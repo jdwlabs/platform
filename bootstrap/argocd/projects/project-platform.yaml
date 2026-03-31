@@ -15,7 +15,7 @@ spec:
     - 'https://metallb.github.io/metallb'
     - 'https://charts.longhorn.io'
     - 'https://charts.external-secrets.io'
-    - 'https://kubernetes-sigs.github.io/dashboard'
+    - 'https://kubernetes-sigs.github.io/metrics-server/'
     - 'https://kubernetes.github.io/dashboard'
     - 'https://grafana.github.io/helm-charts'
     - 'https://prometheus-community.github.io/helm-charts'

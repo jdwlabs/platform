@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  yamlint:
+  yamllint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -23,13 +23,13 @@ jobs:
           config_data: |
             extends: default
             rules:
-            line-length:
-              max: 200
-            truthy:
-              allowed-values: ['true', 'false']
-            comments:
-              min-spaces-from-content: 1
-            document-start: disable
+             line-length:
+               max: 200
+             truthy:
+               allowed-values: ['true', 'false']
+             comments:
+               min-spaces-from-content: 1
+             document-start: disable
 
   validate-configs:
     runs-on: ubuntu-latest
@@ -40,7 +40,7 @@ jobs:
           python3 -c "
           import yaml, sys
           with open('platform/config.yaml') as f:
-              data = yaml.safe_loaf(f)
+              data = yaml.safe_load(f)
           assert 'apps' in data, 'platform/config.yaml missing apps key'
           required = {'name','chart','repo','revision','namespace','postInstall','syncWave'}
           for app in data['apps']:
@@ -74,7 +74,7 @@ jobs:
       - name: Install kubeconform
         run: |
           curl -sSLo kubeconform.tar.gz \
-            https://github.com/yannh/kubeconform/release/latest/download/kubeconform-linux-amd64.tar.gz
+            https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz
           tar -xzf kubeconform.tar.gz
           sudo mv kubeconform /usr/local/bin/
       - name: Validate Kubernetes manifests

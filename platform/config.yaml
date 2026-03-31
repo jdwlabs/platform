@@ -9,7 +9,7 @@ apps:
     syncWave: 0
 
   # Wave 1: Core infrastructure services
-  - name: cert-manger
+  - name: cert-manager
     chart: cert-manager
     repo: https://charts.jetstack.io
     revision: v1.18.2
