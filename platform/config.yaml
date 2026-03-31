@@ -1,0 +1,157 @@
+apps:
+  # Wave 0: Bare metal networking
+  - name: metallb
+    chart: metallb
+    repo: https://metallb.github.io/metallb
+    revision: 0.15.2
+    namespace: metallb-system
+    postInstall: true
+    syncWave: 0
+
+  # Wave 1: Core infrastructure services
+  - name: cert-manger
+    chart: cert-manager
+    repo: https://charts.jetstack.io
+    revision: v1.18.2
+    namespace: cert-manager
+    postInstall: true
+    syncWave: 1
+
+  - name: ingress-nginx
+    chart: ingress-nginx
+    repo: https://kubernetes.github.io/ingress-nginx
+    revision: 4.13.2
+    namespace: ingress-nginx
+    postInstall: false
+    syncWave: 1
+
+  - name: longhorn
+    chart: longhorn
+    repo: https://charts.longhorn.io
+    revision: 1.10.1
+    namespace: longhorn-system
+    postInstall: true
+    syncWave: 1
+
+  # Wave 2: Platform services
+  - name: external-secrets
+    chart: external-secrets
+    repo: https://charts.external-secrets.io
+    revision: 0.19.2
+    namespace: external-secrets
+    postInstall: false
+    syncWave: 2
+
+  - name: vault
+    chart: vault
+    repo: https://helm.releases.hashicorp.com
+    revision: 0.30.1
+    namespace: vault
+    postInstall: true
+    syncWave: 2
+
+  - name: vault-config-operator
+    chart: vault-config-operator
+    repo: https://redhat-cop.github.io/vault-config-operator
+    revision: v0.8.33
+    namespace: vault-config-operator
+    postInstall: false
+    syncWave: 2
+
+  - name: metrics-server
+    chart: metrics-server
+    repo: https://kubernetes-sigs.github.io/metrics-server/
+    revision: 3.13.0
+    namespace: metrics-server
+    postInstall: false
+    syncWave: 2
+
+  - name: monitoring
+    chart: k8s-monitoring
+    repo: https://grafana.github.io/helm-charts
+    revision: 3.3.2
+    namespace: monitoring
+    postInstall: true
+    syncWave: 2
+
+  - name: grafana
+    chart: grafana
+    repo: https://grafana.github.io/helm-charts
+    revision: 9.4.3
+    namespace: monitoring
+    postInstall: true
+    syncWave: 2
+
+  - name: loki
+    chart: loki
+    repo: https://grafana.github.io/helm-charts
+    revision: 6.38.0
+    namespace: monitoring
+    postInstall: true
+    syncWave: 2
+
+  - name: prometheus
+    chart: prometheus
+    repo: https://prometheus-community.github.io/helm-charts
+    revision: 27.32.0
+    namespace: monitoring
+    postInstall: true
+    syncWave: 2
+
+  - name: kubernetes-dashboard
+    chart: kubernetes-dashboard
+    repo: https://kubernetes.github.io/dashboard
+    revision: 7.13.0
+    namespace: kubernetes-dashboard
+    postInstall: true
+    syncWave: 2
+
+  - name: atlas-operator
+    chart: charts/atlas-operator
+    repo: ghcr.io/ariga
+    revision: 0.7.14
+    namespace: atlas
+    postInstall: false
+    syncWave: 2
+
+  # Wave 3: Operators (prerequisite for tenant workloads)
+  - name: cnpg-operator
+    chart: cloudnative-pg
+    repo: https://cloudnative-pg.github.io/charts
+    revision: 0.26.1
+    namespace: cnpg-system
+    postInstall: false
+    syncWave: 3
+
+  - name: arc-systems
+    chart: gha-runner-scale-set-controller
+    repo: ghcr.io/actions/actions-runner-controller-charts
+    revision: 0.13.1
+    namespace: arc-systems
+    postInstall: true
+    syncWave: 3
+
+  # Wave 4: Shared database infrastructure
+  - name: postgresql-cluster-non
+    chart: cluster
+    repo: https://cloudnative-pg.github.io/charts
+    revision: 0.4.0
+    namespace: database
+    postInstall: false
+    syncWave: 4
+
+  - name: postgresql-cluster-prd
+    chart: cluster
+    repo: https://cloudnative-pg.github.io/charts
+    revision: 0.4.0
+    namespace: database
+    postInstall: false
+    syncWave: 4
+
+  - name: db-ui
+    chart: adminer
+    repo: https://charts.ectobit.com
+    revision: 0.1.8
+    namespace: database
+    postInstall: true
+    syncWave: 4

@@ -1,0 +1,24 @@
+commonMetaLabels:
+  origin_prometheus: "prometheus-server-1"
+
+prometheus-node-exporter:
+  service:
+    port: 9200
+
+server:
+  port: 8200
+  persistentVolume:
+    enabled: true
+    storageClass:
+    accessModes:
+      - ReadWriteOnce
+    size: 8Gi
+
+alertmanager:
+  enabled: true
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 2Gi

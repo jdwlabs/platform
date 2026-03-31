@@ -1,0 +1,17 @@
+installCRDs: true
+
+#webhook:
+#  limits:
+#    ephemeral-storage: 500Mi
+
+#cainjector:
+#  enabled: false
+
+startupapicheck:
+  enabled: false
+#  limits:
+#    ephemeral-storage: 500Mi
+
+#resources:
+#  limits:
+#    ephemeral-storage: 500Mi

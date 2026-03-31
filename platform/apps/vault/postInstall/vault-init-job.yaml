@@ -1,0 +1,35 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-admin-initializer
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  template:
+    spec:
+      containers:
+        - name: vault-admin-initializer
+          image: hashicorp/vault:1.15.2
+          env:
+            - name: VAULT_ADDR
+              value: http://vault.vault.svc:8200
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vault-token
+                  key: token
+          command:
+            - /bin/sh
+            - -c
+            - |
+              sleep 10
+              vault auth enable kubernetes
+              vault secrets enable database
+              vault write auth/kubernetes/config kubernetes_host=https://kubernetes.default.svc:443 kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              vault write auth/kubernetes/role/vault-admin bound_service_account_names=default bound_service_account_namespaces=default policies=vault-admin ttl=1h
+              vault policy write vault-admin - <<EOF
+                path "/*" {
+                  capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+                }          
+              EOF
+      restartPolicy: Never

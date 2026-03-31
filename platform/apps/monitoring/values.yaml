@@ -1,0 +1,32 @@
+cluster:
+  name: jdwlabs
+  namespace: monitoring
+
+clusterMetrics:
+  enabled: true
+
+clusterEvents:
+  enabled: true
+
+podLogs:
+  enabled: true
+
+nodeLogs:
+  enabled: true
+
+alloy-logs:
+  enabled: true
+
+alloy-metrics:
+  enabled: true
+
+alloy-singleton:
+  enabled: true
+
+destinations:
+  - name: Loki
+    type: loki
+    url: "http://loki:3100/loki/api/v1/push"
+  - name: Prometheus
+    type: prometheus
+    url: "http://prometheus-server:9090/api/v1/write"
