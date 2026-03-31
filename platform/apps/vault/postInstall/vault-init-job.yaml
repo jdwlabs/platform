@@ -30,6 +30,6 @@ spec:
               vault policy write vault-admin - <<EOF
                 path "/*" {
                   capabilities = ["create", "read", "update", "delete", "list", "sudo"]
-                }          
+                }
               EOF
       restartPolicy: Never
