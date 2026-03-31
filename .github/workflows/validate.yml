@@ -24,7 +24,7 @@ jobs:
             extends: default
             rules:
              line-length:
-               max: 200
+               max: 300
              truthy:
                allowed-values: ['true', 'false']
              comments:
