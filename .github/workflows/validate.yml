@@ -23,13 +23,13 @@ jobs:
           config_data: |
             extends: default
             rules:
-             line-length:
-               max: 300
-             truthy:
-               allowed-values: ['true', 'false']
-             comments:
-               min-spaces-from-content: 1
-             document-start: disable
+              line-length:
+                max: 300
+              truthy:
+                allowed-values: ['true', 'false']
+              comments:
+                min-spaces-from-content: 1
+              document-start: disable
 
   validate-configs:
     runs-on: ubuntu-latest
