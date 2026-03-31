@@ -139,6 +139,6 @@ flags:
 # Overrides the default `.Release.Namespace` for all resources in this chart.
 namespaceOverride: ""
 
-  ## Defines the K8s client rate limiter parameters.
-  # k8sClientRateLimiterQPS: 20
+## Defines the K8s client rate limiter parameters.
+# k8sClientRateLimiterQPS: 20
 # k8sClientRateLimiterBurst: 30
