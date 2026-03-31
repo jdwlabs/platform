@@ -16,7 +16,7 @@ server:
         storage "raft" {
            path    = "/vault/data/"
         }
-        
+
         listener "tcp" {
            address = "[::]:8200"
            cluster_address = "[::]:8201"
