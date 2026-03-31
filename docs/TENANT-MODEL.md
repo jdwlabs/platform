@@ -47,7 +47,7 @@ tenants/<name>/
 
 ## Isolation Boundaries
 
-- **Namespace**: Per-tenant namespaces prevent resouce collisions
+- **Namespace**: Per-tenant namespaces prevent resource collisions
 - **ArgoCD AppProject**: Tenant apps can only deploy to their own namespaces
 - **NetworkPolicy**: Default-deny with explicit allow rules per namespace
 - **ResourceQuota**: Prevents resource exhaustion by any single tenant
