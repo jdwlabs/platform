@@ -1,0 +1,6 @@
+enableMonitoring: false
+enableCertManager: true
+
+env:
+  - name: VAULT_ADDR
+    value: http://vault.vault:8200

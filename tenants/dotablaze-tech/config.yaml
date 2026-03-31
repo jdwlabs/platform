@@ -1,0 +1,19 @@
+tenant: dotablaze-tech
+apps:
+  - name: arc-runner-set-dotablaze-tech
+    tenant: dotablaze-tech
+    chart: gha-runner-scale-set
+    repo: ghcr.io/actions/actions-runner-controller-charts
+    revision: 0.13.1
+    namespace: dotablaze-tech-runners
+    postInstall: true
+    syncWave: 5
+
+  - name: dotablaze-tech-schemas
+    tenant: dotablaze-tech
+    chart: cluster
+    repo: https://cloudnative-pg.github.io/charts
+    revision: 0.4.0
+    namespace: database
+    postInstall: true
+    syncWave: 5

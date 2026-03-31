@@ -1,0 +1,8 @@
+controller:
+  config:
+    proxy-body-size: "50m"
+  admissionWebhooks:
+    patch:
+      enabled: true
+    certManager:
+      enabled: true

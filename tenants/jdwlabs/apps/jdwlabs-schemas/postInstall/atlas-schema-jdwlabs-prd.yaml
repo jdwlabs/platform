@@ -1,0 +1,23 @@
+apiVersion: db.atlasgo.io/v1alpha1
+kind: AtlasSchema
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  name: jdwlabs-atlas-schema-prd
+spec:
+  credentials:
+    scheme: postgres
+    host: postgresql-cluster-prd-rw.database.svc
+    user: postgres
+    passwordFrom:
+      secretKeyRef:
+        key: password
+        name: postgresql-cluster-prd-superuser
+    database: jdwlabs_prd
+    port: 5432
+    parameters:
+      sslmode: disable
+  schema:
+    configMapKeyRef:
+      key: schema.sql
+      name: jdwlabs-postgresql-prd-schema

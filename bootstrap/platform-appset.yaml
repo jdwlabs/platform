@@ -1,0 +1,54 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - "missingkey=error"
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://github.com/jdwlabs/platform.git
+              revision: main
+              files:
+                - path: platform/config.yaml
+          - list:
+              elementsYaml: "{{.apps | toJson}}"
+  template:
+    metadata:
+      name: 'platform-{{.name}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: "{{.syncWave}}"
+    spec:
+      project: platform
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - PruneLast=true
+          - ServerSideApply=true
+      destination:
+        namespace: '{{.namespace}}'
+        server: https://kubernetes.default.svc
+  templatePatch: |
+    spec:
+      sources:
+        - repoURL: '{{ .repo }}'
+          chart: '{{ .chart }}'
+          targetRevision: '{{ .revision }}'
+          helm:
+            valueFiles:
+              - $values/platform/apps/{{ .name }}/values.yaml
+        - repoURL: https://github.com/jdwlabs/platform.git
+          targetRevision: main
+          ref: values
+        {{- if .postInstall }}
+        - repoURL: https://github.com/jdwlabs/platform.git
+          targetRevision: main
+          path: platform/apps/{{ .name }}/postInstall
+        {{- end }}
