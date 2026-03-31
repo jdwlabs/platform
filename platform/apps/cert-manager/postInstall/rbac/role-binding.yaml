@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: porkbun-webhook-binding
+  namespace: cert-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: porkbun-webhook-role
+subjects:
+  - kind: ServiceAccount
+    name: porkbun-webhook
+    namespace: porkbun-webhook

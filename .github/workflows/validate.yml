@@ -1,0 +1,91 @@
+name: Validate
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  yamlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Lint YAML
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          file_or_dir: |
+            platform/
+            tenants/
+            bootstrap/
+          config_data: |
+            extends: default
+            rules:
+            line-length:
+              max: 200
+            truthy:
+              allowed-values: ['true', 'false']
+            comments:
+              min-spaces-from-content: 1
+            document-start: disable
+
+  validate-configs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate platform config.yaml
+        run: |
+          python3 -c "
+          import yaml, sys
+          with open('platform/config.yaml') as f:
+              data = yaml.safe_loaf(f)
+          assert 'apps' in data, 'platform/config.yaml missing apps key'
+          required = {'name','chart','repo','revision','namespace','postInstall','syncWave'}
+          for app in data['apps']:
+              missing = required - set(app.keys())
+              assert not missing, f'App {app.get(\"name\")} missing fields: {missing}'
+          print(f'platform/config.yaml valid: {len(data[\"apps\"])} apps')
+          "
+      - name: Validate tenant configs
+        run: |
+          for f in tenants/*/config.yaml; do
+            echo "Validating $f"
+            python3 -c "
+          import yaml, sys
+          with open('$f') as fp:
+              data = yaml.safe_load(fp)
+          assert 'tenant' in data, '$f missing tenant key'
+          assert 'apps' in data, '$f missing apps key'
+          required = {'name','tenant','chart','repo','revision','namespace','postInstall','syncWave'}
+          for app in data['apps']:
+              missing = required - set(app.keys())
+              assert not missing, f'App {app[\"name\"]} missing fields: {missing}'
+              assert app.get('tenant') == data['tenant'], f'App {app[\"name\"]} tenant mismatch'
+          print(f'\$f valid: {len(data[\"apps\"])} apps')
+            "
+          done
+
+  kubeconform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install kubeconform
+        run: |
+          curl -sSLo kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/release/latest/download/kubeconform-linux-amd64.tar.gz
+          tar -xzf kubeconform.tar.gz
+          sudo mv kubeconform /usr/local/bin/
+      - name: Validate Kubernetes manifests
+        run: |
+          find platform/apps tenants -name '*.yaml' \
+            ! -name 'values.yaml' \
+            ! -name 'tenant.yaml' \
+            ! -name 'config.yaml' \
+            ! -path '*/helm-charts/*' | \
+            xargs kubeconform \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+              -ignore-missing-schemas \
+              -summary

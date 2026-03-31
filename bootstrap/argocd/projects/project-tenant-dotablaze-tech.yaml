@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: tenant-dotablaze-tech
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  description: "Tenant dotablaze-tech applications"
+  sourceRepos:
+    - 'https://github.com/jdwlabs/platform.git'
+    - 'ghcr.io/actions-runner-controller-charts'
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: 'dotablaze-tech-runners'
+    - server: https://kubernetes.default.svc
+      namespace: 'database'
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'

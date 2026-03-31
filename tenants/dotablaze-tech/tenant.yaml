@@ -1,0 +1,15 @@
+apiVersion: platform.jdwlabs.io/v1
+kind: Tenant
+metadata:
+  name: dotablaze-tech
+spec:
+  displayName: "Dotablaze Tech (dotablaze-tech)"
+  githubOrg: dotablaze-tech
+  vaultPrefix: "kv/dotablaze-tech"
+  namespaces:
+    - name: dotablaze-tech-runners
+      type: ci
+  resourceQuota:
+    tier: standard
+  contacts:
+    - dotablazegaming@gmail.com

@@ -1,0 +1,15 @@
+apiVersion: platform.jdwlabs.io/v1
+kind: Tenant
+metadata:
+  name: jdwlabs
+spec:
+  displayName: "Jdwlabs (jdwlabs)"
+  githubOrg: jdwlabs
+  vaultPrefix: "kv/jdwlabs"
+  namespaces:
+    - name: jdwlabs-runners
+      type: ci
+  resourceQuota:
+    tier: standard
+  contacts:
+    - jdwillmsen@gmail.com

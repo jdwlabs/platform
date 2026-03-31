@@ -1,0 +1,25 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vault-auto-unseal
+  namespace: vault
+spec:
+  schedule: "*/2 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: vault-unseal
+              image: blockloop/vault-unseal
+              env:
+                - name: VAULT_ADDR
+                  value: "http://vault.vault.svc:8200"
+                - name: VAULT_SKIP_VERIFY
+                  value: "1"
+                - name: VAULT_UNSEAL_KEY_1
+                  valueFrom:
+                    secretKeyRef:
+                      name: vault-unseal-keys
+                      key: unseal_key_1
+          restartPolicy: OnFailure

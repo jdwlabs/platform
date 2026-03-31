@@ -1,0 +1,21 @@
+apiVersion: db.atlasgo.io/v1alpha1
+kind: AtlasSchema
+metadata:
+  name: jdwlabs-atlas-schema-non
+spec:
+  credentials:
+    scheme: postgres
+    host: postgresql-cluster-non-rw.database.svc
+    user: postgres
+    passwordFrom:
+      secretKeyRef:
+        key: password
+        name: postgresql-cluster-non-superuser
+    database: jdwlabs_non
+    port: 5432
+    parameters:
+      sslmode: disable
+  schema:
+    configMapKeyRef:
+      key: schema.sql
+      name: jdwlabs-postgresql-non-schema

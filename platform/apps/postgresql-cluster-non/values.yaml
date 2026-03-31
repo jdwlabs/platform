@@ -1,0 +1,5 @@
+#cluster:
+#  storage:
+#    size: 2Gi
+#    storageClass: "openebs-single-replica"
+externalClusters: []
