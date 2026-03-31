@@ -40,7 +40,7 @@ For each namespace (`<tenant>-runners`):
 - [ ] Copy `tenants/_templates/argocd-project.yaml`
 - [ ] Update `metadata.name` to `tenant-<tenant>`
 - [ ] Update `spec.destinations` to tenant's namespaces
-- [ ] Save as `bootstrap/argocd/projects/proejct-tenant-<tenant>.yaml`
+- [ ] Save as `bootstrap/argocd/projects/project-tenant-<tenant>.yaml`
 - [ ] Apply: `kubectl apply -f bootstrap/argocd/projects/project-tenant-<tenant>.yaml`
 
 ### Step 5: Create App Configs

@@ -9,4 +9,4 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: arc-systems-gha-rs-controller
-    namespace: arc-runners
+    namespace: arc-systems
