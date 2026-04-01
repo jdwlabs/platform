@@ -1,15 +1,36 @@
-apiVersion: platform.jdwlabs.io/v1
-kind: Tenant
-metadata:
-  name: dotablaze-tech
-spec:
-  displayName: "Dotablaze Tech (dotablaze-tech)"
-  githubOrg: dotablaze-tech
-  vaultPrefix: "kv/dotablaze-tech"
-  namespaces:
-    - name: dotablaze-tech-runners
-      type: ci
-  resourceQuota:
-    tier: standard
-  contacts:
-    - dotablazegaming@gmail.com
+name: dotablaze-tech
+displayName: "Dotablaze Tech"
+githubOrg: dotablaze-tech
+contacts:
+  - dotablazegaming@gmail.com
+
+deploymentRepo:
+  url: ""
+  revision: ""
+
+namespaces:
+  - name: dotablaze-tech-runners
+    quotaTier: ci
+    networkPolicy: ci
+    arc: true
+
+project:
+  elevated: false
+  clusterResourceWhitelist: []
+
+services:
+  - name: arc-runner-set-dotablaze-tech
+    chart: gha-runner-scale-set
+    repo: ghcr.io/actions/actions-runner-controller-charts
+    revision: 0.13.1
+    namespace: dotablaze-tech-runners
+    postInstall: true
+    syncWave: 5
+
+  - name: dotablaze-tech-schemas
+    chart: cluster
+    repo: https://cloudnative-pg.github.io/charts
+    revision: 0.4.0
+    namespace: database
+    postInstall: true
+    syncWave: 5

@@ -1,4 +1,81 @@
-apps:
+name: platform
+displayName: "Platform Infrastructure"
+githubOrg: jdwlabs
+contacts:
+  - jdwillmsen@gmail.com
+
+deploymentRepo:
+  url: ""
+  revision: ""
+
+namespaces:
+  - name: metallb-system
+    quotaTier: platform
+    networkPolicy: platform
+  - name: cert-manager
+    quotaTier: platform
+    networkPolicy: platform
+  - name: ingress-nginx
+    quotaTier: platform
+    networkPolicy: platform
+  - name: longhorn-system
+    quotaTier: platform
+    networkPolicy: platform
+  - name: vault
+    quotaTier: platform
+    networkPolicy: platform
+  - name: vault-config-operator
+    quotaTier: platform
+    networkPolicy: platform
+  - name: external-secrets
+    quotaTier: platform
+    networkPolicy: platform
+  - name: monitoring
+    quotaTier: platform
+    networkPolicy: platform
+  - name: kubernetes-dashboard
+    quotaTier: platform
+    networkPolicy: platform
+  - name: atlas
+    quotaTier: platform
+    networkPolicy: platform
+  - name: cnpg-system
+    quotaTier: platform
+    networkPolicy: platform
+  - name: arc-systems
+    quotaTier: platform
+    networkPolicy: platform
+  - name: database
+    quotaTier: platform
+    networkPolicy: platform
+  - name: metrics-server
+    quotaTier: platform
+    networkPolicy: platform
+  - name: porkbun-webhook
+    quotaTier: platform
+    networkPolicy: platform
+
+project:
+  elevated: true
+  clusterResourceWhitelist: []
+  extraSourceRepos:
+    - "https://metallb.github.io/metallb"
+    - "https://charts.jetstack.io"
+    - "https://kubernetes.github.io/ingress-nginx"
+    - "https://charts.longhorn.io"
+    - "https://charts.external-secrets.io"
+    - "https://helm.releases.hashicorp.com"
+    - "https://redhat-cop.github.io/vault-config-operator"
+    - "https://kubernetes-sigs.github.io/metrics-server/"
+    - "https://grafana.github.io/helm-charts"
+    - "https://prometheus-community.github.io/helm-charts"
+    - "https://kubernetes.github.io/dashboard"
+    - "ghcr.io/ariga"
+    - "https://cloudnative-pg.github.io/charts"
+    - "ghcr.io/actions/actions-runner-controller-charts"
+    - "https://charts.ectobit.com"
+
+services:
   # Wave 0: Bare metal networking
   - name: metallb
     chart: metallb

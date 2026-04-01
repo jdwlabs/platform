@@ -1,0 +1,16 @@
+{{- range .Values.namespaces }}
+{{- if hasKey $.Values._quotaTiers .quotaTier }}
+{{- $tier := index $.Values._quotaTiers .quotaTier }}
+---
+apiVersion: v1
+king: ResourceQuota
+metadata:
+  name: tenant-quota
+  namespace: {{ .name }}
+spec:
+  hard:
+    {{- range $key, $val := $tier }}
+    {{ $key }}: {{ $val | quote }}
+    {{- end }}
+{{- end }}
+{{- end }}

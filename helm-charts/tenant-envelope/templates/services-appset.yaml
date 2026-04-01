@@ -1,0 +1,49 @@
+{{- if .Values.services }}
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: {{ .Values.name }}-services
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - "missingkey=error"
+  generators:
+    - list:
+        elements: {{ .Values.services | toJson }}
+  template:
+    metadata:
+      name: '{{ .Values.name }}-{{ "{{" }} .name {{ "}}" }}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{ "{{" }} .syncWave | toString {{ "}}" }}'
+    spec:
+      project: tenant-{{ .Values.name }}
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+          syncOptions:
+            - CreateNamespace=false
+            - PruneLast=true
+            - ServerSideApply=true
+      destination:
+        namespace: '{{ "{{" }} .namespace {{ "}}" }}'
+        server: https://kubernetes.default.svc
+  templatePatch: |
+    spec:
+      sources:
+        - repoURL: '{{ "{{" }} .repo {{ "}}" }}'
+          chart: '{{ "{{" }} .chart {{ "}}" }}'
+          targetRevision: '{{ "{{" }} .revision {{ "}}" }}'
+          helm:
+            valueFiles:
+              - $values/tenants/{{ .Values.name }}/services/{{ "{{" }} .name {{ "}}" }}/values.yaml
+        - repoURL: {{ .Values._platform.repoURL }}
+          targetRevision: {{ .Values._platform.revision }}
+          ref: values
+        {{ "{{-" }} if .postInstall {{ "}}" }}
+        - repoURL: {{ .Values._platform.repoURL }}
+          targetRevision: {{ .Values._platform.revision }}
+          path: tenants/{{ .Values.name }}/services/{{ "{{" }} .name {{ "}}" }}/postInstall
+        {{ "{{-" }} end {{ "}}" }}
+{{- end }}

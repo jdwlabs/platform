@@ -1,8 +1,11 @@
+{{- range .Values.namespaces }}
+{{- if .arc }}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: gha-runner-scale-set-controller-secrets
-  namespace: jdwlabs-runners
+  namespace: {{ .name }}
 rules:
   - apiGroups: [""]
     resources: ["*"]
@@ -15,17 +18,17 @@ rules:
     verbs: ["*"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: RoleBinding
 metadata:
   name: gha-runner-scale-set-controller-secrets
-  namespace: dotablaze-tech-runners
-rules:
-  - apiGroups: [""]
-    resources: ["*"]
-    verbs: ["*"]
-  - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: ["*"]
-    verbs: ["*"]
-  - apiGroups: ["actions.github.com"]
-    resources: ["*"]
-    verbs: ["*"]
+  namespace: {{ .name }}
+subjects:
+  - kind: ServiceAccount
+    name: arc-systems-gha-rs-controller
+    namespace: arc-systems
+roleRef:
+    kind: Role
+    name: gha-runner-scale-set-controller-secrets
+    apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}
