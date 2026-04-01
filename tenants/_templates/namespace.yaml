@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: <TENANT>-<PURPOSE>
-  labels:
-    platform.jdwlabs.io/tenant: <TENANT>
-    platform.jdwlabs.io/type: <TYPE>

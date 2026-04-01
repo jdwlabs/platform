@@ -1,0 +1,26 @@
+{{- range .Values.namespaces }}
+{{- if hasKey $.Values._limitRangeTiers .quotaTier }}
+{{- $tier := index $.Values._limitRangeTiers .quotaTier }}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: tenant-limits
+  namespace: {{ .name }}
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: {{ $tier.defaultCpu | quote }}
+        memory: {{ $tier.defaultMemory | quote }}
+      defaultRequest:
+        cpu: {{ $tier.defaultRequestCpu | quote }}
+        memory: {{ $tier.defaultRequestMemory | quote }}
+      max:
+        cpu: {{ $tier.maxCpu | quote }}
+        memory: {{ $tier.maxMemory | quote }}
+    - type: PersistentVolumeClaim
+      max:
+        storage: {{ $tier.maxStorage | quote }}
+  {{- end }}
+  {{- end }}

@@ -1,0 +1,42 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: governance
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - "missingkey=error"
+  generators:
+    - git:
+        repoURL: https://github.com/jdwlabs/platform.git
+        revision: main
+        files:
+          - path: tenants/*/tenant.yaml
+  template:
+    metadata:
+      name: 'governance-{{ "{{" }} .name {{ "}}" }}'
+      annotations:
+        argocd.argoproj.io/sync-wave: "1"
+    spec:
+      project: bootstrap
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true
+      destination:
+        namespace: argocd
+        server: https://kubernetes.default.svc
+      sources:
+        - repoURL: https://github.com/jdwlabs/platform.git
+          targetRevision: main
+          path: helm-charts/tenant-envelope
+          helm:
+            releaseName: 'governance-{{ "{{" }} .name {{ "}}" }}'
+            valueFiles:
+              - $values/tenants/{{ "{{" }} .name {{ "}}" }}/tenant.yaml
+        - repoURL: https://github.com/jdwlabs/platform.git
+          targetRevision: main
+          ref: values

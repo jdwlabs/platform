@@ -1,0 +1,55 @@
+{{- $repos := dict }}
+{{- $_ := set $repos .Values._platform.repoURL true }}
+{{- if .Values.deploymentRepo.url }}
+{{- $_ := set $repos .Values.deploymentRepo.url true }}
+{{- end }}
+{{- range .Values.services }}
+{{- $_ := set $repos .repo true }}
+{{- end }}
+{{- range .Values.project.extraSourceRepos }}
+{{- $_ := set $repos . true }}
+{{- end }}
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: tenant-{{ .Values.name }}
+  namespace: argocd
+spec:
+  description: "Tenant {{ .Values.displayName }} - managed by governance"
+  sourceRepos:
+    {{- range $repo, $_ := $repos }}
+    - {{ $repo | quote }}
+    {{- end }}
+  destinations:
+    {{- range .Values.namespaces }}
+    - server: https://kubernetes.default.svc
+      namespace: {{ .name | quote }}
+    {{- end }}
+  {{- if .Values.project.elevated }}
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  {{- else }}
+  clusterResourceWhitelist:
+    {{- if .Values.project.clusterResourceWhiteList }}
+    {{- range .Values.project.clusterResourceWhiteList }}
+    - group: {{ .group | quote }}
+      kind: {{ .kind | quote }}
+    {{- end }}
+    {{- else }}
+    []
+    {{- end }}
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+  {{- end }}

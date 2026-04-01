@@ -1,0 +1,8 @@
+apiVersion: v2
+name: tenant-envelope
+description: >-
+  Provisions the complete governance envelope for one platform tenant:
+  namespaces, resource quotas, limit ranges, network policies, AppProject,
+  ARC RBAC, and the ArgoCD ApplicationSets that drive the tenant's workloads.
+type: application
+version: 1.0.0
