@@ -1,0 +1,17 @@
+{{- range .Values.namespaces }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .name }}
+  labels:
+    platform.jdwlabs.io/tenant: {{ $.Values.name }}
+    platform.jdwlabs.io/quota-tier: {{ .quotaTier }}
+    {{- if .arc }}
+    platform.jdwlabs.io/type: ci
+    {{- else if eq .quotaTier "platform" }}
+    platform.jdwlabs.io/type: platform
+    {{- else }}
+    platform.jdwlabs.io/type: workload
+    {{- end }}
+{{- end }}
