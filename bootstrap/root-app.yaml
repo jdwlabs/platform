@@ -8,17 +8,17 @@ metadata:
 spec:
   project: bootstrap
   source:
-    repoURL: https://github.com/jdwlabs/platform.git\
+    repoURL: https://github.com/jdwlabs/platform.git
     targetRevision: main
     path: bootstrap
     directory:
       recurse: true
-    destination:
-      server: https://kubernetes.default.svc
-      namespace: argocd
-    syncPolicy:
-      automated:
-        prune: true
-        selfHeal: true
-      syncOptions:
-        - ServerSideApply=true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

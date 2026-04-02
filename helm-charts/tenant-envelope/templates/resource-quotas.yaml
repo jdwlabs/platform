@@ -3,7 +3,7 @@
 {{- $tier := index $.Values._quotaTiers .quotaTier }}
 ---
 apiVersion: v1
-king: ResourceQuota
+kind: ResourceQuota
 metadata:
   name: tenant-quota
   namespace: {{ .name }}

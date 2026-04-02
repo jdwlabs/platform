@@ -22,5 +22,5 @@ spec:
     - type: PersistentVolumeClaim
       max:
         storage: {{ $tier.maxStorage | quote }}
-  {{- end }}
-  {{- end }}
+{{- end }}
+{{- end }}

@@ -9,11 +9,15 @@ spec:
   goTemplateOptions:
     - "missingkey=error"
   generators:
-    - git:
-        repoURL: {{ .Values.deploymentRepo.url | quote }}
-        revision: {{ .Values.deploymentRepo.revision | quote }}
-        files:
-          - path: argocd/apps/*/config.yaml
+    - matrix:
+        generators:
+          - git:
+            repoURL: {{ .Values.deploymentRepo.url | quote }}
+            revision: {{ .Values.deploymentRepo.revision | quote }}
+            files:
+              - path: argocd/apps/*/config.yaml
+          - list:
+              elementsYaml: '{{ "{{" }} .apps | toJson {{ "}}" }}'
   template:
     metadata:
       name: '{{ .Values.name }}-{{ "{{" }} .name {{ "}}" }}'
@@ -26,7 +30,7 @@ spec:
           prune: true
           selfHeal: true
         syncOptions:
-          - CreateNamespace=true
+          - CreateNamespace=false
           - PruneLast=true
           - ServerSideApply=true
       destination:
