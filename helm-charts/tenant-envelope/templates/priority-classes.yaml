@@ -1,0 +1,38 @@
+{{- if .Values.project.elevated }}
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: platform-critical
+value: 100000
+preemptionPolicy: PreemptLowerPriority
+globalDefault: false
+description: "Platform infrastructure services (ArgoCD, cert-manager, monitoring)"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: tenant-high
+value: 1000
+preemptionPolicy: Never
+globalDefault: false
+description: "Production tenant workloads requiring scheduling priority"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: tenant-default
+value: 0
+preemptionPolicy: Never
+globalDefault: true
+description: "Default priority for tenant workloads"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: tenant-low
+value: -100
+preemptionPolicy: Never
+globalDefault: false
+description: "Batch and background jobs"
+{{- end }}

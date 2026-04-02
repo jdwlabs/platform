@@ -15,7 +15,7 @@ metadata:
   name: tenant-{{ .Values.name }}
   namespace: argocd
 spec:
-  description: "Tenant {{ .Values.displayName }} - managed by governance"
+  description: "Tenant {{ .Values.displayName }} — managed by governance"
   sourceRepos:
     {{- range $repo, $_ := $repos }}
     - {{ $repo | quote }}
@@ -34,8 +34,8 @@ spec:
       kind: '*'
   {{- else }}
   clusterResourceWhitelist:
-    {{- if .Values.project.clusterResourceWhiteList }}
-    {{- range .Values.project.clusterResourceWhiteList }}
+    {{- if .Values.project.clusterResourceWhitelist }}
+    {{- range .Values.project.clusterResourceWhitelist }}
     - group: {{ .group | quote }}
       kind: {{ .kind | quote }}
     {{- end }}

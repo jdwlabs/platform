@@ -22,10 +22,10 @@ spec:
         automated:
           prune: true
           selfHeal: true
-          syncOptions:
-            - CreateNamespace=false
-            - PruneLast=true
-            - ServerSideApply=true
+        syncOptions:
+          - CreateNamespace=false
+          - PruneLast=true
+          - ServerSideApply=true
       destination:
         namespace: '{{ "{{" }} .namespace {{ "}}" }}'
         server: https://kubernetes.default.svc

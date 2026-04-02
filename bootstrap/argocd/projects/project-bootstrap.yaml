@@ -4,7 +4,7 @@ metadata:
   name: bootstrap
   namespace: argocd
 spec:
-  description: "Bootstrap project - manages governance ApplicationSet and tenant envelopes"
+  description: "Bootstrap project — manages governance ApplicationSet and tenant envelopes"
   sourceRepos:
     - 'https://github.com/jdwlabs/platform.git'
   destinations:
