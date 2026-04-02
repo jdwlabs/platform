@@ -59,21 +59,21 @@ project:
   elevated: true
   clusterResourceWhitelist: []
   extraSourceRepos:
-    - "https://metallb.github.io/metallb"
-    - "https://charts.jetstack.io"
-    - "https://kubernetes.github.io/ingress-nginx"
-    - "https://charts.longhorn.io"
-    - "https://charts.external-secrets.io"
-    - "https://helm.releases.hashicorp.com"
-    - "https://redhat-cop.github.io/vault-config-operator"
-    - "https://kubernetes-sigs.github.io/metrics-server/"
-    - "https://grafana.github.io/helm-charts"
-    - "https://prometheus-community.github.io/helm-charts"
-    - "https://kubernetes.github.io/dashboard"
-    - "ghcr.io/ariga"
-    - "https://cloudnative-pg.github.io/charts"
-    - "ghcr.io/actions/actions-runner-controller-charts"
-    - "https://charts.ectobit.com"
+    - 'https://metallb.github.io/metallb'
+    - 'https://charts.jetstack.io'
+    - 'https://kubernetes.github.io/ingress-nginx'
+    - 'https://charts.longhorn.io'
+    - 'https://charts.external-secrets.io'
+    - 'https://helm.releases.hashicorp.com'
+    - 'https://redhat-cop.github.io/vault-config-operator'
+    - 'https://kubernetes-sigs.github.io/metrics-server/'
+    - 'https://grafana.github.io/helm-charts'
+    - 'https://prometheus-community.github.io/helm-charts'
+    - 'https://kubernetes.github.io/dashboard'
+    - 'ghcr.io/ariga'
+    - 'https://cloudnative-pg.github.io/charts'
+    - 'ghcr.io/actions/actions-runner-controller-charts'
+    - 'https://charts.ectobit.com'
 
 services:
   # Wave 0: Bare metal networking
@@ -85,7 +85,7 @@ services:
     postInstall: true
     syncWave: 0
 
-  # Wave 1: Core infrastructure services
+  # Wave 1: Core infrastructure
   - name: cert-manager
     chart: cert-manager
     repo: https://charts.jetstack.io
@@ -191,7 +191,7 @@ services:
     postInstall: false
     syncWave: 2
 
-  # Wave 3: Operators (prerequisite for tenant workloads)
+  # Wave 3: Operators
   - name: cnpg-operator
     chart: cloudnative-pg
     repo: https://cloudnative-pg.github.io/charts

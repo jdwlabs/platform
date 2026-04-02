@@ -11,7 +11,7 @@ namespaces: []
 
 project:
   elevated: false
-  clusterResourceWhiteList: []
+  clusterResourceWhitelist: []
   extraSourceRepos: []
 
 services: []
@@ -24,47 +24,35 @@ _quotaTiers:
   small:
     requests.cpu: "1"
     requests.memory: 2Gi
-    limits.cpu: "2"
-    limits.memory: 4Gi
-    pods: "10"
+    limits.cpu: "4"
+    limits.memory: 8Gi
+    pods: "15"
     persistentvolumeclaims: "5"
-    services: "5"
     services.loadbalancers: "1"
-    secrets: "20"
-    configmaps: "10"
   standard:
     requests.cpu: "4"
     requests.memory: 8Gi
-    limits.cpu: "8"
-    limits.memory: 16Gi
-    pods: "20"
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    pods: "30"
     persistentvolumeclaims: "10"
-    services: "10"
     services.loadbalancers: "2"
-    secrets: "30"
-    configmaps: "20"
   large:
     requests.cpu: "16"
     requests.memory: 32Gi
-    limits.cpu: "32"
-    limits.memory: 64Gi
+    limits.cpu: "64"
+    limits.memory: 128Gi
     pods: "50"
     persistentvolumeclaims: "20"
-    services: "20"
     services.loadbalancers: "5"
-    secrets: "50"
-    configmaps: "50"
   ci:
-    requests.cpu: "2"
-    requests.memory: 4Gi
-    limits.cpu: "8"
-    limits.memory: 16Gi
-    pods: "30"
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    pods: "40"
     persistentvolumeclaims: "5"
-    services: "5"
     services.loadbalancers: "0"
-    secrets: "20"
-    configmaps: "10"
 
 _limitRangeTiers:
   small:
