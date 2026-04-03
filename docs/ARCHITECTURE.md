@@ -2,7 +2,8 @@
 
 ## Overview
 
-`jdwlabs/platform` is a tenant-centric GitOps repository managing Kubernetes applications via ArgoCD ApplicationSets with explicit tenant boundaries, namespace isolation, and resource controls.
+`jdwlabs/platform` is a tenant-centric GitOps repository managing Kubernetes applications via ArgoCD ApplicationSets
+with explicit tenant boundaries, namespace isolation, and resource controls.
 
 ## Repository Layout
 
@@ -18,6 +19,7 @@ platform/
 ## ArgoCD Model
 
 ### Governance ApplicationSet (`bootstrap/governance-appset.yaml`)
+
 - Scans `tenants/*/tenant.yaml` via git file generator
 - Renders `helm-charts/tenant-envelope` for each tenant
 - Creates namespaces, quotas, limit ranges, network policies, AppProjects
@@ -26,9 +28,11 @@ platform/
 - Deployments ApplicationSet (if `deploymentRepo.url` set) deploys from the tenant's deployment repo
 - Automated sync with prune and self-heal
 
-## Deployments ApplicationSet
+### Deployments ApplicationSet
 
-When a tenant defines `deploymentRepo.url` in their `tenant.yaml`, the `tenant-envelope` chart generates a `<tenant>-deployments` ApplicationSet. This enables tenants to manage their own application deployments in a separate Git repository.
+When a tenant defines `deploymentRepo.url` in their `tenant.yaml`, the `tenant-envelope` chart generates a
+`<tenant>-deployments` ApplicationSet. This enables tenants to manage their own application deployments in a separate
+Git repository.
 
 The ApplicationSet uses a **matrix generator** combining:
 
@@ -63,7 +67,7 @@ apps:
     namespace: <target-ns>         # Must be a namespace the tenant owns
     chartPath: charts/<chart>      # Path to chart in the deployment repo
     syncWave: "0"                  # Default ordering (default: "0")
-    values:                        # Helm value files relative to chartPath
+    valueFiles:                    # Helm value files relative to chartPath
       - values.yaml
       - values-<env>.yaml
 ```
@@ -72,14 +76,14 @@ Sync options applied to all deployment repo apps: `CreateNamespace=false`, `Prun
 
 ## Sync Wave Ordering
 
-| Wave | Category | Apps |
-|------|----------|------|
-| 0 | Bare metal networking | metallb |
-| 1 | Core infrastructure | cert-manager, ingress-nginx, longhorn |
-| 2 | Platform services | vault, external-secrets, monitoring, grafana, etc. |
-| 3 | Operators | cnpg-operator, atlas-operator, arc-systems |
-| 4 | Shared databases | postgresql-cluster-non, postgresql-cluster-prd, db-ui |
-| 5 | Tenant workloads | ARC runner sets, Atlas schemas |
+| Wave | Category              | Apps                                                  |
+|------|-----------------------|-------------------------------------------------------|
+| 0    | Bare metal networking | metallb                                               |
+| 1    | Core infrastructure   | cert-manager, ingress-nginx, longhorn                 |
+| 2    | Platform services     | vault, external-secrets, monitoring, grafana, etc.    |
+| 3    | Operators             | cnpg-operator, atlas-operator, arc-systems            |
+| 4    | Shared databases      | postgresql-cluster-non, postgresql-cluster-prd, db-ui |
+| 5    | Tenant workloads      | ARC runner sets, Atlas schemas                        |
 
 ## Namespace Strategy
 
@@ -96,19 +100,19 @@ Sync options applied to all deployment repo apps: `CreateNamespace=false`, `Prun
 
 ## Infrastructure Stack
 
-| Component | Purpose | Namespace        |
-|-----------|---------|------------------|
-| MetalLB | Layer2 load balancer (192.168.1.240-250) | metallb-system   |
-| cert-manager | TLS certificates via Let's Encrypt + Porkbun DNS01 | cert-manager     |
-| ingress-nginx | Ingress controller | ingress-nginx    |
-| Longhorn | Distributed block storage | longhorn-system  |
-| Vault | Secret management | vault            |
-| ESO | External Secrets Operator | external-secrets |
-| ArgoCD | GitOps continuous delivery | argocd           |
-| CNPG | CloudNativePG database operator | cnpg-system      |
-| Atlas | Database schema migration operator | atlas            |
-| ARC | GitHub Actions Runner Controller | arc-systems      |
-| Prometheus + Grafana + Loki | Observability stack | monitoring       |
+| Component                   | Purpose                                            | Namespace        |
+|-----------------------------|----------------------------------------------------|------------------|
+| MetalLB                     | Layer2 load balancer (192.168.1.240-250)           | metallb-system   |
+| cert-manager                | TLS certificates via Let's Encrypt + Porkbun DNS01 | cert-manager     |
+| ingress-nginx               | Ingress controller                                 | ingress-nginx    |
+| Longhorn                    | Distributed block storage                          | longhorn-system  |
+| Vault                       | Secret management                                  | vault            |
+| ESO                         | External Secrets Operator                          | external-secrets |
+| ArgoCD                      | GitOps continuous delivery                         | argocd           |
+| CNPG                        | CloudNativePG database operator                    | cnpg-system      |
+| Atlas                       | Database schema migration operator                 | atlas            |
+| ARC                         | GitHub Actions Runner Controller                   | arc-systems      |
+| Prometheus + Grafana + Loki | Observability stack                                | monitoring       |
 
 ## Domain
 
