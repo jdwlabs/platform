@@ -42,10 +42,10 @@ jobs:
           import yaml, sys
           with open('$f') as fp:
               data = yaml.safe_load(fp)
-          assert 'name' in data, '$f missing namespaces key'
+          assert 'name' in data, '$f missing name key'
           assert 'namespaces' in data, '$f missing namespaces key'
           assert 'services' in data, '$f missing services key'
-          required = {'name','chart','repo','namespace','postInstall','syncWave'}
+          required = {'name','chart','repo','revision','namespace','postInstall','syncWave'}
           for svc in data['services']:
               missing = required - set(svc.keys())
               assert not missing, f'Service {svc.get(\"name\")} missing fields: {missing}'

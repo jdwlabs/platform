@@ -17,8 +17,8 @@ platform/
 
 ## ArgoCD Model
 
-### Governance ApplicationSet (`bootstrap/governance-appset.yaml)
-- Scans `tenant/*/tenant.yaml` via git file generator
+### Governance ApplicationSet (`bootstrap/governance-appset.yaml`)
+- Scans `tenants/*/tenant.yaml` via git file generator
 - Renders `helm-charts/tenant-envelope` for each tenant
 - Creates namespaces, quotas, limit ranges, network policies, AppProjects
 - Generates per-tenant `<name>-services` and `<name>-deployments` ApplicationSets
