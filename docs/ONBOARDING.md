@@ -70,15 +70,15 @@ Each `argocd/<env>/config.yaml` lists the apps for that environment:
 ```yaml
 apps:
   - name: <app-name>
-    namespace: <tenant>-<ns>  # Must be a namespace the tenant owns
+    namespace: <tenant>-<ns>
     chartPath: charts/<chart-name>
-    syncWave: "0"  # Default ordering (default: "0")
-    values:
+    syncWave: "0" 
+    valueFiles:
       - values.yaml
       - values-<env>.yaml
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md#deployments-applicationset) for the full config scheme.
+See [ARCHITECTURE.md](ARCHITECTURE.md#deployments-applicationset) for the full config schema.
 
 ### Step 6: Git and ArgoCD
 
