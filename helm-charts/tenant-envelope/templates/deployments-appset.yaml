@@ -15,7 +15,7 @@ spec:
               repoURL: {{ .Values.deploymentRepo.url | quote }}
               revision: {{ .Values.deploymentRepo.revision | quote }}
               files:
-                - path: argocd/config.yaml
+                - path: argocd/*/config.yaml
           - list:
               elementsYaml: '{{ "{{" }} .apps | toJson {{ "}}" }}'
   template:
