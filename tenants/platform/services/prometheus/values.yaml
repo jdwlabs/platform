@@ -6,7 +6,7 @@ prometheus-node-exporter:
     port: 9200
 
 server:
-  port: 8200
+  port: 9090
   persistentVolume:
     enabled: true
     storageClass:

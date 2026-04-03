@@ -28,9 +28,10 @@ services:
     syncWave: 5
 
   - name: dotablaze-tech-schemas
-    chart: cluster
-    repo: https://cloudnative-pg.github.io/charts
-    revision: 0.4.0
+    chart: ""
+    repo: ""
+    revision: ""
     namespace: database
-    postInstall: true
+    postInstall: false
+    rawManifests: true
     syncWave: 5
