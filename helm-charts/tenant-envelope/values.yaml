@@ -26,7 +26,6 @@ _quotaTiers:
     requests.memory: 2Gi
     limits.cpu: "4"
     limits.memory: 8Gi
-    pods: "15"
     persistentvolumeclaims: "5"
     services.loadbalancers: "1"
   standard:
@@ -34,7 +33,6 @@ _quotaTiers:
     requests.memory: 8Gi
     limits.cpu: "16"
     limits.memory: 32Gi
-    pods: "30"
     persistentvolumeclaims: "10"
     services.loadbalancers: "2"
   large:
@@ -42,7 +40,6 @@ _quotaTiers:
     requests.memory: 32Gi
     limits.cpu: "64"
     limits.memory: 128Gi
-    pods: "50"
     persistentvolumeclaims: "20"
     services.loadbalancers: "5"
   ci:
@@ -50,7 +47,6 @@ _quotaTiers:
     requests.memory: 8Gi
     limits.cpu: "16"
     limits.memory: 32Gi
-    pods: "40"
     persistentvolumeclaims: "5"
     services.loadbalancers: "0"
 
