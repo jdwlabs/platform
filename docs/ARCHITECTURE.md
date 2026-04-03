@@ -26,6 +26,50 @@ platform/
 - Deployments ApplicationSet (if `deploymentRepo.url` set) deploys from the tenant's deployment repo
 - Automated sync with prune and self-heal
 
+## Deployments ApplicationSet
+
+When a tenant defines `deploymentRepo.url` in their `tenant.yaml`, the `tenant-envelope` chart generates a `<tenant>-deployments` ApplicationSet. This enables tenants to manage their own application deployments in a separate Git repository.
+
+The ApplicationSet uses a **matrix generator** combining:
+
+1. **Git file generator** scanning `argocd/*/config.yaml` in the deployment repo (one file per environment)
+2. **List generator** expanding the `apps` array from each matched config file
+
+Each entry in `apps` becomes an ArgoCD Application named `<tenant>-<name>`.
+
+#### Deployment repo structure
+
+```
+<deploymentRepo>/
+├── argocd/
+│   ├── non/
+│   │   └── config.yaml  # Defines apps for non environment
+│   └── prd/
+│       └── config.yaml  # Defines apps for prd environment
+└── charts/
+    └── <chart-name>/
+        ├── Chart.yaml
+        ├── templates/
+        ├── values.yaml        # Base values
+        ├── values-non.yaml    # Non-prod overrides
+        └── values-prd.yaml    # Prod overrides
+```
+
+#### Config file schema (`argocd/<env>/config.yaml`)
+
+```yaml
+apps:
+  - name: <name>                   # Used in Application name: <tenant>-<name>
+    namespace: <target-ns>         # Must be a namespace the tenant owns
+    chartPath: charts/<chart>      # Path to chart in the deployment repo
+    syncWave: "0"                  # Default ordering (default: "0")
+    values:                        # Helm value files relative to chartPath
+      - values.yaml
+      - values-<env>.yaml
+```
+
+Sync options applied to all deployment repo apps: `CreateNamespace=false`, `PruneLast=true`, `ServerSideApply=true`.
+
 ## Sync Wave Ordering
 
 | Wave | Category | Apps |

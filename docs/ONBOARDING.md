@@ -44,13 +44,49 @@ The `tenant-envelope` Helm chart automatically provisions:
 - [ ] Create `tenants/<tenant>/services/arc-runner-set-<tenant>/values.yaml`
 - [ ] Create `tenants/<tenant>/services/arc-runner-set-<tenant>/postInstall/externalsecret.yaml`
 
-### Step 5: Git and ArgoCD
+### Step 5: Set Up Deployment Repo (Optional)
+
+If the tenant will manage application deployments via a separate Git repository:
+
+1. Create the repo (e.g. `github.com/<org>/deployments`)
+2. Add `deploymentRepo.url` and `deploymentRepo.revision` to `tenant.yaml`
+3. Create per-environment config files:
+
+```
+<deploymentRepo>/
+├── argocd/
+│   └── <env>/
+│       └── config.yaml
+└── charts/
+    └── <chart-name>/
+        ├── Chart.yaml
+        ├── templates/
+        ├── values.yaml
+        └── values-<env>.yaml
+```
+
+Each `argocd/<env>/config.yaml` lists the apps for that environment:
+
+```yaml
+apps:
+  - name: <app-name>
+    namespace: <tenant>-<ns>  # Must be a namespace the tenant owns
+    chartPath: charts/<chart-name>
+    syncWave: "0"  # Default ordering (default: "0")
+    values:
+      - values.yaml
+      - values-<env>.yaml
+```
+
+See [ARCHITECTURE.md](ARCHITECTURE.md#deployments-applicationset) for the full config scheme.
+
+### Step 6: Git and ArgoCD
 
 - [ ] Open pull request; CI validation must pass
 - [ ] Merge to main
 - [ ] The governance ApplicationSet detects the new `tenant.yaml` and generates all resources within 3 minutes
 
-### Step 6: Verify
+### Step 7: Verify
 
 - [ ] ArgoCD Application `governance-<tenant>` shows Synced/Healthy
 - [ ] ArgoCD Application `<tenant>-arc-runner-set-<tenant>` shows Synced/Healthy
@@ -58,6 +94,7 @@ The `tenant-envelope` Helm chart automatically provisions:
 - [ ] Runner appears in GitHub org Settings > Actions > Runners
 - [ ] NetworkPolicies applied: `kubectl get netpol -n <tenant>-runners`
 - [ ] ResourceQuota applied: `kubectl describe resourcequota -n <tenant>-runners`
+- [ ] If deployment repo configured: ArgoCD Applications `<tenant>-<name>` show Synced/Healthy
 
 ## Offboarding a Tenant
 
