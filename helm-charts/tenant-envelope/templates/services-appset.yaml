@@ -7,7 +7,7 @@ metadata:
 spec:
   goTemplate: true
   goTemplateOptions:
-    - "missingkey=error"
+    - "missingkey=zero"
   generators:
     - list:
         elements: {{ .Values.services | toJson }}
@@ -32,6 +32,19 @@ spec:
   templatePatch: |
     spec:
       sources:
+        {{ "{{-" }} if .rawManifests {{ "}}" }}
+        - repoURL: {{ .Values._platform.repoURL }}
+          targetRevision: {{ .Values._platform.revision }}
+          path: tenants/{{ .Values.name }}/services/{{ "{{" }} .name {{ "}}" }}/postInstall
+        {{ "{{-" }} else {{ "}}" }}
+        {{ "{{-" }} if .chartPath {{ "}}" }}
+        - repoURL: '{{ "{{" }} .repo {{ "}}" }}'
+          path: '{{ "{{" }} .chartPath {{ "}}" }}'
+          targetRevision: '{{ "{{" }} .revision {{ "}}" }}'
+          helm:
+            valueFiles:
+              - $values/tenants/{{ .Values.name }}/deployments/{{ "{{" }} .name {{ "}}" }}/values.yaml
+        {{ "{{-" }} else {{ "}}" }}
         - repoURL: '{{ "{{" }} .repo {{ "}}" }}'
           chart: '{{ "{{" }} .chart {{ "}}" }}'
           targetRevision: '{{ "{{" }} .revision {{ "}}" }}'
@@ -45,5 +58,6 @@ spec:
         - repoURL: {{ .Values._platform.repoURL }}
           targetRevision: {{ .Values._platform.revision }}
           path: tenants/{{ .Values.name }}/services/{{ "{{" }} .name {{ "}}" }}/postInstall
+        {{ "{{-" }} end {{ "}}" }}
         {{ "{{-" }} end {{ "}}" }}
 {{- end }}

@@ -17,21 +17,13 @@ platform/
 
 ## ArgoCD Model
 
-Two ApplicationSets manage all deployments:
-
-### Platform ApplicationSet (`bootstrap/platform-appset.yaml`)
-- Reads `platform/config.yaml`
-- Deploys shared infrastructure (MetalLB, cert-manager, Vault, etc.)
-- Uses the `platform` ArgoCD AppProject
-- App naming: `platform-<name>`
-
-### Tenant ApplicationSet (`bootstrap/tenant-appset.yaml`)
-- Reads `tenants/*/config.yaml`
-- Deploys tenant-specific apps (ARC runners, database schemas)
-- Uses `tenant-<name>` ArgoCD AppProjects
-- App naming: `<tenant>-<name>`
-- Matrix generator (git file + list)
-- Multi-source (Helm chart + values ref + optional postInstall raw manifests)
+### Governance ApplicationSet (`bootstrap/governance-appset.yaml)
+- Scans `tenant/*/tenant.yaml` via git file generator
+- Renders `helm-charts/tenant-envelope` for each tenant
+- Creates namespaces, quotas, limit ranges, network policies, AppProjects
+- Generates per-tenant `<name>-services` and `<name>-deployments` ApplicationSets
+- Services ApplicationSet deploys from Helm chart + values ref + optional postInstall raw manifests
+- Deployments ApplicationSet (if `deploymentRepo.url` set) deploys from the tenant's deployment repo
 - Automated sync with prune and self-heal
 
 ## Sync Wave Ordering

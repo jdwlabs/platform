@@ -94,6 +94,15 @@ services:
     postInstall: true
     syncWave: 1
 
+  - name: porkbun-webhook
+    chart: ""
+    chartPath: helm-charts/porkbun-webhook
+    repo: https://github.com/jdwlabs/platform.git
+    revision: main
+    namespace: porkbun-webhook
+    postInstall: false
+    syncWave: 1
+
   - name: ingress-nginx
     chart: ingress-nginx
     repo: https://kubernetes.github.io/ingress-nginx
@@ -148,7 +157,7 @@ services:
     repo: https://grafana.github.io/helm-charts
     revision: 3.3.2
     namespace: monitoring
-    postInstall: true
+    postInstall: false
     syncWave: 2
 
   - name: grafana
@@ -164,7 +173,7 @@ services:
     repo: https://grafana.github.io/helm-charts
     revision: 6.38.0
     namespace: monitoring
-    postInstall: true
+    postInstall: false
     syncWave: 2
 
   - name: prometheus

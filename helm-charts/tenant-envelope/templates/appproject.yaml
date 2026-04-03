@@ -4,7 +4,9 @@
 {{- $_ := set $repos .Values.deploymentRepo.url true }}
 {{- end }}
 {{- range .Values.services }}
+{{- if .repo }}
 {{- $_ := set $repos .repo true }}
+{{- end }}
 {{- end }}
 {{- range .Values.project.extraSourceRepos }}
 {{- $_ := set $repos . true }}
@@ -21,9 +23,16 @@ spec:
     - {{ $repo | quote }}
     {{- end }}
   destinations:
+    {{- $dests := dict }}
     {{- range .Values.namespaces }}
+    {{- $_ := set $dests .name true }}
+    {{- end }}
+    {{- range .Values.services }}
+    {{- $_ := set $dests .namespace true }}
+    {{- end }}
+    {{- range $dest, $_ := $dests }}
     - server: https://kubernetes.default.svc
-      namespace: {{ .name | quote }}
+      namespace: {{ $ns | quote }}
     {{- end }}
   {{- if .Values.project.elevated }}
   clusterResourceWhitelist:

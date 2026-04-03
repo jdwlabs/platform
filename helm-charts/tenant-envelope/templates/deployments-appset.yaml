@@ -12,10 +12,10 @@ spec:
     - matrix:
         generators:
           - git:
-            repoURL: {{ .Values.deploymentRepo.url | quote }}
-            revision: {{ .Values.deploymentRepo.revision | quote }}
-            files:
-              - path: argocd/apps/*/config.yaml
+              repoURL: {{ .Values.deploymentRepo.url | quote }}
+              revision: {{ .Values.deploymentRepo.revision | quote }}
+              files:
+                - path: argocd/config.yaml
           - list:
               elementsYaml: '{{ "{{" }} .apps | toJson {{ "}}" }}'
   template:

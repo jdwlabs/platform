@@ -15,49 +15,44 @@
   - `github_app_installation_id`
   - `github_app_private_key`
 
-### Step 2: Create Directory Structure
+### Step 2: Create Tenant Directory
 
 ```bash
-mkdir -p tenants/<tenant>/apps/arc-runner-set-<tenant>/postInstall
+mkdir -p tenants/<tenant>/service/arc-runner-set-<tenant>/postInstall
 ```
 
-- [ ] Copy `tenants/jdwlabs/tenant.yaml` to `tenants/<tenant>/tenant.yaml`, update fields
-- [ ] Create `tenants/<tenant>/config.yaml` with apps list
+### Step 3: Create tenant.yaml
 
-### Step 3: Create Namespace Baseline Manifests
+Create `tenants/<tenant>/tenant.yaml` using an existing tenant as a reference (e.g. `tenants/jdwlabs/tenant.yaml`). Update:
 
-For each namespace (`<tenant>-runners`):
+- [ ] `name`, `displayName`, `githubOrg`, `contacts`
+- [ ] `deploymentRepo` (if the tenant has a deployment repo)
+- [ ] `namespaces` list with appropriate `quotaTier` and `networkPolicy` values
+- [ ] `project.elevated` (should be `false` for non-platform tenants)
+- [ ] `services` list with ARC runner set and any schema services
 
-- [ ] Copy `tenants/_templates/namespace.yaml` and update name + labels
-- [ ] Copy `tenants/_templates/resource-quota.yaml` and update namespace
-- [ ] Copy `tenants/_templates/limit-range.yaml` and update namespace
-- [ ] Copy `tenants/_templates/network-policy-default-deny.yaml` and update namespace
-- [ ] Copy `tenants/_templates/network-policy-allow-dns.yaml` and update namespace
-- [ ] Copy `tenants/_templates/network-policy-allow-ingress.yaml` and update namespace
+The `tenant-envelope` Helm chart automatically provisions:
+- Namespaces with labels and Pod Security Standards
+- ResourceQuotas and LimitRanges (based on `quotaTier`)
+- NetworkPolicies (based on `networkPolicy`)
+- ArgoCD AppProject scoped to tenant namespaces
+- ARC RBAC for runner namespaces
+- ApplicationSets for services and deployments
 
-### Step 4: Create ArgoCD AppProject
+### Step 4: Create Service Configs
 
-- [ ] Copy `tenants/_templates/argocd-project.yaml`
-- [ ] Update `metadata.name` to `tenant-<tenant>`
-- [ ] Update `spec.destinations` to tenant's namespaces
-- [ ] Save as `bootstrap/argocd/projects/project-tenant-<tenant>.yaml`
-- [ ] Apply: `kubectl apply -f bootstrap/argocd/projects/project-tenant-<tenant>.yaml`
+- [ ] Create `tenants/<tenant>/services/arc-runner-set-<tenant>/values.yaml`
+- [ ] Create `tenants/<tenant>/services/arc-runner-set-<tenant>/postInstall/externalsecret.yaml`
 
-### Step 5: Create App Configs
+### Step 5: Git and ArgoCD
 
-- [ ] Create `tenants/<tenant>/apps/arc-runner-set-<tenant>/values.yaml`
-- [ ] Create `tenants/<tenant>/apps/arc-runner-set-<tenant>/postInstall/externalsecret.yaml`
+- [ ] Open pull request; CI validation must pass
+- [ ] Merge to main
+- [ ] The governance ApplicationSet detects the new `tenant.yaml` and generates all resources within 3 minutes
 
 ### Step 6: Git and ArgoCD
 
-- [ ] `git add tenants/<tenant>/`
-- [ ] `git add bootstrap/argocd/projects/project-tenant-<tenant>.yaml`
-- [ ] Open pull request; CI validation must pass
-- [ ] Merge to main
-- [ ] Monitor ArgoCD: the tenant ApplicationSet should generate new Applications within 3 minutes
-
-### Step 7: Verify
-
+- [ ] ArgoCD Application `governance-<tenant>` shows Synced/Healthy
 - [ ] ArgoCD Application `<tenant>-arc-runner-set-<tenant>` shows Synced/Healthy
 - [ ] Pods running in `<tenant>-runners` namespace
 - [ ] Runner appears in GitHub org Settings > Actions > Runners
@@ -67,9 +62,7 @@ For each namespace (`<tenant>-runners`):
 ## Offboarding a Tenant
 
 1. Remove `tenants/<tenant>/` directory from git
-2. The tenant ApplicationSet generator stops finding the config.yaml
+2. The governance ApplicationSet stops finding the `tenant.yaml`
 3. ArgoCD prunes all Application objects for that tenant
-4. Manually delete namespaces: `kubectl delete namespace <tenant>-runners`
+4. Manually delete namespaces if needed: `kubectl delete namespace <tenant>-runners`
 5. Delete Vault secrets under `kv/<tenant>/`
-6. Delete ArgoCD AppProject: `kubectl delete appproject tenant-<tenant> -n argocd`
-7. Remove `bootstrap/argocd/projects/project-tenant-<tenant>.yaml` from git
