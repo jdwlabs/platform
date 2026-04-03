@@ -12,10 +12,10 @@ A tenant is a GitHub organization (or individual developer account) that:
 
 ## Current Tenants
 
-| Tenant | GitHub Org | Namespace | Vault Prefix |
-|--------|------------|-----------|--------------|
-| jdwlabs |jdwlabs | `jdwlabs-runners` | `kv/jdwlabs` |
-| dotablaze-tech | dotablaze-tech | `dotablaze-tech-runners` | `kv/dotablaze-tech` |
+| Tenant         | GitHub Org     | Namespaces                                      | Vault Prefix        | Deployment Repo       |
+|----------------|----------------|-------------------------------------------------|---------------------|-----------------------|
+| jdwlabs        | jdwlabs        | `jdwlabs-non`, `jdwlabs-prd`, `jdwlabs-runners` | `kv/jdwlabs`        | `jdwlabs/deployments` |
+| dotablaze-tech | dotablaze-tech | `dotablaze-tech-runners`                        | `kv/dotablaze-tech` | -                     |
 
 ## Tenant Resources
 
@@ -31,19 +31,19 @@ Each tenant receives:
 
 ## Directory Structure
 
-Each tenant lives under `tenants/<name>/`:
+Each tenant lives under `tenants/<name>/` in the platform repo:
 
 ```
 tenants/<name>/
-├── tenant.yaml      # Tenant metadata (not machine-processed, for documentation)
-├── config.yaml      # App registry consumed by tenant ApplicationSet
-└── apps/
-    ├── <app-name>/
-    │   ├── values.yaml
-    │   └── postInstall/
-    │       └── ...
-    └── ...
+├── tenant.yaml             # Tenant definition (processed by governance ApplicationSet)
+└── services/
+    └── <service-name>/
+        ├── values.yaml     # Helm values for the service (e.g. ARC runner set)
+        └── postInstall/    # Optional raw manifests applied after Helm install
+            └── ...
 ```
+
+Tenants with a `deploymentRepo` also maintain a separate Git repository for application deployments. See [ARCHITECTURE.md](ARCHITECTURE.md#deployments-applicationset) for the deployment repo structure and config schema.
 
 ## Isolation Boundaries
 
