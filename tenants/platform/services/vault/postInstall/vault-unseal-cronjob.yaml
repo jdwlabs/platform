@@ -3,6 +3,10 @@ kind: CronJob
 metadata:
   name: vault-auto-unseal
   namespace: vault
+  annotations:
+    platform.jdwlabs.io/note: >-
+      Requires vault init with -key-shares=1 -key-threshold=1.
+      The vault-unseal-keys secret must be created manually after init.
 spec:
   schedule: "*/2 * * * *"
   jobTemplate:

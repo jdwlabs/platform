@@ -37,18 +37,11 @@ services:
     postInstall: true
     syncWave: 5
 
-  - name: arc-runner-set-jdwlabs-custom
-    chart: gha-runner-scale-set
-    repo: ghcr.io/actions/actions-runner-controller-charts
-    revision: 0.13.1
-    namespace: jdwlabs-runners
-    postInstall: false
-    syncWave: 5
-
   - name: jdwlabs-schemas
-    chart: cluster
-    repo: https://cloudnative-pg.github.io/charts
-    revision: 0.4.0
+    chart: ""
+    repo: ""
+    revision: ""
     namespace: database
-    postInstall: true
+    postInstall: false
+    rawManifests: true
     syncWave: 5

@@ -15,8 +15,8 @@ metadata:
     {{- else if eq .quotaTier "platform" }}
     platform.jdwlabs.io/type: platform
     pod-security.kubernetes.io/enforce: privileged
-    pod-security.kubernetes.io/audit: baseline
-    pod-security.kubernetes.io/warn: baseline
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
     {{- else }}
     platform.jdwlabs.io/type: workload
     pod-security.kubernetes.io/enforce: baseline
