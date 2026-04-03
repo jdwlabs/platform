@@ -1,9 +1,9 @@
 apiVersion: db.atlasgo.io/v1alpha1
 kind: AtlasSchema
 metadata:
+  name: jdwlabs-atlas-schema-non
   annotations:
     argocd.argoproj.io/sync-wave: "3"
-  name: jdwlabs-atlas-schema-non
 spec:
   credentials:
     scheme: postgres

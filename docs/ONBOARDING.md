@@ -18,7 +18,7 @@
 ### Step 2: Create Tenant Directory
 
 ```bash
-mkdir -p tenants/<tenant>/service/arc-runner-set-<tenant>/postInstall
+mkdir -p tenants/<tenant>/services/arc-runner-set-<tenant>/postInstall
 ```
 
 ### Step 3: Create tenant.yaml
@@ -50,7 +50,7 @@ The `tenant-envelope` Helm chart automatically provisions:
 - [ ] Merge to main
 - [ ] The governance ApplicationSet detects the new `tenant.yaml` and generates all resources within 3 minutes
 
-### Step 6: Git and ArgoCD
+### Step 6: Verify
 
 - [ ] ArgoCD Application `governance-<tenant>` shows Synced/Healthy
 - [ ] ArgoCD Application `<tenant>-arc-runner-set-<tenant>` shows Synced/Healthy
