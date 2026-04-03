@@ -43,7 +43,7 @@ spec:
           targetRevision: '{{ "{{" }} .revision {{ "}}" }}'
           helm:
             valueFiles:
-              - $values/tenants/{{ .Values.name }}/deployments/{{ "{{" }} .name {{ "}}" }}/values.yaml
+              - $values/tenants/{{ .Values.name }}/services/{{ "{{" }} .name {{ "}}" }}/values.yaml
         {{ "{{-" }} else {{ "}}" }}
         - repoURL: '{{ "{{" }} .repo {{ "}}" }}'
           chart: '{{ "{{" }} .chart {{ "}}" }}'
@@ -51,6 +51,7 @@ spec:
           helm:
             valueFiles:
               - $values/tenants/{{ .Values.name }}/services/{{ "{{" }} .name {{ "}}" }}/values.yaml
+        {{ "{{-" }} end {{ "}}" }}
         - repoURL: {{ .Values._platform.repoURL }}
           targetRevision: {{ .Values._platform.revision }}
           ref: values

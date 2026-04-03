@@ -30,7 +30,7 @@ spec:
     {{- range .Values.services }}
     {{- $_ := set $dests .namespace true }}
     {{- end }}
-    {{- range $dest, $_ := $dests }}
+    {{- range $ns, $_ := $dests }}
     - server: https://kubernetes.default.svc
       namespace: {{ $ns | quote }}
     {{- end }}
