@@ -15,7 +15,7 @@ spec:
           - path: tenants/*/tenant.yaml
   template:
     metadata:
-      name: 'governance-{{ "{{" }} .name {{ "}}" }}'
+      name: 'governance-{{ .name }}'
       annotations:
         argocd.argoproj.io/sync-wave: "1"
     spec:
@@ -34,9 +34,9 @@ spec:
           targetRevision: main
           path: helm-charts/tenant-envelope
           helm:
-            releaseName: 'governance-{{ "{{" }} .name {{ "}}" }}'
+            releaseName: 'governance-{{ .name }}'
             valueFiles:
-              - $values/tenants/{{ "{{" }} .name {{ "}}" }}/tenant.yaml
+              - $values/tenants/{{ .name }}/tenant.yaml
         - repoURL: https://github.com/jdwlabs/platform.git
           targetRevision: main
           ref: values
