@@ -37,7 +37,7 @@ export KUBECONFIG=./kubeconfig
 ### 2️⃣ Deploy the Porkbun Webhook via Helm
 
 ```bash
-helm repo add jdw https://charts.jdwkube.com
+helm repo add jdw https://charts.jdwlabs.com
 helm install porkbun-webhook ./porkbun-webhook \
   -n porkbun-webhook --create-namespace \
   -f values.yaml

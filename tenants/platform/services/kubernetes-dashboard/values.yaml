@@ -9,8 +9,8 @@
 #    ingressClassName: public
 #    tls:
 #      - hosts:
-#          - dashboard.jdwkube.com
+#          - dashboard.jdwlabs.com
 #        secretName: kubernetes-dashboard-tls
 #    path: /
 #    hosts:
-#      - dashboard.jdwkube.com
+#      - dashboard.jdwlabs.com
