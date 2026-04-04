@@ -20,7 +20,7 @@ upgrades through GitOps from that point forward.
 
 ```bash
 kubectl create namespace argocd
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl apply -n argocd --server-side --force-conflicts -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 ```
 
 Wait for all pods to be ready:
@@ -44,10 +44,11 @@ Helm-managed version, replacing the manually-installed manifests.
 This single command starts the entire automated cascade:
 
 ```bash
-kubectl apply -f bootstrap/root-app.yaml
+kubectl apply -f https://raw.githubusercontent.com/jdwlabs/platform/main/bootstrap/root-app.yaml
 ```
 
-The `bootstrap` Application recursively applies everything in `bootstrap/`, which creates:
+The `bootstrap` Application uses the `default` AppProject (which always exists in ArgoCD) and recursively applies 
+everything in `bootstrap/`, which creates:
 
 1. `bootstrap` AppProject (`bootstrap/argocd/projects/project-bootstrap.yaml`)
 2. `governance` ApplicationSet (`bootstrap/governance-appset.yaml`)
