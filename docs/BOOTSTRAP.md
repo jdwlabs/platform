@@ -37,7 +37,7 @@ kubectl get pods -n argocd
 
 All pods should be Running and Ready. Do not configure ArgoCD repositories or applications manually - the bootstrap
 manifests handle everything. After Phase 2, the platform's `argo-cd` service (wave 0) will reconcile ArgoCD to the
-Helm-manged version, replacing the manually-installed manifests.
+Helm-managed version, replacing the manually-installed manifests.
 
 ## Phase 2: Apply root-app
 
@@ -85,7 +85,7 @@ Platform services then deploy in sync wave order:
 
 | Wave | What deploys                                                                     |
 |------|----------------------------------------------------------------------------------|
-| 0    | argo-cd (self-maangement), metallb                                               |
+| 0    | argo-cd (self-mangement), metallb                                                |
 | 1    | cert-manager, porkbun-webhook, ingress-nginx, longhorn                           |
 | 2    | vault, external-secrets, vault-config-operator, monitoring stack, atlas-operator |
 | 3    | cnpg-operator, arc-systems                                                       |
@@ -236,7 +236,8 @@ kubectl exec -n vault vault-0 -- sh -c \
     jwt_key_prd=<jwt-secret-prd>"
 ```
 
-CNPG-generated secrets (`postgresql-cluster-non-app`, `postgresql-cluster-prd-app`) are created automatically by the CNPG
+CNPG-generated secrets (`postgresql-cluster-non-app`, `postgresql-cluster-prd-app`) are created automatically by the
+CNPG
 operator and read via the Kubernetes SecretStore - no manual seeding needed.
 
 To discover all ExternalSecret Vault paths in the codebase:
