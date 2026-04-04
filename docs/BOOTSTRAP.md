@@ -85,7 +85,7 @@ Platform services then deploy in sync wave order:
 
 | Wave | What deploys                                                                     |
 |------|----------------------------------------------------------------------------------|
-| 0    | argo-cd (self-mangement), metallb                                                |
+| 0    | argo-cd (self-management), metallb                                               |
 | 1    | cert-manager, porkbun-webhook, ingress-nginx, longhorn                           |
 | 2    | vault, external-secrets, vault-config-operator, monitoring stack, atlas-operator |
 | 3    | cnpg-operator, arc-systems                                                       |
