@@ -5,10 +5,16 @@ contacts:
   - dotablazegaming@gmail.com
 
 deploymentRepo:
-  url: ""
-  revision: ""
+  url: https://github.com/dotablaze-tech/deployments.git
+  revision: main
 
 namespaces:
+  - name: dotablaze-tech-non
+    quotaTier: standard
+    networkPolicy: default
+  - name: dotablaze-tech-prd
+    quotaTier: standard
+    networkPolicy: default
   - name: dotablaze-tech-runners
     quotaTier: ci
     networkPolicy: ci
@@ -16,7 +22,11 @@ namespaces:
 
 project:
   elevated: false
-  clusterResourceWhitelist: []
+  clusterResourceWhitelist:
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
 
 services:
   - name: arc-runner-set-dotablaze-tech
