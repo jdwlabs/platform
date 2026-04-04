@@ -1,5 +1,7 @@
 # Platform
 
+[![Validate](https://github.com/jdwlabs/platform/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/jdwlabs/platform/actions/workflows/validate.yml)
+
 Tenant-centric Kubernetes GitOps platform managed by ArgoCD.
 
 ## Structure
