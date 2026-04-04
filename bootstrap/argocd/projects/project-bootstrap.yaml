@@ -9,7 +9,7 @@ spec:
     - 'https://github.com/jdwlabs/platform.git'
   destinations:
     - server: https://kubernetes.default.svc
-      namespace: 'argocd'
+      namespace: '*'
   clusterResourceWhitelist:
     - group: '*'
       kind: '*'
