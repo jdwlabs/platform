@@ -241,7 +241,7 @@ kubectl exec -n vault vault-0 -- sh -c \
 ```bash
 # Discord bot token for meowbot
 kubectl exec -n vault vault-0 -- sh -c \
-  "VAULT_TOKEN=$ROOT_TOKEN valut kv put kv/dotablaze-tech-discord-bot-token \
+  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/dotablaze-tech-discord-bot-token \
     token=<discord-bot-token>"
 ```
 
