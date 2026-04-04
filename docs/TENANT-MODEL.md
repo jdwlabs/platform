@@ -12,10 +12,10 @@ A tenant is a GitHub organization (or individual developer account) that:
 
 ## Current Tenants
 
-| Tenant         | GitHub Org     | Namespaces                                      | Vault Prefix        | Deployment Repo       |
-|----------------|----------------|-------------------------------------------------|---------------------|-----------------------|
-| jdwlabs        | jdwlabs        | `jdwlabs-non`, `jdwlabs-prd`, `jdwlabs-runners` | `kv/jdwlabs`        | `jdwlabs/deployments` |
-| dotablaze-tech | dotablaze-tech | `dotablaze-tech-runners`                        | `kv/dotablaze-tech` | -                     |
+| Tenant         | GitHub Org     | Namespaces                                                           | Vault Prefix        | Deployment Repo              |
+|----------------|----------------|----------------------------------------------------------------------|---------------------|------------------------------|
+| jdwlabs        | jdwlabs        | `jdwlabs-non`, `jdwlabs-prd`, `jdwlabs-runners`                      | `kv/jdwlabs`        | `jdwlabs/deployments`        |
+| dotablaze-tech | dotablaze-tech | `dotablaze-tech-non`, `dotablaze-tech-prd`, `dotablaze-tech-runners` | `kv/dotablaze-tech` | `dotablaze-tech/deployments` |
 
 ## Tenant Resources
 
@@ -43,7 +43,8 @@ tenants/<name>/
             └── ...
 ```
 
-Tenants with a `deploymentRepo` also maintain a separate Git repository for application deployments. See [ARCHITECTURE.md](ARCHITECTURE.md#deployments-applicationset) for the deployment repo structure and config schema.
+Tenants with a `deploymentRepo` also maintain a separate Git repository for application deployments.
+See [ARCHITECTURE.md](ARCHITECTURE.md#deployments-applicationset) for the deployment repo structure and config schema.
 
 ## Isolation Boundaries
 
