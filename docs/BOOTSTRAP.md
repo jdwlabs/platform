@@ -14,7 +14,9 @@ see [ONBOARDING.md](ONBOARDING.md).
 
 ## Phase 1: Install ArgoCD
 
-ArgoCD is not managed by this repository - it must be installed manually before anything else.
+ArgoCD must exist before it can manage itself. Install it once manually to seed the cluster, then the platform takes
+over via the `argo-cd` Helm chart in `tenants/platform/tenant.yaml` - managing ArgoCD's configuration, version, and
+upgrades through GitOps from that point forward.
 
 ```bash
 kubectl create namespace argocd
@@ -34,7 +36,8 @@ kubectl get pods -n argocd
 ```
 
 All pods should be Running and Ready. Do not configure ArgoCD repositories or applications manually - the bootstrap
-manifests handle everything.
+manifests handle everything. After Phase 2, the platform's `argo-cd` service (wave 0) will reconcile ArgoCD to the
+Helm-manged version, replacing the manually-installed manifests.
 
 ## Phase 2: Apply root-app
 
@@ -47,7 +50,7 @@ kubectl apply -f bootstrap/root-app.yaml
 The `bootstrap` Application recursively applies everything in `bootstrap/`, which creates:
 
 1. `bootstrap` AppProject (`bootstrap/argocd/projects/project-bootstrap.yaml`)
-2. `governace` ApplicationSet (`bootstrap/governance-appset.yaml`)
+2. `governance` ApplicationSet (`bootstrap/governance-appset.yaml`)
 3. Itself (self-managing via `selfHeal: true` and `prune: true`)
 
 Verify:
@@ -82,7 +85,7 @@ Platform services then deploy in sync wave order:
 
 | Wave | What deploys                                                                     |
 |------|----------------------------------------------------------------------------------|
-| 0    | metallb                                                                          |
+| 0    | argo-cd (self-maangement), metallb                                               |
 | 1    | cert-manager, porkbun-webhook, ingress-nginx, longhorn                           |
 | 2    | vault, external-secrets, vault-config-operator, monitoring stack, atlas-operator |
 | 3    | cnpg-operator, arc-systems                                                       |
@@ -94,7 +97,7 @@ Watch sync progress:
 kubectl get applications -n argocd --watch
 ```
 
-Services at wave 2+ will remain degraded until Vault is initialized in Phase 4. This ie expected - proceed immediately.
+Services at wave 2+ will remain degraded until Vault is initialized in Phase 4. This is expected - proceed immediately.
 
 ## Phase 4: Initialize Vault
 
@@ -144,7 +147,7 @@ kubectl create secret generic vault-unseal-keys \
   --from-literal=unseal_key_1="$UNSEAL_KEY"
 
 # Root token - vault-admin-initializer Job
-kubectl create secret generic vault-root-token \
+kubectl create secret generic vault-token \
   -n vault \
   --from-literal=token="$ROOT_TOKEN"
 
@@ -233,7 +236,7 @@ kubectl exec -n vault vault-0 -- sh -c \
     jwt_key_prd=<jwt-secret-prd>"
 ```
 
-CNPG-generated secrets (`postgres-cluster-non-app`, `postgresql-cluster-prd-app`) are created automatically by the CNPG
+CNPG-generated secrets (`postgresql-cluster-non-app`, `postgresql-cluster-prd-app`) are created automatically by the CNPG
 operator and read via the Kubernetes SecretStore - no manual seeding needed.
 
 To discover all ExternalSecret Vault paths in the codebase:
@@ -268,7 +271,7 @@ kubectl get clusterissuer
 kubectl get applications -n argocd
 ```
 
-All should how `Synced` and `Healthy`.
+All should show `Synced` and `Healthy`.
 
 ### ARC runners
 
@@ -285,7 +288,7 @@ Runners should appear in each GitHub org's Settings > Actions > runners within a
 kubectl get cluster -n database
 ```
 
-Both `postgresql-cluster-non` and `postgres-cluster-prd` should show `Cluster in healthy state`.
+Both `postgresql-cluster-non` and `postgresql-cluster-prd` should show `Cluster in healthy state`.
 
 ### Tenant deployments
 
@@ -313,13 +316,15 @@ Kubernetes cluster ready
             |
             +-- Governance cascade (Phase 3, automated)
                  |
-                 +-- Wave 0-1: MetalLB, cert-manager, ingress-nginx, Longhorn
+                 +-- Wave 0: ArgoCD (self-managed), MetalLB
+                 |
+                 +-- Wave 1: cert-manager, ingress-nginx, Longhorn
                  |
                  +-- Wave 2: Vault deployed (sealed)
                  |    |
                  |    +-- Vault initialized + secrets created (Phase 4)  <-- MANUAL
                  |         |
-                 |         +-- ClusterSecretStore become Valid
+                 |         +-- ClusterSecretStore becomes Valid
                  |              |
                  |              +-- Vault KV paths seeded (Phase 5)  <-- MANUAL
                  |                   |
@@ -340,13 +345,13 @@ Kubernetes cluster ready
 
 ## Troubleshooting
 
-| Symptom                                | Likely cause                               | Resolution                                    |
-|----------------------------------------|--------------------------------------------|-----------------------------------------------|
-| `governance-*` apps stuck Progressing  | Namespace creation in progress             | Wait 2-3 min, check `kubectl get ns`          |
-| ExternalSecrets in `SecretSyncedError` | Vault not initalized or secrets not seeded | Complete Phase 4 and 5                        |
-| `letsencrypt-prod` issuer not Ready    | Porkbun secret missing from Vault          | Seed `kv/porkbun` (Phase 5)                   |
-| Vault pod CrashLoopBackOff             | Initialized but unseal key secret missing  | Create `vault-unseal-keys` secret (Phase 4.4) |
-| ARC runner pods not appearing          | GitHub App secret not seeded               | Seed `kv/<tenant>-github-app` (Phase 5)       |
-| `vault-admin-initializer` Job failed   | `vault-token` secret missing in vault ns   | Create `vault-token` secret (Phase 4.4)       |
-| Deployment apps stuck `Missing`        | Deployment repo not accessible             | Check ArgoCD repo credentials                 |
-| CNPG clusters not healthy              | Longhorn storage not ready                 | Check Longhonr pods in `longhorn-system`      |
+| Symptom                                | Likely cause                                | Resolution                                    |
+|----------------------------------------|---------------------------------------------|-----------------------------------------------|
+| `governance-*` apps stuck Progressing  | Namespace creation in progress              | Wait 2-3 min, check `kubectl get ns`          |
+| ExternalSecrets in `SecretSyncedError` | Vault not initialized or secrets not seeded | Complete Phase 4 and 5                        |
+| `letsencrypt-prod` issuer not Ready    | Porkbun secret missing from Vault           | Seed `kv/porkbun` (Phase 5)                   |
+| Vault pod CrashLoopBackOff             | Initialized but unseal key secret missing   | Create `vault-unseal-keys` secret (Phase 4.4) |
+| ARC runner pods not appearing          | GitHub App secret not seeded                | Seed `kv/<tenant>-github-app` (Phase 5)       |
+| `vault-admin-initializer` Job failed   | `vault-token` secret missing in vault ns    | Create `vault-token` secret (Phase 4.4)       |
+| Deployment apps stuck `Missing`        | Deployment repo not accessible              | Check ArgoCD repo credentials                 |
+| CNPG clusters not healthy              | Longhorn storage not ready                  | Check Longhorn pods in `longhorn-system`      |

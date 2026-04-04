@@ -76,14 +76,14 @@ Sync options applied to all deployment repo apps: `CreateNamespace=false`, `Prun
 
 ## Sync Wave Ordering
 
-| Wave | Category              | Apps                                                  |
-|------|-----------------------|-------------------------------------------------------|
-| 0    | Bare metal networking | metallb                                               |
-| 1    | Core infrastructure   | cert-manager, ingress-nginx, longhorn                 |
-| 2    | Platform services     | vault, external-secrets, monitoring, grafana, etc.    |
-| 3    | Operators             | cnpg-operator, atlas-operator, arc-systems            |
-| 4    | Shared databases      | postgresql-cluster-non, postgresql-cluster-prd, db-ui |
-| 5    | Tenant workloads      | ARC runner sets, Atlas schemas                        |
+| Wave | Category            | Apps                                                  |
+|------|---------------------|-------------------------------------------------------|
+| 0    | Bootstrap           | argo-cd (self-management), metallb                    |
+| 1    | Core infrastructure | cert-manager, ingress-nginx, longhorn                 |
+| 2    | Platform services   | vault, external-secrets, monitoring, grafana, etc.    |
+| 3    | Operators           | cnpg-operator, atlas-operator, arc-systems            |
+| 4    | Shared databases    | postgresql-cluster-non, postgresql-cluster-prd, db-ui |
+| 5    | Tenant workloads    | ARC runner sets, Atlas schemas                        |
 
 ## Namespace Strategy
 
