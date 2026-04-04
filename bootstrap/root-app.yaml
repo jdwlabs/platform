@@ -6,7 +6,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: bootstrap
+  project: default
   source:
     repoURL: https://github.com/jdwlabs/platform.git
     targetRevision: main
