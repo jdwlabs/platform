@@ -236,9 +236,17 @@ kubectl exec -n vault vault-0 -- sh -c \
     jwt_key_prd=<jwt-secret-prd>"
 ```
 
+### Application secrets (dotablaze-tech deployments)
+
+```bash
+# Discord bot token for meowbot
+kubectl exec -n vault vault-0 -- sh -c \
+  "VAULT_TOKEN=$ROOT_TOKEN valut kv put kv/dotablaze-tech-discord-bot-token \
+    token=<discord-bot-token>"
+```
+
 CNPG-generated secrets (`postgresql-cluster-non-app`, `postgresql-cluster-prd-app`) are created automatically by the
-CNPG
-operator and read via the Kubernetes SecretStore - no manual seeding needed.
+CNPG operator and read via the Kubernetes SecretStore - no manual seeding needed.
 
 To discover all ExternalSecret Vault paths in the codebase:
 
