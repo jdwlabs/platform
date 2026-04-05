@@ -171,6 +171,7 @@ The `vault-admin-initializer` Job runs automatically once the `vault-token` secr
 the database secrets engine, and writes the `vault-admin` policy.
 
 ```bash
+kubectl annotate application platform-vault -n argocd argocd.argoproj.io/refresh=normal --overwrite
 kubectl get job vault-admin-initializer -n vault
 kubectl logs job/vault-admin-initializer -n vault
 ```
