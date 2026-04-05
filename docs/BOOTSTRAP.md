@@ -114,7 +114,7 @@ kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=vault -n vault 
 ### 4.2 Initialize Vault
 
 ```bash
-kubectl exec -n vault vault-0 -- vault operator init \
+kubectl exec -n vault platform-vault-0 -- vault operator init \
   -key-shares=1 \
   -key-threshold=1 \
   -format=json > vault-init.json
@@ -133,7 +133,7 @@ restart.
 ### 4.3 Unseal Vault
 
 ```bash
-kubectl exec -n vault vault-0 -- vault operator unseal "$UNSEAL_KEY"
+kubectl exec -n vault platform-vault-0 -- vault operator unseal "$UNSEAL_KEY"
 ```
 
 ### 4.4 Create Kubernetes secrets
@@ -161,7 +161,7 @@ kubectl create secret generic vault-token \
 ### 4.5 Enable KV secrets engine
 
 ```bash
-kubectl exec -n vault vault-0 -- sh -c \
+kubectl exec -n vault platform-vault-0 -- sh -c \
   "VAULT_TOKEN=$ROOT_TOKEN vault secrets enable -path=kv kv-v2"
 ```
 
