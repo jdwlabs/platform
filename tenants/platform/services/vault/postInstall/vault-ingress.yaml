@@ -23,6 +23,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: vault-ui
+                name: platform-vault-ui
                 port:
                   number: 8200

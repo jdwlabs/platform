@@ -19,7 +19,7 @@ spec:
               image: blockloop/vault-unseal
               env:
                 - name: VAULT_ADDR
-                  value: "http://vault.vault.svc:8200"
+                  value: "http://platform-vault.vault.svc:8200"
                 - name: VAULT_SKIP_VERIFY
                   value: "1"
                 - name: VAULT_UNSEAL_KEY_1

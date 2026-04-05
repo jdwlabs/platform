@@ -12,7 +12,7 @@ spec:
           image: hashicorp/vault:1.15.2
           env:
             - name: VAULT_ADDR
-              value: http://vault.vault.svc:8200
+              value: http://platform-vault.vault.svc:8200
             - name: VAULT_TOKEN
               valueFrom:
                 secretKeyRef:
