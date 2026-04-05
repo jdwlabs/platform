@@ -3,4 +3,4 @@ enableCertManager: true
 
 env:
   - name: VAULT_ADDR
-    value: http://vault.vault:8200
+    value: http://platform-vault.vault:8200
