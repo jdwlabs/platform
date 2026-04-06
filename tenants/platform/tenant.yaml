@@ -54,6 +54,9 @@ namespaces:
   - name: metrics-server
     quotaTier: platform
     networkPolicy: platform
+  - name: kube-system
+    quotaTier: platform
+    networkPolicy: platform
   - name: porkbun-webhook
     quotaTier: platform
     networkPolicy: platform
