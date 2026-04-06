@@ -199,13 +199,13 @@ services will remain in error state.
 
 ```bash
 # Porkbun DNS API credentials (cert-manager DNS01 webhook)
-kubectl exec -n vault vault-0 -- sh -c \
+kubectl exec -n vault platform-vault-0 -- sh -c \
   "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/porkbun \
     api-key=<porkbun-api-key> \
     secret-key=<porkbun-secret-key>"
 
 # Longhorn UI basic auth
-kubectl exec -n vault vault-0 -- sh -c \
+kubectl exec -n vault platform-vault-0 -- sh -c \
   "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/longhorn \
     htpasswd_string=<htpasswd-value>"
 ```
@@ -214,14 +214,14 @@ kubectl exec -n vault vault-0 -- sh -c \
 
 ```bash
 # jdwlabs ARC GitHub App
-kubectl exec -n vault vault-0 -- sh -c \
+kubectl exec -n vault platform-vault-0 -- sh -c \
   "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/jdwlabs-github-app \
     github_app_id=<app-id> \
     github_app_installation_id=<installation-id> \
     github_app_private_key=<pem-private-key>"
 
 # dotablaze-tech ARC GitHub App
-kubectl exec -n vault vault-0 -- sh -c \
+kubectl exec -n vault platform-vault-0 -- sh -c \
   "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/dotablaze-tech-github-app \
     github_app_id=<app-id> \
     github_app_installation_id=<installation-id> \
@@ -232,7 +232,7 @@ kubectl exec -n vault vault-0 -- sh -c \
 
 ```bash
 # usersrole JWT signing keys
-kubectl exec -n vault vault-0 -- sh -c \
+kubectl exec -n vault platform-vault-0 -- sh -c \
   "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/usersrole \
     jwt_key_non=<jwt-secret-non> \
     jwt_key_prd=<jwt-secret-prd>"
@@ -242,7 +242,7 @@ kubectl exec -n vault vault-0 -- sh -c \
 
 ```bash
 # Discord bot token for meowbot
-kubectl exec -n vault vault-0 -- sh -c \
+kubectl exec -n vault platform-vault-0 -- sh -c \
   "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/dotablaze-tech-discord-bot-token \
     token=<discord-bot-token>"
 ```
