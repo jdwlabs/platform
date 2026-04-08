@@ -12,9 +12,6 @@ namespaces:
   - name: argocd
     quotaTier: platform
     networkPolicy: platform
-  - name: metallb-system
-    quotaTier: platform
-    networkPolicy: platform
   - name: cert-manager
     quotaTier: platform
     networkPolicy: platform
@@ -66,7 +63,6 @@ project:
   clusterResourceWhitelist: []
   extraSourceRepos:
     - 'https://argoproj.github.io/argo-helm'
-    - 'https://metallb.github.io/metallb'
     - 'https://charts.jetstack.io'
     - 'https://kubernetes.github.io/ingress-nginx'
     - 'https://charts.longhorn.io'
@@ -89,14 +85,6 @@ services:
     repo: https://argoproj.github.io/argo-helm
     revision: 9.4.17
     namespace: argocd
-    postInstall: true
-    syncWave: 0
-
-  - name: metallb
-    chart: metallb
-    repo: https://metallb.github.io/metallb
-    revision: 0.15.2
-    namespace: metallb-system
     postInstall: true
     syncWave: 0
 

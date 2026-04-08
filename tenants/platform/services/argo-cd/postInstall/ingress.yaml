@@ -1,13 +1,11 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: argocd-server-ingress
+  name: argo-cd-ingress
   namespace: argocd
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
     nginx.ingress.kubernetes.io/ssl-passthrough: "true"
-    acme.cert-manager.io/http01-edit-in-place: "true"
-    kubernetes.io/ingress.class: nginx
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx
@@ -23,6 +21,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: argo-cd-argocd-server
+                name: platform-argo-cd-argocd-server
                 port:
                   number: 443
