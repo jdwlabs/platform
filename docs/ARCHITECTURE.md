@@ -118,7 +118,7 @@ Sync options applied to all deployment repo apps: `CreateNamespace=false`, `Prun
 ### Overview
 
 All external traffic enters the cluster through a single path: DNS resolves to the
-router's public IP, the router NATs to HAProxy, and HAProxy laod-balances across
+router's public IP, the router NATs to HAProxy, and HAProxy load-balances across
 Kubernetes nodes via NodePort.
 
 ```
@@ -222,7 +222,7 @@ graph TB
 
 **NodePort (ingress-nginx)**
 
-- `service.type: NodePort` with fixed ports: `:30080` (HTTP), `:300443` (HTTPS)
+- `service.type: NodePort` with fixed ports: `:30080` (HTTP), `:30443` (HTTPS)
 - Kubernetes opens these ports on **every node** in the cluster
 - kube-proxy on each node maintains iptables rules that DNAT traffic to the ingress-nginx pod, regardless of which node
   the pod runs on

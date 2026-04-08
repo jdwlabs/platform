@@ -2,6 +2,7 @@ controller:
   config:
     proxy-body-size: "50m"
     use-forwarded-headers: "true"
+    compute-full-forwarded-for: "true"
     use-proxy-protocol: "true"
   service:
     type: NodePort
