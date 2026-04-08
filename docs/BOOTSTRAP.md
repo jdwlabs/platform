@@ -47,7 +47,7 @@ This single command starts the entire automated cascade:
 kubectl apply -f https://raw.githubusercontent.com/jdwlabs/platform/main/bootstrap/root-app.yaml
 ```
 
-The `bootstrap` Application uses the `default` AppProject (which always exists in ArgoCD) and recursively applies 
+The `bootstrap` Application uses the `default` AppProject (which always exists in ArgoCD) and recursively applies
 everything in `bootstrap/`, which creates:
 
 1. `bootstrap` AppProject (`bootstrap/argocd/projects/project-bootstrap.yaml`)
@@ -86,7 +86,7 @@ Platform services then deploy in sync wave order:
 
 | Wave | What deploys                                                                     |
 |------|----------------------------------------------------------------------------------|
-| 0    | argo-cd (self-management), metallb                                               |
+| 0    | argo-cd (self-management)                                                        |
 | 1    | cert-manager, porkbun-webhook, ingress-nginx, longhorn                           |
 | 2    | vault, external-secrets, vault-config-operator, monitoring stack, atlas-operator |
 | 3    | cnpg-operator, arc-systems                                                       |
@@ -327,7 +327,7 @@ Kubernetes cluster ready
             |
             +-- Governance cascade (Phase 3, automated)
                  |
-                 +-- Wave 0: ArgoCD (self-managed), MetalLB
+                 +-- Wave 0: ArgoCD (self-managed)
                  |
                  +-- Wave 1: cert-manager, ingress-nginx, Longhorn
                  |

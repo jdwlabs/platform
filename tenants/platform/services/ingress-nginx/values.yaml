@@ -1,6 +1,13 @@
 controller:
   config:
     proxy-body-size: "50m"
+    use-forwarded-headers: "true"
+    use-proxy-protocol: "true"
+  service:
+    type: NodePort
+    nodePorts:
+      http: 30080
+      https: 30443
   admissionWebhooks:
     patch:
       enabled: true

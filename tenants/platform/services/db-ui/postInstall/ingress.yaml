@@ -2,10 +2,9 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: db-ui-ingress
-  labels:
-    name: db-ui-ingress
+  namespace: database
   annotations:
-    kubernetes.io/ingress.class: 'nginx'
+    nginx.ingress.kubernetes.io/backend-protocl: "HTTP"
     cert-manager.io/cluster-issuer: 'letsencrypt-prod'
 spec:
   ingressClassName: nginx
@@ -17,10 +16,10 @@ spec:
     - host: dbui.jdwlabs.com
       http:
         paths:
-          - pathType: Prefix
-            path: '/'
+          - path: /
+            pathType: Prefix
             backend:
               service:
-                name: db-ui-adminer
+                name: platform-db-ui-adminer
                 port:
                   number: 80

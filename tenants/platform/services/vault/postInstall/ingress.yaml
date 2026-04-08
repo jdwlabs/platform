@@ -1,27 +1,25 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: grafana-ingress
-  namespace: monitoring
+  name: vault-ingress
+  namespace: vault
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-    acme.cert-manager.io/http01-edit-in-place: "true"
-    kubernetes.io/ingress.class: nginx
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - grafana.jdwlabs.com
-      secretName: grafana-tls
+        - vault.jdwlabs.com
+      secretName: vault-ui-tls
   rules:
-    - host: grafana.jdwlabs.com
+    - host: vault.jdwlabs.com
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: grafana
+                name: platform-vault-ui
                 port:
-                  number: 80
+                  number: 8200
