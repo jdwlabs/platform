@@ -4,8 +4,8 @@ metadata:
   name: db-ui-ingress
   namespace: database
   annotations:
-    nginx.ingress.kubernetes.io/backend-protocl: "HTTP"
-    cert-manager.io/cluster-issuer: 'letsencrypt-prod'
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx
   tls:
