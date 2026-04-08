@@ -11,7 +11,7 @@ spec:
   tls:
     - hosts:
         - vault.jdwlabs.com
-      secretName: vault-ui-tls
+      secretName: vault-tls
   rules:
     - host: vault.jdwlabs.com
       http:
