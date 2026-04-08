@@ -12,7 +12,7 @@ spec:
   tls:
     - hosts:
         - argocd.jdwlabs.com
-      secretName: argocd-server-tls
+      secretName: argo-cd-tls
   rules:
     - host: argocd.jdwlabs.com
       http:
