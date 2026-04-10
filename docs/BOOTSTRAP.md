@@ -39,6 +39,33 @@ All pods should be Running and Ready. Do not configure ArgoCD repositories or ap
 manifests handle everything. After Phase 2, the platform's `argo-cd` service (wave 0) will reconcile ArgoCD to the
 Helm-managed version, replacing the manually-installed manifests.
 
+### Retrieve ArgoCD admin credentials
+
+ArgoCD generates a random admin password on first install, stored in the `argocd-initial-admin-secret` Secret:
+
+```bash
+ARGOCD_PASS=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)
+echo "$ARGOCD_PASS"
+```
+
+Login via CLI (optional - not required for bootstrap, but useful for debugging):
+
+```bash
+argocd login argocd.jdwlabs.com --username admin --password "$ARGOCD_PASS"
+```
+
+Change the default password after the platform is stable:
+
+```bash
+argocd account update-password
+```
+
+After changing the password, delete the initial secret:
+
+```bash
+kubectl -n argocd delete secret argocd-initial-admin-secret
+```
+
 ## Phase 2: Apply root-app
 
 This single command starts the entire automated cascade:
