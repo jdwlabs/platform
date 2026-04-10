@@ -348,6 +348,31 @@ All `jdwlabs-*` deployment Applications should show `Synced` and `Healthy`.
 | Longhorn              | `https://longhorn.jdwlabs.com`   |
 | Kubernetes Dashboard  | `https://dashboard.jdwlabs.com`  |
 
+### Accessing Grafana
+
+The Grafana Helm chart generates a random admin password on first install, stored in the `platform-grafana` Secret:
+
+```bash
+GRAFANA_PASS=$(kubectl -n monitoring get secret platform-grafana -o jsonpath='{.data.admin-password}' | base64 -d)
+echo "$GRAFANA_PASS"
+```
+
+Login at `https://grafana.jdwlabs.com` with username `admin` and the password above.
+
+Two datasoruces are pre-configured:
+
+| Datasource | Type       | URL                             |
+|------------|------------|---------------------------------|
+| Prometheus | Prometheus | `http://prometheus-server:9000` |
+| Loki       | Loki       | `http://loki:3100`              |
+
+To change the admin password, go to **Profile > Change password** in the Grafana UI, or:
+
+```bash
+kubectl -n monitoring exec deploy/platform-grafana -- \
+  grafana cli admin reset-admin-password <new-password>
+```
+
 ### Connecting to databases via db-ui
 
 Adminer at `https://dbui.jdwlabs.com` provides browser-based access to the PostgreSQL clusters. No credentials are
@@ -411,7 +436,7 @@ the AtlasSchema ConfigMaps in `tenants/*/services/*-schemas/`.
 
 ### Re-issuing TLS certificates
 
-If the Porkbun API keys were not available when cert-manager first attempted DNS-01 validation (e.g., Vault was not yet 
+If the Porkbun API keys were not available when cert-manager first attempted DNS-01 validation (e.g., Vault was not yet
 seeded), all ingress certificates will be in a failed state. After seeding `kv/porkbun` in Phase 5, force cert-manager
 to retry by deleting the TLS secrets - cert-manager will automatically re-create them:
 
@@ -439,6 +464,7 @@ kubectl describe certificaterequest <name> -n <namespace>
 ```
 
 Common issues:
+
 - `porkbun` secret not synced - check `kubectl get externalsecret porkbun -n cert-manager`
 - ClusterIssuer not ready - check `kubectl get clusterissuer letsencrypt-prod`
 - DNS propagation delay - wait 2-5 minutes and check again
