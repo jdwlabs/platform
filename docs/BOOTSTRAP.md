@@ -384,27 +384,27 @@ CNPG creates a superuser and an app-level secret per cluster. Retrieve them with
 
 ```bash
 # Non-production superuser
-kubectl -n database get secret postgresql-cluster-non-superuser \
+kubectl -n database get secret platform-postgresql-cluster-non-superuser \
   -o jsonpath='{.data.username}' | base64 -d; echo
-kubectl -n database get secret postgresql-cluster-non-superuser \
+kubectl -n database get secret platform-postgresql-cluster-non-superuser \
   -o jsonpath='{.data.password}' | base64 -d; echo
   
 # Production superuser
-kubectl -n database get secret postgresql-cluster-prd-superuser \
+kubectl -n database get secret platform-postgresql-cluster-prd-superuser \
   -o jsonpath='{.data.username}' | base64 -d; echo
-kubectl -n database get secret postgresql-cluster-prd-superuser \
+kubectl -n database get secret platform-postgresql-cluster-prd-superuser \
   -o jsonpath='{.data.password}' | base64 -d; echo
  
 # Non-production app-level credentials (used by application pods) 
-kubectl -n database get secret postgresql-cluster-non-app \
+kubectl -n database get secret platform-postgresql-cluster-non-app \
   -o jsonpath='{.data.username}' | base64 -d; echo
-kubectl -n database get secret postgresql-cluster-non-app \
+kubectl -n database get secret platform-postgresql-cluster-non-app \
   -o jsonpath='{.data.password}' | base64 -d; echo
   
 # Production app-level credentials (used by application pods) 
-kubectl -n database get secret postgresql-cluster-prd-app \
+kubectl -n database get secret platform-postgresql-cluster-prd-app \
   -o jsonpath='{.data.username}' | base64 -d; echo
-kubectl -n database get secret postgresql-cluster-prd-app \
+kubectl -n database get secret platform-postgresql-cluster-prd-app \
   -o jsonpath='{.data.password}' | base64 -d; echo
 ```
 
@@ -412,13 +412,13 @@ kubectl -n database get secret postgresql-cluster-prd-app \
 
 Open `https://dbui.jdwlabs.com` and fill in:
 
-| Field    | Non-production                           | Production                               |
-|----------|------------------------------------------|------------------------------------------|
-| System   | PostgreSQL                               | PostgreSQL                               |
-| Server   | `postgresql-cluster-non-rw.database.svc` | `postgresql-cluster-prd-rw.database.svc` |
-| Username | *(from superuser or app secret above)*   | *(from superuser or app secret above)*   |
-| Password | *(from secret above)*                    | *(from secret above)*                    |
-| Database | `jdwlabs_non` / `dotablazetech_non`      | `jdwlabs_prd` / `dotablazetech_prd`      |
+| Field    | Non-production                                    | Production                                        |
+|----------|---------------------------------------------------|---------------------------------------------------|
+| System   | PostgreSQL                                        | PostgreSQL                                        |
+| Server   | `platform-postgresql-cluster-non-rw.database.svc` | `platform-postgresql-cluster-prd-rw.database.svc` |
+| Username | *(from superuser or app secret above)*            | *(from superuser or app secret above)*            |
+| Password | *(from secret above)*                             | *(from secret above)*                             |
+| Database | `jdwlabs_non` / `dotablazetech_non`               | `jdwlabs_prd` / `dotablazetech_prd`               |
 
 Read-only endpoints are also available at `postgresql-cluster-{non,prd}-ro.database.svc`.
 
