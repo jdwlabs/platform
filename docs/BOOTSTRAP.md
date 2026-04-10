@@ -338,10 +338,110 @@ All `jdwlabs-*` deployment Applications should show `Synced` and `Healthy`.
 
 ### Platform UIs
 
-| Service | URL                          |
-|---------|------------------------------|
-| ArgoCD  | `https://argocd.jdwlabs.com` |
-| Vault   | `https://vault.jdwlabs.com`  |
+| Service               | URL                              |
+|-----------------------|----------------------------------|
+| ArgoCD                | `https://argocd.jdwlabs.com`     |
+| Vault                 | `https://vault.jdwlabs.com`      |
+| Database UI (Adminer) | `https://dbui.jdwlabs.com`       |
+| Grafana               | `https://grafana.jdwlabs.com`    |
+| Prometheus            | `https://prometheus.jdwlabs.com` |
+| Longhorn              | `https://longhorn.jdwlabs.com`   |
+| Kubernetes Dashboard  | `https://dashboard.jdwlabs.com`  |
+
+### Connecting to databases via db-ui
+
+Adminer at `https://dbui.jdwlabs.com` provides browser-based access to the PostgreSQL clusters. No credentials are
+pre-configured - you supply them on the login page.
+
+**1. Get cluster credentials**
+
+CNPG creates a superuser and an app-level secret per cluster. Retrieve them with:
+
+```bash
+# Non-production superuser
+kubectl -n database get secret postgresql-cluster-non-superuser \
+  -o jsonpath='{.data.username}' | base64 -d; echo
+kubectl -n database get secret postgresql-cluster-non-superuser \
+  -o jsonpath='{.data.password}' | base64 -d; echo
+  
+# Production superuser
+kubectl -n database get secret postgresql-cluster-prd-superuser \
+  -o jsonpath='{.data.username}' | base64 -d; echo
+kubectl -n database get secret postgresql-cluster-prd-superuser \
+  -o jsonpath='{.data.password}' | base64 -d; echo
+ 
+# Non-production app-level credentials (used by application pods) 
+kubectl -n database get secret postgresql-cluster-non-app \
+  -o jsonpath='{.data.username}' | base64 -d; echo
+kubectl -n database get secret postgresql-cluster-non-app \
+  -o jsonpath='{.data.password}' | base64 -d; echo
+  
+# Production app-level credentials (used by application pods) 
+kubectl -n database get secret postgresql-cluster-prd-app \
+  -o jsonpath='{.data.username}' | base64 -d; echo
+kubectl -n database get secret postgresql-cluster-prd-app \
+  -o jsonpath='{.data.password}' | base64 -d; echo
+```
+
+**2. Login to Adminer**
+
+Open `https://dbui.jdwlabs.com` and fill in:
+
+| Field    | Non-production                           | Production                               |
+|----------|------------------------------------------|------------------------------------------|
+| System   | PostgreSQL                               | PostgreSQL                               |
+| Server   | `postgresql-cluster-non-rw.database.svc` | `postgresql-cluster-prd-rw.database.svc` |
+| Username | *(from superuser or app secret above)*   | *(from superuser or app secret above)*   |
+| Password | *(from secret above)*                    | *(from secret above)*                    |
+| Database | `jdwlabs_non` / `dotablazetech_non`      | `jdwlabs_prd` / `dotablazetech_prd`      |
+
+Read-only endpoints are also available at `postgresql-cluster-{non,prd}-ro.database.svc`.
+
+**3. Available databases**
+
+| Cluster                  | Database            | Schemas  | Owner          |
+|--------------------------|---------------------|----------|----------------|
+| `postgresql-cluster-non` | `jdwlabs_non`       | `auth`   | jdwlabs        |
+| `postgresql-cluster-non` | `dotablazetech_non` | `public` | dotablaze-tech |
+| `postgresql-cluster-prd` | `jdwlabs_prd`       | `auth`   | jdwlabs        |
+| `postgresql-cluster-prd` | `dotablazetech_prd` | `public` | dotablaze-tech |
+
+Schema migrations are managed by the Atlas operator (wave 5). Do not manually alter tables - changes should go through
+the AtlasSchema ConfigMaps in `tenants/*/services/*-schemas/`.
+
+### Re-issuing TLS certificates
+
+If the Porkbun API keys were not available when cert-manager first attempted DNS-01 validation (e.g., Vault was not yet 
+seeded), all ingress certificates will be in a failed state. After seeding `kv/porkbun` in Phase 5, force cert-manager
+to retry by deleting the TLS secrets - cert-manager will automatically re-create them:
+
+```bash
+kubectl delete secret argo-cd-tls -n argocd
+kubectl delete secret secret db-ui-tls -n database
+kubectl delete secret grafana-tls -n monitoring
+kubectl delete secret kubernetes-dashboard-tls -n kubernetes-dashboard
+kubectl delete secret longhorn-tls -n longhorn-system
+kubectl delete secret prometheus-tls -n monitoring
+kubectl delete secret vault-tls -n vault
+```
+
+Verify certificates are re-issued:
+
+```bash
+kubectl get certificates -A
+```
+
+All should show `Ready: True` within a few minutes. If any remain `False`, check the certificate request:
+
+```bash
+kubectl get certificate request -A
+kubectl describe certificaterequest <name> -n <namespace>
+```
+
+Common issues:
+- `porkbun` secret not synced - check `kubectl get externalsecret porkbun -n cert-manager`
+- ClusterIssuer not ready - check `kubectl get clusterissuer letsencrypt-prod`
+- DNS propagation delay - wait 2-5 minutes and check again
 
 ## Dependency Chain
 
