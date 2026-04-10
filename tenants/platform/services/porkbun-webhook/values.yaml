@@ -2,7 +2,7 @@ groupName: jdwlabs.com
 
 certManager:
   namespace: cert-manager
-  serviceAccountName: cert-manager
+  serviceAccountName: platform-cert-manager
 
 image:
   repository: ghcr.io/mdonoughe/porkbun-webhook
