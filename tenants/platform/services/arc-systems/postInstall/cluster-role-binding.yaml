@@ -8,5 +8,5 @@ roleRef:
   name: role-creator
 subjects:
   - kind: ServiceAccount
-    name: arc-systems-gha-rs-controller
+    name: platform-arc-systems-gha-rs-controller
     namespace: arc-systems

@@ -26,7 +26,7 @@ alloy-singleton:
 destinations:
   - name: Loki
     type: loki
-    url: "http://loki:3100/loki/api/v1/push"
+    url: "http://platform-loki:3100/loki/api/v1/push"
   - name: Prometheus
     type: prometheus
-    url: "http://prometheus-server:9090/api/v1/write"
+    url: "http://platform-prometheus-server:9090/api/v1/write"

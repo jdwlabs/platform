@@ -20,6 +20,11 @@ _platform:
   repoURL: https://github.com/jdwlabs/platform.git
   revision: main
 
+_arc:
+  controllerServiceAccount:
+    name: platform-arc-systems-gha-rs-controller
+    namespace: arc-systems
+
 _quotaTiers:
   small:
     requests.cpu: "1"

@@ -2,3 +2,33 @@
 #  storage:
 #    size: 6Gi
 #    storageClass: "openebs-single-replica"
+
+externalClusters: []
+
+cluster:
+  roles:
+    - name: jdwlabs_prd_owner
+      ensure: present
+      login: true
+      comment: "Owner of jdwlabs_prd database"
+      passwordSecret:
+        name: jdwlabs-prd-owner-credentials
+
+    - name:
+      ensure: present
+      login: true
+      comment: "Owner of dotablazetech_prd database"
+      passwordSecret:
+        name: dotablazetech-prd-owner-credentials
+
+databases:
+  - name: jdwlabs_prd
+    ensure: present
+    owner: jdwlabs_prd_owner
+    schemas:
+      - name: auth
+        owner: jdwlabs_prd_owner
+        ensure: present
+  - name:
+    ensure: present
+    owner: dotablazetech_prd_owner

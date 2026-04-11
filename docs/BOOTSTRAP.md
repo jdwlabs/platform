@@ -274,7 +274,8 @@ kubectl exec -n vault platform-vault-0 -- sh -c \
     token=<discord-bot-token>"
 ```
 
-CNPG-generated secrets (`postgresql-cluster-non-app`, `postgresql-cluster-prd-app`) are created automatically by the
+CNPG-generated secrets (`platform-postgresql-cluster-non-app`, `platform-postgresql-cluster-prd-app`) are created
+automatically by the
 CNPG operator and read via the Kubernetes SecretStore - no manual seeding needed.
 
 To discover all ExternalSecret Vault paths in the codebase:
@@ -326,7 +327,16 @@ Runners should appear in each GitHub org's Settings > Actions > runners within a
 kubectl get cluster -n database
 ```
 
-Both `postgresql-cluster-non` and `postgresql-cluster-prd` should show `Cluster in healthy state`.
+Both `platform-postgresql-cluster-non` and `platform-postgresql-cluster-prd` should show `Cluster in healthy state`.
+
+Verify tenant databases were created automatically:
+
+```bash
+kubectl get databases -n database
+```
+
+Expected databases: `jdwlabs_non`, `dotablazetech_non` (non cluster), `jdwlabs_prd`, `dotablazetech_prd` (prd cluster).
+These are declared in the CNPG cluster values and managed by the `Database` CRD - no manual creation needed.
 
 ### Tenant deployments
 
@@ -359,12 +369,12 @@ echo "$GRAFANA_PASS"
 
 Login at `https://grafana.jdwlabs.com` with username `admin` and the password above.
 
-Two datasoruces are pre-configured:
+Two datasources are pre-configured:
 
-| Datasource | Type       | URL                             |
-|------------|------------|---------------------------------|
-| Prometheus | Prometheus | `http://prometheus-server:9000` |
-| Loki       | Loki       | `http://loki:3100`              |
+| Datasource | Type       | URL                                      |
+|------------|------------|------------------------------------------|
+| Prometheus | Prometheus | `http://platform-prometheus-server:9000` |
+| Loki       | Loki       | `http://platform-loki:3100`              |
 
 To change the admin password, go to **Profile > Change password** in the Grafana UI, or:
 
@@ -420,19 +430,21 @@ Open `https://dbui.jdwlabs.com` and fill in:
 | Password | *(from secret above)*                             | *(from secret above)*                             |
 | Database | `jdwlabs_non` / `dotablazetech_non`               | `jdwlabs_prd` / `dotablazetech_prd`               |
 
-Read-only endpoints are also available at `postgresql-cluster-{non,prd}-ro.database.svc`.
+Read-only endpoints are also available at `platform-postgresql-cluster-{non,prd}-ro.database.svc`.
 
 **3. Available databases**
 
-| Cluster                  | Database            | Schemas  | Owner          |
-|--------------------------|---------------------|----------|----------------|
-| `postgresql-cluster-non` | `jdwlabs_non`       | `auth`   | jdwlabs        |
-| `postgresql-cluster-non` | `dotablazetech_non` | `public` | dotablaze-tech |
-| `postgresql-cluster-prd` | `jdwlabs_prd`       | `auth`   | jdwlabs        |
-| `postgresql-cluster-prd` | `dotablazetech_prd` | `public` | dotablaze-tech |
+| Cluster                           | Database            | Schemas  | Owner          | Owner Role                |
+|-----------------------------------|---------------------|----------|----------------|---------------------------|
+| `platform-postgresql-cluster-non` | `jdwlabs_non`       | `auth`   | jdwlabs        | `jdwlabs_non_owner`       |
+| `platform-postgresql-cluster-non` | `dotablazetech_non` | `public` | dotablaze-tech | `dotablazetech_non_owner` |
+| `platform-postgresql-cluster-prd` | `jdwlabs_prd`       | `auth`   | jdwlabs        | `jdwlabs_prd_owner`       |
+| `platform-postgresql-cluster-prd` | `dotablazetech_prd` | `public` | dotablaze-tech | `dotablazetech_prd_owner` |
 
-Schema migrations are managed by the Atlas operator (wave 5). Do not manually alter tables - changes should go through
-the AtlasSchema ConfigMaps in `tenants/*/services/*-schemas/`.
+Databases and owner roles are declared in the CNPG cluster values (`postgresql-cluster-{non,prd}/values.yaml`) and
+created automatically via the CNPG `Database` CRD at wave 4. Schema migrations are managed by the Atlas operator
+(wave 5). Do not manually alter tables or databases - changes should go through CNPG values for databases/roles and
+AtlasSchema ConfigMaps in `tenants/*/services/*-schemas/` for DDL.
 
 ### Re-issuing TLS certificates
 
@@ -442,7 +454,7 @@ to retry by deleting the TLS secrets - cert-manager will automatically re-create
 
 ```bash
 kubectl delete secret argo-cd-tls -n argocd
-kubectl delete secret secret db-ui-tls -n database
+kubectl delete secret db-ui-tls -n database
 kubectl delete secret grafana-tls -n monitoring
 kubectl delete secret kubernetes-dashboard-tls -n kubernetes-dashboard
 kubectl delete secret longhorn-tls -n longhorn-system
@@ -459,7 +471,7 @@ kubectl get certificates -A
 All should show `Ready: True` within a few minutes. If any remain `False`, check the certificate request:
 
 ```bash
-kubectl get certificate request -A
+kubectl get certificaterequest -A
 kubectl describe certificaterequest <name> -n <namespace>
 ```
 
