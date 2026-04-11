@@ -7,12 +7,12 @@ metadata:
 spec:
   credentials:
     scheme: postgres
-    host: postgresql-cluster-non-rw.database.svc
+    host: platform-postgresql-cluster-non-rw.database.svc
     user: postgres
     passwordFrom:
       secretKeyRef:
         key: password
-        name: postgresql-cluster-non-superuser
+        name: platform-postgresql-cluster-non-superuser
     database: jdwlabs_non
     port: 5432
     parameters:

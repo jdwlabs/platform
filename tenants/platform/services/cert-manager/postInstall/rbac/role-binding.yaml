@@ -9,5 +9,5 @@ roleRef:
   name: porkbun-webhook-role
 subjects:
   - kind: ServiceAccount
-    name: porkbun-webhook
+    name: platform-porkbun-webhook
     namespace: porkbun-webhook
