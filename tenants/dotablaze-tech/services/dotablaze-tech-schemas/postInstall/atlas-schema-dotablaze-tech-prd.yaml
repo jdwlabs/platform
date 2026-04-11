@@ -7,12 +7,12 @@ metadata:
 spec:
   credentials:
     scheme: postgres
-    host: postgresql-cluster-prd-rw.database.svc
+    host: platform-postgresql-cluster-prd-rw.database.svc
     user: postgres
     passwordFrom:
       secretKeyRef:
         key: password
-        name: postgresql-cluster-prd-superuser
+        name: platform-postgresql-cluster-prd-superuser
     database: dotablazetech_prd
     port: 5432
     parameters:

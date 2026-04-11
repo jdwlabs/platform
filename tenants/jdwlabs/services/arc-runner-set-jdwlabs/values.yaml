@@ -370,7 +370,7 @@ template:
 ## Note: if your controller is installed to only watch a single namespace, you have to pass these values explicitly.
 controllerServiceAccount:
   namespace: arc-systems
-  name: gha-rs-controller
+  name: platform-arc-systems-gha-rs-controller
 
 # Overrides the default `.Release.Namespace` for all resources in this chart.
 namespaceOverride: ""

@@ -24,8 +24,8 @@ metadata:
   namespace: {{ .name }}
 subjects:
   - kind: ServiceAccount
-    name: arc-systems-gha-rs-controller
-    namespace: arc-systems
+    name: {{ .Values._arc.controllerServiceAccount.name }}
+    namespace: {{ .Values._arc.controllerServiceAccount.namespace }}
 roleRef:
   kind: Role
   name: gha-runner-scale-set-controller-secrets
