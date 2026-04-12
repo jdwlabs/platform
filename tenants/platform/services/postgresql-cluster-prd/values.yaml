@@ -14,7 +14,7 @@ cluster:
       passwordSecret:
         name: jdwlabs-prd-owner-credentials
 
-    - name:
+    - name: dotablazetech_prd_owner
       ensure: present
       login: true
       comment: "Owner of dotablazetech_prd database"
@@ -29,6 +29,6 @@ databases:
       - name: auth
         owner: jdwlabs_prd_owner
         ensure: present
-  - name:
+  - name: dotablazetech_prd
     ensure: present
     owner: dotablazetech_prd_owner
