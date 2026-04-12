@@ -275,8 +275,7 @@ kubectl exec -n vault platform-vault-0 -- sh -c \
 ```
 
 CNPG-generated secrets (`platform-postgresql-cluster-non-app`, `platform-postgresql-cluster-prd-app`) are created
-automatically by the
-CNPG operator and read via the Kubernetes SecretStore - no manual seeding needed.
+automatically by the CNPG operator and read via the Kubernetes SecretStore - no manual seeding needed.
 
 To discover all ExternalSecret Vault paths in the codebase:
 
