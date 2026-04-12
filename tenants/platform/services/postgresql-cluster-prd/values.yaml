@@ -10,6 +10,8 @@ cluster:
     - name: jdwlabs_prd_owner
       ensure: present
       login: true
+      inherit: true
+      connectionLimit: -1
       comment: "Owner of jdwlabs_prd database"
       passwordSecret:
         name: jdwlabs-prd-owner-credentials
@@ -17,6 +19,8 @@ cluster:
     - name: dotablazetech_prd_owner
       ensure: present
       login: true
+      inherit: true
+      connectionLimit: -1
       comment: "Owner of dotablazetech_prd database"
       passwordSecret:
         name: dotablazetech-prd-owner-credentials
