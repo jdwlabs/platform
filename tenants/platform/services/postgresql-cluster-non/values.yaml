@@ -14,7 +14,7 @@ cluster:
       passwordSecret:
         name: jdwlabs-non-owner-credentials
 
-    - name:
+    - name: dotablazetech_non_owner
       ensure: present
       login: true
       comment: "Owner of dotablazetech_non database"
@@ -29,6 +29,6 @@ databases:
       - name: auth
         owner: jdwlabs_non_owner
         ensure: present
-  - name:
+  - name: dotablazetech_non
     ensure: present
     owner: dotablazetech_non_owner
