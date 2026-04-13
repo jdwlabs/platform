@@ -128,7 +128,7 @@ services:
     repo: https://charts.external-secrets.io
     revision: 0.19.2
     namespace: external-secrets
-    postInstall: false
+    postInstall: true
     syncWave: 2
 
   - name: vault
