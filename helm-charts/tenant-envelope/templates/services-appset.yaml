@@ -21,7 +21,7 @@ spec:
       ignoreDifferences:
         - group: apps
           kind: StatefulSet
-          jqPathExpresssions:
+          jqPathExpressions:
             - .spec.persistentVolumeClaimRetentionPolicy
             - .spec.podManagementPolicy
             - .spec.updateStrategy
@@ -29,7 +29,7 @@ spec:
             - .spec.volumeClaimTemplates[]?.status
         - group: apps
           kind: Deployment
-          jqPathExpresssions:
+          jqPathExpressions:
             - .spec.template.metadata.annotations."checksum/secret"
       syncPolicy:
         automated:
