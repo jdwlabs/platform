@@ -461,7 +461,7 @@ to retry by deleting the TLS secrets - cert-manager will automatically re-create
 kubectl delete secret argo-cd-tls -n argocd
 kubectl delete secret db-ui-tls -n database
 kubectl delete secret grafana-tls -n monitoring
-kubectl delete secret kubernetes-dashboard-tls -n kubernetes-dashboard
+kubectl delete secret headlamp-tls -n headlamp
 kubectl delete secret longhorn-tls -n longhorn-system
 kubectl delete secret prometheus-tls -n monitoring
 kubectl delete secret vault-tls -n vault

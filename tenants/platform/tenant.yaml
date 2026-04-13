@@ -33,7 +33,7 @@ namespaces:
   - name: monitoring
     quotaTier: platform
     networkPolicy: platform
-  - name: kubernetes-dashboard
+  - name: headlamp
     quotaTier: platform
     networkPolicy: platform
   - name: atlas
