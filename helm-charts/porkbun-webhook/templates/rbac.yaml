@@ -52,6 +52,48 @@ subjects:
     name: {{ include "porkbun-webhook.fullname" . }}
     namespace: {{ .Release.Namespace }}
 ---
+# Grant the webhook permission to read secrets in the cert-manager namespace.
+# Required to read the porkbun API credentials secret for DNS-01 challenges.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "porkbun-webhook.fullname" . }}:secret-reader
+  namespace: {{ .Values.certManager.namespace }}
+  labels:
+    app: {{ include "porkbun-webhook.name" . }}
+    chart: {{ include "porkbun-webhook.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "porkbun-webhook.fullname" . }}:secret-reader
+  namespace: {{ .Values.certManager.namespace }}
+  labels:
+    app: {{ include "porkbun-webhook.name" . }}
+    chart: {{ include "porkbun-webhook.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "porkbun-webhook.fullname" . }}:secret-reader
+subjects:
+  - apiGroup: ""
+    kind: ServiceAccount
+    name: {{ include "porkbun-webhook.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+---
 # Grant cert-manager permission to validate using our apiserver
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
