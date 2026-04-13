@@ -18,6 +18,19 @@ spec:
         argocd.argoproj.io/sync-wave: '{{ "{{" }} .syncWave | toString {{ "}}" }}'
     spec:
       project: tenant-{{ .Values.name }}
+      ignoreDifferences:
+        - group: apps
+          kind: StatefulSet
+          jqPathExpresssions:
+            - .spec.persistentVolumeClaimRetentionPolicy
+            - .spec.podManagementPolicy
+            - .spec.updateStrategy
+            - .spec.volumeClaimTemplates[]?.spec.volumeMode
+            - .spec.volumeClaimTemplates[]?.status
+        - group: apps
+          kind: Deployment
+          jqPathExpresssions:
+            - .spec.template.metadata.annotations."checksum/secret"
       syncPolicy:
         automated:
           prune: true
@@ -26,6 +39,7 @@ spec:
           - CreateNamespace=false
           - PruneLast=true
           - ServerSideApply=true
+          - RespectIgnoreDifferences=true
       destination:
         namespace: '{{ "{{" }} .namespace {{ "}}" }}'
         server: https://kubernetes.default.svc
