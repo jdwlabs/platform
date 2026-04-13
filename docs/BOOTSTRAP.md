@@ -111,13 +111,13 @@ Each governance Application renders the `tenant-envelope` Helm chart, which crea
 
 Platform services then deploy in sync wave order:
 
-| Wave | What deploys                                                                     |
-|------|----------------------------------------------------------------------------------|
-| 0    | argo-cd (self-management)                                                        |
-| 1    | cert-manager, porkbun-webhook, ingress-nginx, longhorn                           |
-| 2    | vault, external-secrets, vault-config-operator, monitoring stack, atlas-operator |
-| 3    | cnpg-operator, arc-systems                                                       |
-| 4    | postgresql clusters, db-ui                                                       |
+| Wave | What deploys                                                                                             |
+|------|----------------------------------------------------------------------------------------------------------|
+| 0    | argo-cd (self-management)                                                                                |
+| 1    | cert-manager, porkbun-webhook, ingress-nginx, longhorn                                                   |
+| 2    | vault, external-secrets (+ ClusterSecretStores), vault-config-operator, monitoring stack, atlas-operator |
+| 3    | cnpg-operator, arc-systems                                                                               |
+| 4    | postgresql clusters, db-ui                                                                               |
 
 Watch sync progress:
 
@@ -166,7 +166,8 @@ kubectl exec -n vault platform-vault-0 -- vault operator unseal "$UNSEAL_KEY"
 ### 4.4 Create Kubernetes secrets
 
 These secrets are consumed by the `vault-auto-unseal` CronJob, the `vault-admin-initializer` Job, and the
-`ClusterSecretStore`.
+`vault` ClusterSecretStore. Only two secrets are needed - both ClusterSecretStores (`vault` and `k8s-secret-store`)
+are managed by the platform and require no per-tenant setup.
 
 ```bash
 # Unseal key - vault-auto-unseal CronJob (runs every 2 min)
@@ -179,11 +180,14 @@ kubectl create secret generic vault-token \
   -n vault \
   --from-literal=token="$ROOT_TOKEN"
 
-# Root token - ClusterSecretStore (for External Secrets Operator)
+# Root token - vault ClusterSecretStore (used by all ExternalSecrets cluster-wide)
 kubectl create secret generic vault-token \
   -n external-secrets \
   --from-literal=token="$ROOT_TOKEN"
 ```
+
+No `vault-token` secrets are needed in tenant namespaces - all tenants use the platform-managed
+`vault` ClusterSecretStore which reads from the single token in `external-secrets`.
 
 ### 4.5 Enable KV secrets engine
 
@@ -209,13 +213,15 @@ The `vault-auto-unseal` CronJob runs every 2 minutes to re-unseal after pod rest
 kubectl get cronjob vault-auto-unseal -n vault
 ```
 
-Verify the ClusterSecretStore is ready:
+Verify the ClusterSecretStores are ready:
 
 ```bash
 kubectl get clustersecretstore vault
+kubectl get clustersecretstore k8s-secret-store
 ```
 
-Expected: status shows `Valid`.
+Both should show status `Valid`. The `vault` store reads from Vault KV v2, and `k8s-secret-store` reads
+Kubernetes secrets from the `database` namespace (CNPG-generated credentials).
 
 ## Phase 5: Seed Vault secrets
 
@@ -495,21 +501,23 @@ Kubernetes cluster ready
                  |
                  +-- Wave 1: cert-manager, ingress-nginx, Longhorn
                  |
-                 +-- Wave 2: Vault deployed (sealed)
+                 +-- Wave 2: Vault + ESO deployed (+ ClusterSecretStores)
                  |    |
                  |    +-- Vault initialized + secrets created (Phase 4)  <-- MANUAL
                  |         |
-                 |         +-- ClusterSecretStore becomes Valid
+                 |         +-- vault ClusterSecretStore becomes Valid
+                 |         +-- k8s-secret-store ClusterSecretStore becomes Valid
                  |              |
                  |              +-- Vault KV paths seeded (Phase 5)  <-- MANUAL
                  |                   |
-                 |                   +-- ExternalSecrets resolve
+                 |                   +-- ExternalSecrets resolve (all tenants, no per-ns setup)
                  |                   |    +-- cert-manager ClusterIssuers --> TLS certs
                  |                   |    +-- Longhorn ingress auth
                  |                   |    +-- ARC runners register with GitHub
                  |                   |
                  |                   +-- Tenant deployment apps resolve
-                 |                        +-- usersrole JWT secret
+                 |                        +-- usersrole JWT secret (via vault ClusterSecretStore)
+                 |                        +-- DB credentials (via k8s-secret-store ClusterSecretStore)
                  |
                  +-- Wave 3: CNPG operator, ARC controller
                  |
