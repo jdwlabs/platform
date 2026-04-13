@@ -361,7 +361,7 @@ All `jdwlabs-*` deployment Applications should show `Synced` and `Healthy`.
 | Grafana               | `https://grafana.jdwlabs.com`    |
 | Prometheus            | `https://prometheus.jdwlabs.com` |
 | Longhorn              | `https://longhorn.jdwlabs.com`   |
-| Kubernetes Dashboard  | `https://dashboard.jdwlabs.com`  |
+| Headlamp              | `https://dashboard.jdwlabs.com`  |
 
 ### Accessing Grafana
 

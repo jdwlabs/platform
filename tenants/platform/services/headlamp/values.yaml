@@ -1,0 +1,3 @@
+clusterRoleBinding:
+  create: true
+  clusterRoleName: cluster-admin
