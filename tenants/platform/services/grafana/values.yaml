@@ -1,3 +1,5 @@
+revisionHistoryLimit: 1
+
 admin:
   existingSecret: grafana-admin-credentials
   userKey: admin-user
