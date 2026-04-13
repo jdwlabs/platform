@@ -237,6 +237,12 @@ kubectl exec -n vault platform-vault-0 -- sh -c \
     api-key=<porkbun-api-key> \
     secret-key=<porkbun-secret-key>"
 
+# Grafana admin credentials
+kubectl exec -n vault platform-vault-0 -- sh -c \
+  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/grafana \
+    admin-user=admin \
+    admin-password=<grafana-admin-password>"
+
 # Longhorn UI basic auth
 kubectl exec -n vault platform-vault-0 -- sh -c \
   "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/longhorn \
