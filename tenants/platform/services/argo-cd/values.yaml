@@ -1,3 +1,18 @@
+configs:
+  cm:
+    # Local account for MCP/API integration (apiKey only, no UI login)
+    accounts.claude-mcp: apiKey
+  rbac:
+    policy.csv: |
+      p, role:readonly, applications, get, */*, allow
+      p, role:readonly, applications, list, */*, allow
+      p, role:readonly, clusters, get, *, allow
+      p, role:readonly, projects, get, *, allow
+      p, role:readonly, repositories, get, *, allow
+      p, role:readonly, logs, get, */*, allow
+      p, role:readonly, exec, create, */*, deny
+      g, claude-mcp, role:readonly
+
 server:
   service:
     type: ClusterIP
