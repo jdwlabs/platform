@@ -1,17 +1,16 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: kubernetes-dashboard-ingress
-  namespace: kubernetes-dashboard
+  name: headlamp-ingress
+  namespace: headlamp
   annotations:
-    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx
   tls:
     - hosts:
         - dashboard.jdwlabs.com
-      secretName: kubernetes-dashboard-tls
+      secretName: headlamp-tls
   rules:
     - host: dashboard.jdwlabs.com
       http:
@@ -20,6 +19,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: platform-kubernetes-dashboard-kong-proxy
+                name: platform-headlamp
                 port:
-                  number: 443
+                  number: 80
