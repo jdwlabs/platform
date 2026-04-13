@@ -1,4 +1,4 @@
-revisionHistoryLimit: 1
+revisionHistoryLimit: 0
 
 admin:
   existingSecret: grafana-admin-credentials
