@@ -26,6 +26,8 @@ spec:
             - .spec.podManagementPolicy
             - .spec.updateStrategy
             - .spec.template.metadata.annotations
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
             - .spec.volumeClaimTemplates[]?.spec.volumeMode
             - .spec.volumeClaimTemplates[]?.status
         - group: apps
