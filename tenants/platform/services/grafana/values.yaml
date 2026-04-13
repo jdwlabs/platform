@@ -1,3 +1,8 @@
+admin:
+  existingSecret: grafana-admin-credentials
+  userKey: admin-user
+  passwordKey: admin-password
+
 datasources:
   datasources.yaml:
     datasources:
