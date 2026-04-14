@@ -6,6 +6,16 @@
 externalClusters: []
 
 cluster:
+  monitoring:
+    enablePodMonitor: true
+
+  initdb:
+    postInitSQL:
+      - ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON TABLES TO app;
+      - ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON SEQUENCES TO app;
+      - ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO app;
+      - ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO app;
+
   roles:
     - name: jdwlabs_non_owner
       ensure: present
@@ -24,6 +34,16 @@ cluster:
       comment: "Owner of dotablazetech_non database"
       passwordSecret:
         name: dotablazetech-non-owner-credentials
+
+    - name: app
+      ensure: present
+      login: true
+      inherit: true
+      connectionLimit: -1
+      comment: "Application user with inherited access to all tenant databases"
+      inRoles:
+        - jdwlabs_non_owner
+        - dotablazetech_non_owner
 
 databases:
   - name: jdwlabs_non
