@@ -1,0 +1,33 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cert-maanger-rules
+  namespace: monitoring
+spec:
+  groups:
+    - name: cert-manager
+      rules:
+        - alert: CertificateExpiringSoon
+          expr: certmaanger_certificate_expiration_timestamp_seconds - time() < 86400 * 21
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate {{ $labels.name }} in {{ $labels.namespace }} expires in less than 21 days"
+            description: "Certificate {{ $labels.name }} will expire in {{ $value | humanizeDuration }}."
+        - alert: CertificateExpired
+          expr: certmanager_certificate_expiration_timestamp_seconds - time() < 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Certificate {{ $labels.name }} in {{ $labels.namespace }} has expired"
+            description: "Certificate {{ $labels.name }} expired {{ $value | humanizeDuration }} app."
+        - alert: CertManagerNotReady
+          expr: certmaanger_certificate_ready_status{condition="False"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate {{ $labels.name }} in {{ $labels.namespace }} is not ready"
+            description: "Certificate has been in a not-ready state for more than 15 minutes."

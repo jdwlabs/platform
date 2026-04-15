@@ -1,0 +1,33 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cnpg-rules
+  namespace: monitoring
+spec:
+  groups:
+    - name: cnpg
+      rules:
+        - alert: CNPGClusterDown
+          expr: cnpg_pg_up == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "CNPG instance {{ $labels.pod }} in cluster {{ $labels.cnpg_io_cluster }} is down"
+            description: "The PostgreSQL instance has been unreachable for more than 1 minute."
+        - alert: CNPGReplicationLag
+          expr: cnpg_pg_replication_lag > 30
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CNPG replication lag > 30s on {{ $labels.pod }}"
+            description: "Replication lag is {{ $value }}s on instance {{ $labels.pod }}."
+        - alert: CNPGLongRunningTransaction
+          expr: cnpg_pg_long_running_transactions > 300
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Long-running transaction on {{ $labels.pod }}"
+            description: "A transaction has been running for over 5 minutes on {{ $labels.pod }}."
