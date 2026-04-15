@@ -1,0 +1,32 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: argocd-rules
+  namespace: monitoring
+spec:
+  groups:
+    - name: argocd
+      rules:
+        - alert: ArgoCDAppNotSynced
+          expr: argocd_app_info{sync_status!="Synced"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ArgoCD app {{ $label.name }} is not synced"
+            description: "Application {{ $label.name }} has sync status {{ $label.sync_status }} for more than 15 minutes."
+        - alert: ArgoCDAppUnhealthy
+          expr: argocd_app_info{health_status!~"Healthy|Progressing"} == 1
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "ArgoCD app {{ $labels.name }} is {{ $labels.health_status }}"
+            description: "Application {{ $labels.name }} has been unhealthy for more than 10 minutes."
+        - alert: ArgoCDSyncFailing
+          expr: increase(argocd_app_sync_total{phase!="Succeeded")[15m]) > 3
+          labels:
+            severity: warning
+          annotations:
+            summary: "ArgoCD app {{ $labels.name }} sync is repeatedly failing"
+            description: "Application {{ $labels.name }} has had more than 3 failed syncs in the last 15 minutes."

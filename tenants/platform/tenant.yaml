@@ -111,7 +111,7 @@ services:
     repo: https://kubernetes.github.io/ingress-nginx
     revision: 4.13.2
     namespace: ingress-nginx
-    postInstall: false
+    postInstall: true
     syncWave: 1
 
   - name: longhorn
@@ -176,13 +176,13 @@ services:
     repo: https://grafana.github.io/helm-charts
     revision: 6.38.0
     namespace: monitoring
-    postInstall: false
+    postInstall: true
     syncWave: 2
 
-  - name: prometheus
-    chart: prometheus
+  - name: kube-prometheus-stack
+    chart: kube-prometheus-stack
     repo: https://prometheus-community.github.io/helm-charts
-    revision: 27.32.0
+    revision: "69.4.0"
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -209,7 +209,7 @@ services:
     repo: https://cloudnative-pg.github.io/charts
     revision: 0.26.1
     namespace: cnpg-system
-    postInstall: false
+    postInstall: true
     syncWave: 3
 
   - name: arc-systems

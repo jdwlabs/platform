@@ -5,18 +5,34 @@ admin:
   userKey: admin-user
   passwordKey: admin-password
 
+sidecar:
+  dashboards:
+    enabled: true
+    label: grafana_dashboard
+    labelValue: "1"
+    searchNamespace: ALL
+    provider:
+      foldersFromFilesStructure: true
+
 datasources:
   datasources.yaml:
+    apiVersion: 1
     datasources:
       - name: Prometheus
         type: prometheus
         access: proxy
-        url: http://platform-prometheus-server:9090
+        url: http://platform-kube-prometheus-stack-prometheus:9090
         isDefault: true
       - name: Loki
         type: loki
         access: proxy
         url: http://platform-loki:3100
+      - name: Alertmanager
+        type: alertmanager
+        access: proxy
+        url: http://platform-kube-prometheus-stack-alertmanager:9093
+        jsonData:
+          implementation: prometheus
 
 persistence:
   enabled: true

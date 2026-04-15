@@ -23,10 +23,17 @@ alloy-metrics:
 alloy-singleton:
   enabled: true
 
+# Disable components now owned by kube-prometheus-stack
+kube-state-metrics:
+  enabled: false
+
+node-exporter:
+  enabled: false
+
 destinations:
   - name: Loki
     type: loki
     url: "http://platform-loki:3100/loki/api/v1/push"
   - name: Prometheus
     type: prometheus
-    url: "http://platform-prometheus-server:9090/api/v1/write"
+    url: "http://platform-kube-prometheus-stack-prometheus:9090/api/v1/write"
