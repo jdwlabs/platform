@@ -21,6 +21,7 @@ spec:
         - alert: LokiIngestionRateDropped
           expr: |
             sum(rate(loki_distributor_bytes_received_total[5m])) == 0
+            or absent(loki_distributor_bytes_received_total)
           for: 10m
           labels:
             severity: warning
