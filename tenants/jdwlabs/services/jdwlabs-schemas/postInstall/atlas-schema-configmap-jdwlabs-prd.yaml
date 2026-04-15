@@ -100,7 +100,7 @@ data:
     GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA auth TO app;
     GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA auth TO app;
 
-    -- Ensure future tables created by postgres are accessible
+    -- Ensure future tables created by postgres in auth schema are accessible
     ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth GRANT ALL ON TABLES TO jdwlabs_prd_owner;
     ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth GRANT ALL ON SEQUENCES TO jdwlabs_prd_owner;
     ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth GRANT ALL ON TABLES TO app;

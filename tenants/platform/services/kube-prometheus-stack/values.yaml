@@ -26,7 +26,7 @@ prometheus:
 
 alertmanager:
   enabled: true
-  alertmangerSpec:
+  alertmanagerSpec:
     storage:
       volumeClaimTemplate:
         spec:
@@ -56,7 +56,7 @@ alertmanager:
       - name: 'null'
       - name: 'discord'
         webhook_configs:
-          - url_file: /etc/alertmanager/secrets/alertmaanger-discord/webhook_url
+          - url_file: /etc/alertmanager/secrets/alertmanager-discord/webhook_url
             send_resolved: true
 
 # kube-prometheus-stack owns these going forward

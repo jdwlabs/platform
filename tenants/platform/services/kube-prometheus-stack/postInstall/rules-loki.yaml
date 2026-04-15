@@ -16,7 +16,7 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: "loki error rate above 10% on route {{ $labels.route }}"
+            summary: "Loki error rate above 10% on route {{ $labels.route }}"
             description: "Loki is returning 5xx errors at {{ $value }}% on route {{ $labels.route }}."
         - alert: LokiIngestionRateDropped
           expr: |

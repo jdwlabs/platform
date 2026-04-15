@@ -9,10 +9,10 @@ spec:
       - key: app.kubernetes.io/part-of
         operator: In
         values: [argocd]
-    namespaceSelector:
-      matchNames:
-        - argocd
-    endpoints:
-      - port: metrics
-        interval: 30s
-        path: /metrics
+  namespaceSelector:
+    matchNames:
+      - argocd
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
