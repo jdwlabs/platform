@@ -247,6 +247,11 @@ kubectl exec -n vault platform-vault-0 -- sh -c \
 kubectl exec -n vault platform-vault-0 -- sh -c \
   "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/longhorn \
     htpasswd_string=<htpasswd-value>"
+
+# AlertmanagerDiscord webhook (cluster alert notifications)
+kubectl exec -n vault platform-vault-0 -- sh -c \
+  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/alertmanager \
+    discord_webhook_url=<discord-webhook-url>"
 ```
 
 ### Tenant secrets
@@ -359,15 +364,16 @@ All `jdwlabs-*` deployment Applications should show `Synced` and `Healthy`.
 
 ### Platform UIs
 
-| Service               | URL                              |
-|-----------------------|----------------------------------|
-| ArgoCD                | `https://argocd.jdwlabs.com`     |
-| Vault                 | `https://vault.jdwlabs.com`      |
-| Database UI (Adminer) | `https://dbui.jdwlabs.com`       |
-| Grafana               | `https://grafana.jdwlabs.com`    |
-| Prometheus            | `https://prometheus.jdwlabs.com` |
-| Longhorn              | `https://longhorn.jdwlabs.com`   |
-| Headlamp              | `https://dashboard.jdwlabs.com`  |
+| Service               | URL                               |
+|-----------------------|-----------------------------------|
+| ArgoCD                | `https://argocd.jdwlabs.com`      |
+| Vault                 | `https://vault.jdwlabs.com`       |
+| Database UI (Adminer) | `https://dbui.jdwlabs.com`        |
+| Grafana               | `https://grafana.jdwlabs.com`     |
+| Prometheus            | `https://prometheus.jdwlabs.com`  |
+| Alertmanager          | `https://alertmanager.jdwlabs.com |
+| Longhorn              | `https://longhorn.jdwlabs.com`    |
+| Headlamp              | `https://dashboard.jdwlabs.com`   |
 
 ### Accessing Grafana
 
@@ -544,3 +550,4 @@ Kubernetes cluster ready
 | `vault-admin-initializer` Job failed   | `vault-token` secret missing in vault ns    | Create `vault-token` secret (Phase 4.4)       |
 | Deployment apps stuck `Missing`        | Deployment repo not accessible              | Check ArgoCD repo credentials                 |
 | CNPG clusters not healthy              | Longhorn storage not ready                  | Check Longhorn pods in `longhorn-system`      |
+| Alertmanager alerts not sent           | `kv/alertmanager` not seeded in Vault       | Seed `kv/alertmanager` (Phase 5)              |

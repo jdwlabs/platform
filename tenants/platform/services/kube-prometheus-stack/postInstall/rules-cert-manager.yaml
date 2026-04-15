@@ -16,7 +16,7 @@ spec:
             summary: "Certificate {{ $labels.name }} in {{ $labels.namespace }} expires in less than 21 days"
             description: "Certificate {{ $labels.name }} will expire in {{ $value | humanizeDuration }}."
         - alert: CertificateExpired
-          expr: certmanager_certificate_expiration_timestamp_seconds - time() < 0
+          expr: time() - certmanager_certificate_expiration_timestamp_seconds > 0
           for: 5m
           labels:
             severity: critical

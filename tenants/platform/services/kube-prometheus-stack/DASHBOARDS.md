@@ -28,18 +28,18 @@ Each ConfigMap contains the full JSON exported from Grafana.com.
 1. Find the dashboard on https://grafana.com/grafana/dashboards/
 2. Download the JSON:
    `curl -sL "https://grafana.com/api/dashboards/{ID}/revisions/latest/download" > /tmp/dashboard.json`
-3. Create a ConfigMap in the relevant service's `postInstall/` directory: 
+3. Create a ConfigMap in the relevant service's `postInstall/` directory:
    ```yaml
    apiVersion: v1
    kind: ConfigMap
    metadata:
-      name: dashboard-<name>
-      namespace: <service-namespace>
-      labels:
-         grafana_dashboard: "1"
+     name: dashboard-<name>
+     namespace: <service-namespace>
+     labels:
+       grafana_dashboard: "1"
    data:
-      <name>.json: |
-         <paste JSON here, indented 4 spaces>
+     <name>.json: |
+       <paste JSON here, indented 2 spaces>
    ```
 4. Ensure the service has `postInstall: true` in `tenant.yaml`
 5. Add the dashboard to this table
