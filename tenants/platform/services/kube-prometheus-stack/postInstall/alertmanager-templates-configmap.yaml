@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-templates
+  namespace: monitoring
+data:
+  discord.tmpl: |
+    {{ define "discord.title" }}
+    [{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}
+    {{ end }}
+    {{ define "discord.message" }}
+    {{ range .Alerts }}
+    **Labels:** {{ range .Labels.SortedPairs }}{{ .Name }}={{ .Value }} {{ end }}
+    **Summary:** {{ .Annotations.summary }}
+    **Description:** {{ .Annotations.description }}
+    {{ end }}
+    {{ end }}

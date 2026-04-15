@@ -1,0 +1,29 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: loki-rules
+  namespace: monitoring
+spec:
+  groups:
+    - name: loki
+      rules:
+        - alert: LokiRequestErrors
+          expr: |
+            100 * sum(rate(loki_request_duration_seconds_count{status_code=~"5.."}[5m])) by (route)
+            /
+            sum(rate(loki_request_duration_seconds_count[5m])) by (route) > 10
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "loki error rate above 10% on route {{ $labels.route }}"
+            description: "Loki is returning 5xx errors at {{ $value }}% on route {{ $labels.route }}."
+        - alert: LokiIngestionRateDropped
+          expr: |
+            sum(rate(loki_distributor_bytes_received_total[5m])) == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Loki ingestion has stopped"
+            description: "Loki has received zero bytes for the last 10 minutes."

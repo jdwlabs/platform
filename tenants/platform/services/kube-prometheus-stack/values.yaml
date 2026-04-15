@@ -1,0 +1,116 @@
+crds:
+  enabled: true
+
+prometheusOperator:
+  enabled: true
+  admissionWebhooks:
+    certManager:
+      enabled: true
+
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    retentionSize: "20GB"
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 25Gi
+    # Discover ServiceMonitors, PodMonitors, and PrometheusRules from all namespaces
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+
+alertmanager:
+  enabled: true
+  alertmangerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+    secrets:
+      - alertmanager-discord
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: ['alertname', 'namespace']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: 'discord'
+      routes:
+        - matchers:
+            - alertname = "Watchdog"
+          receiver: 'null'
+        - matchers:
+            - alertname = "InfoInhibitor"
+          receiver: 'null'
+    receivers:
+      - name: 'null'
+      - name: 'discord'
+        webhook_configs:
+          - url_file: /etc/alertmanager/secrets/alertmaanger-discord/webhook_url
+            send_resolved: true
+
+# kube-prometheus-stack owns these going forward
+kubeStateMetrics:
+  enabled: true
+
+nodeExporter:
+  enabled: true
+  prometheus:
+    monitor:
+      enabled: true
+
+# Grafana managed separately
+grafana:
+  enabled: false
+
+# Built-in alert rules
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    configReloaders: true
+    general: true
+    kubeApiserverAvailability: true
+    kubeApiserverBurnrate: true
+    kubeApiserverHistogram: true
+    kubeApiserverSlos: true
+    kubelet: true
+    kubePrometheusGeneral: true
+    kubePrometheusNodeRecording: true
+    kubernetesApps: true
+    kubernetesResources: true
+    kubernetesStorage: true
+    kubernetesSystem: true
+    kubeStateMetrics: true
+    network: true
+    node: true
+    nodeExporterAlerting: true
+    nodeExporterRecording: true
+    prometheus: true
+    prometheusOperator: true
+    # Disabled - not accessible in this cluster
+    etcd: false
+    kubeControllerManager: false
+    kubeProxy: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+
+# Disabled - control plane components not scrape-accessible
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
