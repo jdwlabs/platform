@@ -1,12 +1,12 @@
 apiVersion: monitoring.coreos.com/v1
-kind: Servicemonitor
+kind: ServiceMonitor
 metadata:
   name: longhorn-metrics
   namespace: longhorn-system
 spec:
   selector:
     matchLabels:
-      app: longhorn-maanger
+      app: longhorn-manager
   namespaceSelector:
     matchNames:
       - longhorn-system

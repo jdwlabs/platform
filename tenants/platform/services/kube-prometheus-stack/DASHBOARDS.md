@@ -11,13 +11,13 @@ Each ConfigMap contains the full JSON exported from Grafana.com.
 | Node Exporter Full        | 1860  | `kube-prometheus-stack/postInstall/dashboard-node-exporter.yaml` | https://grafana.com/grafana/dashboards/1860  |
 | ArgoCD                    | 14584 | `argo-cd/postInstall/dashboard-argocd.yaml`                      | https://grafana.com/grafana/dashboards/14584 |
 | ingress-nginx             | 9614  | `ingress-nginx/postInstall/dashboard-ingress-nginx.yaml`         | https://grafana.com/grafana/dashboards/9614  |
-| Longhorn                  | 16888 | `longhron/postInstall/dashboard-longhorn.yaml`                   | https://grafana.com/grafana/dashboards/16888 |
+| Longhorn                  | 16888 | `longhorn/postInstall/dashboard-longhorn.yaml`                   | https://grafana.com/grafana/dashboards/16888 |
 | CNPG                      | 20417 | `cnpg-operator/postInstall/dashboard-cnpg.yaml`                  | https://grafana.com/grafana/dashboards/20417 |
 | Loki                      | 13407 | `loki/postInstall/dashboard-loki.yaml`                           | https://grafana.com/grafana/dashboards/13407 |
 
 ## Updating a Dashboard
 
-1. Visit the Grafana.com link above and check fro newer revisions
+1. Visit the Grafana.com link above and check for newer revisions
 2. Download the latest JSON:
    `curl -sL "https://grafana.com/api/dashboards/{ID}/revisions/latest/download" > /tmp/dashboard.json`
 3. Replace the JSON content in the corresponding ConfigMap YAML (indented under `data.<filename>: |`)
@@ -29,8 +29,8 @@ Each ConfigMap contains the full JSON exported from Grafana.com.
 2. Download the JSON:
    `curl -sL "https://grafana.com/api/dashboards/{ID}/revisions/latest/download" > /tmp/dashboard.json`
 3. Create a ConfigMap in the relevant service's `postInstall/` directory: 
-   ```yaml 
-   apiVersion: v1 
+   ```yaml
+   apiVersion: v1
    kind: ConfigMap
    metadata:
       name: dashboard-<name>
