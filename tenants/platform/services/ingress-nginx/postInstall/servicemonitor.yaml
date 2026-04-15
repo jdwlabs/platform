@@ -1,5 +1,5 @@
 apiVersion: monitoring.coreos.com/v1
-kind: Servicemonitor
+kind: ServiceMonitor
 metadata:
   name: ingress-nginx-metrics
   namespace: ingress-nginx
