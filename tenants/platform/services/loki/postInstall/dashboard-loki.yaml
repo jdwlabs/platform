@@ -72,7 +72,6 @@ data:
       },
       "description": "Loki metrics via 2.0",
       "editable": true,
-      "gnetId": 13407,
       "graphTooltip": 0,
       "id": null,
       "links": [],
@@ -3741,8 +3740,7 @@ data:
           }
         }
       ],
-      "schemaVersion": 26,
-      "style": "dark",
+      "schemaVersion": 41,
       "tags": [
         "loki"
       ],
