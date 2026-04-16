@@ -4,6 +4,13 @@ cluster:
 
 clusterMetrics:
   enabled: true
+  # Do not deploy - kube-prometheus-stack owns these
+  node-exporter:
+    deploy: false
+    enabled: false
+  kube-state-metrics:
+    deploy: false
+    enabled: false
 
 clusterEvents:
   enabled: true
@@ -22,13 +29,6 @@ alloy-metrics:
 
 alloy-singleton:
   enabled: true
-
-# Disable components now owned by kube-prometheus-stack
-kube-state-metrics:
-  enabled: false
-
-node-exporter:
-  enabled: false
 
 destinations:
   - name: Loki

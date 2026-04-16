@@ -41,7 +41,7 @@ alertmanager:
       - alertmanager-templates
   config:
     template:
-      - '/etc/alertmanager/configmaps/alertmaanger-templates/*.tmpl'
+      - '/etc/alertmanager/configmaps/alertmanager-templates/*.tmpl'
     global:
       resolve_timeout: 5m
     route:
