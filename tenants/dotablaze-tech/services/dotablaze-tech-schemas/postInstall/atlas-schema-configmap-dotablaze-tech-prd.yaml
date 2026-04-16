@@ -48,17 +48,3 @@ data:
         guild_id   TEXT PRIMARY KEY,
         channel_id TEXT NOT NULL
     );
-
-    -- Grant table privileges to the database owner role
-    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO dotablazetech_prd_owner;
-    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO dotablazetech_prd_owner;
-
-    -- Grant table privileges to the CNPG application user
-    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO app;
-    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO app;
-
-    -- Ensure future tables created by postgres are accessible
-    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO dotablazetech_prd_owner;
-    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO dotablazetech_prd_owner;
-    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO app;
-    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO app;

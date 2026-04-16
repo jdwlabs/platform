@@ -89,19 +89,3 @@ data:
         PRIMARY KEY (icon_id),
         CONSTRAINT fk_profile FOREIGN KEY (profile_id) REFERENCES auth.profiles (profile_id)
     );
-
-    -- Grant schema usage and table privileges to the database owner role
-    GRANT USAGE ON SCHEMA auth TO jdwlabs_non_owner;
-    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA auth TO jdwlabs_non_owner;
-    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA auth TO jdwlabs_non_owner;
-
-    -- Grant schema usage and table privileges to the CNPG application user
-    GRANT USAGE ON SCHEMA auth TO app;
-    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA auth TO app;
-    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA auth TO app;
-
-    -- Ensure future tables created by postgres in auth schema are accessible
-    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth GRANT ALL ON TABLES TO jdwlabs_non_owner;
-    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth GRANT ALL ON SEQUENCES TO jdwlabs_non_owner;
-    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth GRANT ALL ON TABLES TO app;
-    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth GRANT ALL ON SEQUENCES TO app;
