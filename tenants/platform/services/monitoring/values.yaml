@@ -19,7 +19,7 @@ podLogs:
   enabled: true
 
 nodeLogs:
-  enabled: true
+  enabled: false
 
 alloy-logs:
   enabled: true
