@@ -1,0 +1,23 @@
+apiVersion: gateway.nginx.org/v1alpha2
+kind: NginxProxy
+metadata:
+  name: platform-proxy-config
+spec:
+  ipFamily: ipv4
+  rewriteClientIP:
+    mode: ProxyProtocol
+    setIPRecursively: true
+    trustedAddresses:
+      - type: CIDR
+        value: 0.0.0.0/0
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: nginx
+spec:
+  controllerName: gateway.nginx.org/nginx-gateway-controller
+  parametersRef:
+    group: gateway.nginx.org
+    kind: NginxProxy
+    name: platform-proxy-config

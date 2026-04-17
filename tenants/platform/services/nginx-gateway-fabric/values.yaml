@@ -1,0 +1,26 @@
+nginx-gateway:
+  kind: Deployment
+  replicaCount: 2
+  snippetsFilters:
+    enable: true
+  config:
+    logging:
+      errorLevel: warn
+
+service:
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 80
+      protocol: TCP
+      name: http
+      nodePort: 30180
+    - port: 443
+      targetPort: 443
+      protocol: TCP
+      name: https
+      nodePort: 30543
+
+metrics:
+  enable: true
+  port: 9113
