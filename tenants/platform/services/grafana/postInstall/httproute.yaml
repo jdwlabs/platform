@@ -1,0 +1,18 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: grafana
+  namespace: monitoring
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  parentRefs:
+    - name: platform-gateway
+      namespace: nginx-gateway
+      sectionName: https
+  hostnames:
+    - grafana.jdwlabs.com
+  rules:
+    - backendRefs:
+        - name: platform-grafana
+          port: 80
