@@ -8,11 +8,11 @@ spec:
   credentials:
     scheme: postgres
     host: platform-postgresql-cluster-non-rw.database.svc
-    user: postgres
+    user: dotablazetech_non_owner
     passwordFrom:
       secretKeyRef:
         key: password
-        name: platform-postgresql-cluster-non-superuser
+        name: dotablazetech-non-owner-credentials
     database: dotablazetech_non
     port: 5432
     parameters:
