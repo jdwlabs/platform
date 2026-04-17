@@ -14,5 +14,5 @@ spec:
     - prometheus.jdwlabs.com
   rules:
     - backendRefs:
-        - name: platform-kube-prometheus-stack-alertmanager
+        - name: platform-kube-prometheus-stack-prometheus
           port: 9090
