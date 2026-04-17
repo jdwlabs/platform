@@ -8,7 +8,7 @@ spec:
   credentials:
     scheme: postgres
     host: platform-postgresql-cluster-prd-rw.database.svc
-    user: dotablaze_prd_owner
+    user: dotablazetech_prd_owner
     passwordFrom:
       secretKeyRef:
         key: password
