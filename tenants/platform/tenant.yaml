@@ -84,6 +84,14 @@ project:
 
 services:
   # Wave 0: Bare metal networking + ArgoCD self-management
+  - name: gateway-api-crds
+    chart: ""
+    repo: ""
+    revision: ""
+    namespace: nginx-gateway
+    rawManifests: true
+    syncWave: 0
+
   - name: argo-cd
     chart: argo-cd
     repo: https://argoproj.github.io/argo-helm

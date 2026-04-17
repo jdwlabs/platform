@@ -20,17 +20,20 @@ datasources:
     datasources:
       - name: Prometheus
         type: prometheus
+        uid: PBFA97CFB590B2093
         access: proxy
-        url: http://platform-kube-prometheus-stack-prometheus:9090
+        url: http://platform-kube-prometheus-s-prometheus:9090
         isDefault: true
       - name: Loki
         type: loki
+        uid: P8E90F9AEF21F6940
         access: proxy
         url: http://platform-loki:3100
       - name: Alertmanager
         type: alertmanager
+        uid: alertmanager
         access: proxy
-        url: http://platform-kube-prometheus-stack-alertmanager:9093
+        url: http://platform-kube-prometheus-s-alertmanager:9093
         jsonData:
           implementation: prometheus
 
