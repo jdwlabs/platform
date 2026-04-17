@@ -80,7 +80,7 @@ project:
     - 'https://cloudnative-pg.github.io/charts'
     - 'ghcr.io/actions/actions-runner-controller-charts'
     - 'https://charts.ectobit.com'
-    - 'oci://ghcr.io/nginx/charts'
+    - 'ghcr.io/nginx/charts'
 
 services:
   # Wave 0: Bare metal networking + ArgoCD self-management
@@ -128,7 +128,7 @@ services:
 
   - name: nginx-gateway-fabric
     chart: nginx-gateway-fabric
-    repo: oci://ghcr.io/nginx/charts
+    repo: ghcr.io/nginx/charts
     revision: 1.7.0
     namespace: nginx-gateway
     postInstall: true
