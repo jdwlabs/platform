@@ -23,7 +23,7 @@ spec:
             - name: PGPASSWORD_PRD
               valueFrom:
                 secretKeyRef:
-                  name: platform-postgresql-prd-superuser
+                  name: platform-postgresql-cluster-prd-superuser
                   key: password
           command: ["sh", "-c"]
           args:
@@ -32,7 +32,7 @@ spec:
               # NON: transfer auth schema objects from postgres to jdwlabs_non_owner
               psql -h platform-postgresql-cluster-non-rw.database -U postgres -d jdwlabs_non <<'SQL'
               DO $$
-              DELCARE r RECORD;
+              DECLARE r RECORD;
               BEGIN
                 IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'auth') THEN
                   EXECUTE 'ALTER SCHEMA auth OWNER TO jdwlabs_non_owner';
@@ -48,9 +48,9 @@ spec:
               END $$;
               SQL
               # PRD: transfer auth schema objects from postgres to jdwlabs_prd_owner
-              psql -h platform-postgresql-cluster-prd-rw.database -U postgres -d jdwlabs_prd <<'SQL'
+              PGPASSWORD="$PGPASSWORD_PRD" psql -h platform-postgresql-cluster-prd-rw.database -U postgres -d jdwlabs_prd <<'SQL'
               DO $$
-              DELCARE r RECORD;
+              DECLARE r RECORD;
               BEGIN
                 IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'auth') THEN
                   EXECUTE 'ALTER SCHEMA auth OWNER TO jdwlabs_prd_owner';
@@ -64,5 +64,5 @@ spec:
                   END LOOP;
                 END IF;
               END $$;
-              SQL             
+              SQL
               echo "Ownership migration complete"

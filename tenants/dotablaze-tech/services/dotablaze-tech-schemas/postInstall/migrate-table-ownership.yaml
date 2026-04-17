@@ -23,7 +23,7 @@ spec:
             - name: PGPASSWORD_PRD
               valueFrom:
                 secretKeyRef:
-                  name: platform-postgresql-prd-superuser
+                  name: platform-postgresql-cluster-prd-superuser
                   key: password
           command: ["sh", "-c"]
           args:
@@ -32,7 +32,7 @@ spec:
               # NON: transfer public schema objects from postgres to dotablazetech_non_owner
               psql -h platform-postgresql-cluster-non-rw.database -U postgres -d dotablazetech_non <<'SQL'
               DO $$
-              DELCARE r RECORD;
+              DECLARE r RECORD;
               BEGIN
                 FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tableowner = 'postgres'
                 LOOP
