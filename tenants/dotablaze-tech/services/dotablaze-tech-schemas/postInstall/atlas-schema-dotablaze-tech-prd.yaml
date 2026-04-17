@@ -8,11 +8,11 @@ spec:
   credentials:
     scheme: postgres
     host: platform-postgresql-cluster-prd-rw.database.svc
-    user: postgres
+    user: dotablaze_prd_owner
     passwordFrom:
       secretKeyRef:
         key: password
-        name: platform-postgresql-cluster-prd-superuser
+        name: dotablazetech-prd-owner-credentials
     database: dotablazetech_prd
     port: 5432
     parameters:
