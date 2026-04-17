@@ -17,7 +17,6 @@ spec:
       protocol: HTTPS
       tls:
         mode: Terminate
-        certificateRefs: []
       allowedRoutes:
         namespaces:
           from: All
