@@ -52,6 +52,8 @@ kind: ReferenceGrant
 metadata:
   name: allow-gateway-tls
   namespace: {{ .name }}
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   from:
     - group: gateway.networking.k8s.io
