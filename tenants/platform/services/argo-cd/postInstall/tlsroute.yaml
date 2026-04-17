@@ -1,0 +1,16 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: TLSRoute
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  parentRefs:
+    - name: paltform-gateway
+      namespace: nginx-gateway
+      sectionName: argocd-passthrough
+  hostnames:
+    - argocd.jdwlabs.com
+  rules:
+    - backendRefs:
+        - name: platform-argo-cd-argocd-server
+          port: 443

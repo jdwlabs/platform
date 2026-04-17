@@ -54,6 +54,9 @@ namespaces:
   - name: kube-system
     quotaTier: platform
     networkPolicy: platform
+  - name: nginx-gateway
+    quotaTier: platform
+    networkPolicy: platform
   - name: porkbun-webhook
     quotaTier: platform
     networkPolicy: platform
@@ -77,6 +80,7 @@ project:
     - 'https://cloudnative-pg.github.io/charts'
     - 'ghcr.io/actions/actions-runner-controller-charts'
     - 'https://charts.ectobit.com'
+    - 'oci://ghcr.io/nginx/charts'
 
 services:
   # Wave 0: Bare metal networking + ArgoCD self-management
@@ -111,6 +115,14 @@ services:
     repo: https://kubernetes.github.io/ingress-nginx
     revision: 4.13.2
     namespace: ingress-nginx
+    postInstall: true
+    syncWave: 1
+
+  - name: nginx-gateway-fabric
+    chart: nginx-gateway-fabric
+    repo: oci://ghcr.io/nginx/charts
+    revision: 1.7.0
+    namespace: nginx-gateway
     postInstall: true
     syncWave: 1
 
