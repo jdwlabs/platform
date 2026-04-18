@@ -451,17 +451,18 @@ Read-only endpoints are also available at `platform-postgresql-cluster-{non,prd}
 
 **3. Available databases**
 
-| Cluster                           | Database            | Schemas  | Owner          | Owner Role                |
-|-----------------------------------|---------------------|----------|----------------|---------------------------|
-| `platform-postgresql-cluster-non` | `jdwlabs_non`       | `auth`   | jdwlabs        | `jdwlabs_non_owner`       |
-| `platform-postgresql-cluster-non` | `dotablazetech_non` | `public` | dotablaze-tech | `dotablazetech_non_owner` |
-| `platform-postgresql-cluster-prd` | `jdwlabs_prd`       | `auth`   | jdwlabs        | `jdwlabs_prd_owner`       |
-| `platform-postgresql-cluster-prd` | `dotablazetech_prd` | `public` | dotablaze-tech | `dotablazetech_prd_owner` |
+| Cluster                           | Database            | Schemas  | Tenant         | Owner Role |
+|-----------------------------------|---------------------|----------|----------------|------------|
+| `platform-postgresql-cluster-non` | `jdwlabs_non`       | `auth`   | jdwlabs        | `app`      |
+| `platform-postgresql-cluster-non` | `dotablazetech_non` | `public` | dotablaze-tech | `app`      |
+| `platform-postgresql-cluster-prd` | `jdwlabs_prd`       | `auth`   | jdwlabs        | `app`      |
+| `platform-postgresql-cluster-prd` | `dotablazetech_prd` | `public` | dotablaze-tech | `app`      |
 
-Databases and owner roles are declared in the CNPG cluster values (`postgresql-cluster-{non,prd}/values.yaml`) and
-created automatically via the CNPG `Database` CRD at wave 4. Schema migrations are managed by the Atlas operator
-(wave 5). Do not manually alter tables or databases - changes should go through CNPG values for databases/roles and
-AtlasSchema ConfigMaps in `tenants/*/services/*-schemas/` for DDL.
+Databases are declared in the CNPG cluster values (`postgresql-cluster-{non,prd}/values.yaml`) and created 
+automatically via the CNPG `Database` CRD at wave 4. All tenant databases share the CNPG-generated `app` role as
+their owner; isolation is enforced at the database boundary, not the role level. Schema migrations are managed by 
+the Atlas operator (wave 5) and also run as `app`. Do not manually alter tables or databases - changes should go 
+through CNPG values for databases/roles and AtlasSchema ConfigMaps in `tenants/*/services/*-schemas/` for DDL.
 
 ### Re-issuing TLS certificates
 
