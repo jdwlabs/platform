@@ -1,4 +1,6 @@
 configs:
+  params:
+    server.insecure: true
   cm:
     # Local account for MCP/API integration (apiKey only, no UI login)
     accounts.claude-mcp: apiKey
