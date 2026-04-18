@@ -1,26 +1,62 @@
-nginx-gateway:
-  kind: Deployment
-  replicaCount: 2
-  snippetsFilters:
+nginxGateway:
+  kind: deployment
+  replicas: 2
+  snippets:
     enable: true
   config:
     logging:
-      errorLevel: warn
+      level: info
+  metrics:
+    enable: true
+    port: 9113
 
-service:
-  type: NodePort
-  ports:
-    - port: 80
-      targetPort: 80
-      protocol: TCP
-      name: http
-      nodePort: 30180
-    - port: 443
-      targetPort: 443
-      protocol: TCP
-      name: https
-      nodePort: 30543
+nginx:
+  kind: deployment
+  replicas: 2
+  config:
+    ipFamily: ipv4
+    rewriteClientIP:
+      mode: ProxyProtocol
+      setIPRecursively: true
+      trustedAddresses:
+        - type: CIDR
+          value: 0.0.0.0/0
+  service:
+    type: NodePort
+    nodePorts:
+      - port: 30180
+        listenerPort: 80
+      - port: 30543
+        listenerPort: 443
 
-metrics:
-  enable: true
-  port: 9113
+gateways:
+  - name: platform-gateway
+    namespace: nginx-gateway
+    spec:
+      gatewayClassName: nginx
+      listeners:
+        - name: http
+          port: 80
+          protocol: HTTP
+          allowedRoutes:
+            namespaces:
+              from: All
+        - name: https
+          port: 443
+          protocol: HTTPS
+          tls:
+            mode: Terminate
+          allowedRoutes:
+            namespaces:
+              from: All
+        - name: argocd-passthrough
+          hostname: argocd.jdwlabs.com
+          port: 443
+          protocol: TLS
+          tls:
+            mode: Passthrough
+          allowedRoutes:
+            namespaces:
+              from: All
+            kinds:
+              - kind: TLSRoute
