@@ -46,6 +46,9 @@ gateways:
           protocol: HTTPS
           tls:
             mode: Terminate
+            certificateRefs:
+              - kind: Secret
+                name: wildcard-jdwlabs-tls
           allowedRoutes:
             namespaces:
               from: All
