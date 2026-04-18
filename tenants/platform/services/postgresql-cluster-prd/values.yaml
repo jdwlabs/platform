@@ -15,47 +15,17 @@ cluster:
       - ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON SEQUENCES TO app;
       - ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO app;
       - ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO app;
-      # Auth schema privileges for jdwlabs databases
-      - ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth GRANT ALL ON TABLES TO jdwlabs_prd_owner;
-      - ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth GRANT ALL ON SEQUENCES TO jdwlabs_prd_owner;
 
-  roles:
-    - name: jdwlabs_prd_owner
-      ensure: present
-      login: true
-      inherit: true
-      connectionLimit: -1
-      comment: "Owner of jdwlabs_prd database"
-      passwordSecret:
-        name: jdwlabs-prd-owner-credentials
-
-    - name: dotablazetech_prd_owner
-      ensure: present
-      login: true
-      inherit: true
-      connectionLimit: -1
-      comment: "Owner of dotablazetech_prd database"
-      passwordSecret:
-        name: dotablazetech-prd-owner-credentials
-
-    - name: app
-      ensure: present
-      login: true
-      inherit: true
-      connectionLimit: -1
-      comment: "Application user with inherited access to all tenant databases"
-      inRoles:
-        - jdwlabs_prd_owner
-        - dotablazetech_prd_owner
-
+# Tenant isolation is enforced at the database boundary, not at the role level. The `app`
+# role owns ever tenant database and is used by Atlas migrations and application pods alike.
 databases:
   - name: jdwlabs_prd
     ensure: present
-    owner: jdwlabs_prd_owner
+    owner: app
     schemas:
       - name: auth
-        owner: jdwlabs_prd_owner
+        owner: app
         ensure: present
   - name: dotablazetech_prd
     ensure: present
-    owner: dotablazetech_prd_owner
+    owner: app
