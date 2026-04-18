@@ -2,6 +2,8 @@ installCRDs: true
 
 extraArgs:
   - --enable-gateway-api
+  - --dns01-recursive-nameservers-only
+  - --dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53
 
 # webhook:
 #  limits:
