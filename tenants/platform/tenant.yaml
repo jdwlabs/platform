@@ -129,7 +129,7 @@ services:
   - name: nginx-gateway-fabric
     chart: nginx-gateway-fabric
     repo: ghcr.io/nginx/charts
-    revision: 1.7.0
+    revision: 2.5.1
     namespace: nginx-gateway
     postInstall: true
     syncWave: 1
