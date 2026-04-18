@@ -8,11 +8,11 @@ spec:
   credentials:
     scheme: postgres
     host: platform-postgresql-cluster-non-rw.database.svc
-    user: jdwlabs_non_owner
+    user: app
     passwordFrom:
       secretKeyRef:
         key: password
-        name: jdwlabs-non-owner-credentials
+        name: platform-postgresql-cluster-non-app
     database: jdwlabs_non
     port: 5432
     parameters:
