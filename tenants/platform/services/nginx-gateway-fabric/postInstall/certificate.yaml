@@ -12,3 +12,5 @@ spec:
   dnsNames:
     - "jdwlabs.com"
     - "*.jdwlabs.com"
+    - "*.prd.jdwlabs.com"
+    - "*.non.jdwlabs.com"
