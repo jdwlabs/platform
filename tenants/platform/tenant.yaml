@@ -206,7 +206,7 @@ services:
   - name: atlas-operator
     chart: charts/atlas-operator
     repo: ghcr.io/ariga
-    revision: 0.7.14
+    revision: 0.7.28
     namespace: atlas
     postInstall: false
     syncWave: 2
