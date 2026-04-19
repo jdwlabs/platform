@@ -14,5 +14,5 @@ spec:
     - alertmanager.jdwlabs.com
   rules:
     - backendRefs:
-        - name: platform-kube-prometheus-stack-alertmanager
+        - name: platform-kube-prometheus-s-alertmanager
           port: 9093

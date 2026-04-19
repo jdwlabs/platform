@@ -34,6 +34,19 @@ spec:
           kind: Deployment
           jqPathExpressions:
             - .spec.template.metadata.annotations."checksum/secret"
+        - group: gateway.networking.k8s.io
+          kind: Gateway
+          jqPathExpressions:
+            - .spec.listeners[]?.tls.certificateRefs[]?.group
+        - group: gateway.networking.k8s.io
+          kind: HTTPRoute
+          jqPathExpressions:
+            - .spec.parentRefs[]?.group
+            - .spec.parentRefs[]?.kind
+            - .spec.rules[]?.backendRefs[]?.group
+            - .spec.rules[]?.backendRefs[]?.kind
+            - .spec.rules[]?.backendRefs[]?.weight
+            - .spec.rules[]?.matches
       syncPolicy:
         automated:
           prune: true
