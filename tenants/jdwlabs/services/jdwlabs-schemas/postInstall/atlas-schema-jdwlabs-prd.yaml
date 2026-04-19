@@ -21,6 +21,7 @@ spec:
     configMapKeyRef:
       key: schema.sql
       name: jdwlabs-postgresql-prd-schema
+  devURL: postgres://postgres:pass@localhost:5432/postgres?sslmode=disable
   devDB:
     spec:
       containers:
