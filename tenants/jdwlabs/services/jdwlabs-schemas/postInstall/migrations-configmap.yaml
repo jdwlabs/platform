@@ -1,9 +1,9 @@
 kind: ConfigMap
 apiVersion: v1
 metadata:
-  name: jdwlabs-postgresql-non-schema
+  name: jdwlabs-migrations
 data:
-  schema.sql: |+
+  V1__init.sql: |
     CREATE SCHEMA IF NOT EXISTS auth;
 
     CREATE TABLE IF NOT EXISTS auth.roles
@@ -89,4 +89,3 @@ data:
         PRIMARY KEY (icon_id),
         CONSTRAINT fk_profile FOREIGN KEY (profile_id) REFERENCES auth.profiles (profile_id)
     );
-

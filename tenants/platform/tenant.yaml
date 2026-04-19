@@ -33,9 +33,6 @@ namespaces:
   - name: headlamp
     quotaTier: platform
     networkPolicy: platform
-  - name: atlas
-    quotaTier: platform
-    networkPolicy: platform
   - name: cnpg-system
     quotaTier: platform
     networkPolicy: platform
@@ -72,7 +69,6 @@ project:
     - 'https://grafana.github.io/helm-charts'
     - 'https://prometheus-community.github.io/helm-charts'
     - 'https://kubernetes-sigs.github.io/headlamp/'
-    - 'ghcr.io/ariga'
     - 'https://cloudnative-pg.github.io/charts'
     - 'ghcr.io/actions/actions-runner-controller-charts'
     - 'https://charts.ectobit.com'
@@ -201,14 +197,6 @@ services:
     revision: 0.41.0
     namespace: headlamp
     postInstall: true
-    syncWave: 2
-
-  - name: atlas-operator
-    chart: charts/atlas-operator
-    repo: ghcr.io/ariga
-    revision: 0.7.28
-    namespace: atlas
-    postInstall: false
     syncWave: 2
 
   # Wave 3: Operators
