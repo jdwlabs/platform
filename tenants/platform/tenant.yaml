@@ -15,9 +15,6 @@ namespaces:
   - name: cert-manager
     quotaTier: platform
     networkPolicy: platform
-  - name: ingress-nginx
-    quotaTier: platform
-    networkPolicy: platform
   - name: longhorn-system
     quotaTier: platform
     networkPolicy: platform
@@ -67,7 +64,6 @@ project:
   extraSourceRepos:
     - 'https://argoproj.github.io/argo-helm'
     - 'https://charts.jetstack.io'
-    - 'https://kubernetes.github.io/ingress-nginx'
     - 'https://charts.longhorn.io'
     - 'https://charts.external-secrets.io'
     - 'https://helm.releases.hashicorp.com'
@@ -116,14 +112,6 @@ services:
     revision: main
     namespace: porkbun-webhook
     postInstall: false
-    syncWave: 1
-
-  - name: ingress-nginx
-    chart: ingress-nginx
-    repo: https://kubernetes.github.io/ingress-nginx
-    revision: 4.13.2
-    namespace: ingress-nginx
-    postInstall: true
     syncWave: 1
 
   - name: nginx-gateway-fabric

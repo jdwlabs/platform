@@ -114,7 +114,7 @@ Platform services then deploy in sync wave order:
 | Wave | What deploys                                                                                             |
 |------|----------------------------------------------------------------------------------------------------------|
 | 0    | argo-cd (self-management)                                                                                |
-| 1    | cert-manager, porkbun-webhook, ingress-nginx, longhorn                                                   |
+| 1    | cert-manager, porkbun-webhook, nginx-gateway-fabric, longhorn                                            |
 | 2    | vault, external-secrets (+ ClusterSecretStores), vault-config-operator, monitoring stack, atlas-operator |
 | 3    | cnpg-operator, arc-systems                                                                               |
 | 4    | postgresql clusters, db-ui                                                                               |
@@ -512,7 +512,7 @@ Kubernetes cluster ready
                  |
                  +-- Wave 0: ArgoCD (self-managed)
                  |
-                 +-- Wave 1: cert-manager, ingress-nginx, Longhorn
+                 +-- Wave 1: cert-manager, nginx-gateway-fabric, Longhorn
                  |
                  +-- Wave 2: Vault + ESO deployed (+ ClusterSecretStores)
                  |    |

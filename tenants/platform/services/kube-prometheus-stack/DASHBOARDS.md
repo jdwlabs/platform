@@ -10,7 +10,6 @@ Each ConfigMap contains the full JSON exported from Grafana.com.
 | Kubernetes / Views / Pods | 15760 | `kube-prometheus-stack/postInstall/dashboard-k8s-overview.yaml`  | https://grafana.com/grafana/dashboards/15760 |
 | Node Exporter Full        | 1860  | `kube-prometheus-stack/postInstall/dashboard-node-exporter.yaml` | https://grafana.com/grafana/dashboards/1860  |
 | ArgoCD                    | 14584 | `argo-cd/postInstall/dashboard-argocd.yaml`                      | https://grafana.com/grafana/dashboards/14584 |
-| ingress-nginx             | 9614  | `ingress-nginx/postInstall/dashboard-ingress-nginx.yaml`         | https://grafana.com/grafana/dashboards/9614  |
 | Longhorn                  | 16888 | `longhorn/postInstall/dashboard-longhorn.yaml`                   | https://grafana.com/grafana/dashboards/16888 |
 | CNPG                      | 20417 | `cnpg-operator/postInstall/dashboard-cnpg.yaml`                  | https://grafana.com/grafana/dashboards/20417 |
 | Loki                      | 13407 | `loki/postInstall/dashboard-loki.yaml`                           | https://grafana.com/grafana/dashboards/13407 |
