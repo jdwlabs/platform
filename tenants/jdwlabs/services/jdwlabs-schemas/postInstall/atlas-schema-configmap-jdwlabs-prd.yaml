@@ -89,3 +89,4 @@ data:
         PRIMARY KEY (icon_id),
         CONSTRAINT fk_profile FOREIGN KEY (profile_id) REFERENCES auth.profiles (profile_id)
     );
+
