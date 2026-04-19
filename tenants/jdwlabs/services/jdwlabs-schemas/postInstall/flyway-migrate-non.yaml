@@ -17,7 +17,7 @@ spec:
           image: flyway/flyway:11.2
           env:
             - name: FLYWAY_URL
-              value: "jdbc:postresql://platform-postgresql-cluster-non-rw.database.svc:5432/jdwlabs_non"
+              value: "jdbc:postgresql://platform-postgresql-cluster-non-rw.database.svc:5432/jdwlabs_non"
             - name: FLYWAY_USER
               value: app
             - name: FLYWAY_PASSWORD
@@ -26,6 +26,8 @@ spec:
                   key: password
                   name: platform-postgresql-cluster-non-app
             - name: FLYWAY_BASELINE_ON_MIGRATE
+              value: "true"
+            - name: FLYWAY_BASELINE_VERSION
               value: "0"
             - name: FLYWAY_DEFAULT_SCHEMA
               value: public
