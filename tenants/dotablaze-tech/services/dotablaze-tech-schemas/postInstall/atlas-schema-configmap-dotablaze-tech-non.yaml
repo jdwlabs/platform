@@ -3,7 +3,7 @@ apiVersion: v1
 metadata:
   name: dotablaze-tech-postgresql-non-schema
 data:
-  schema.sql: |
+  schema.sql: |+
     CREATE TABLE guilds
     (
         id         TEXT PRIMARY KEY,
