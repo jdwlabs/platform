@@ -3,7 +3,7 @@ apiVersion: v1
 metadata:
   name: jdwlabs-postgresql-prd-schema
 data:
-  schema.sql: |
+  schema.sql: |+
     CREATE SCHEMA IF NOT EXISTS auth;
 
     CREATE TABLE IF NOT EXISTS auth.roles
