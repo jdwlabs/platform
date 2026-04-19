@@ -252,3 +252,11 @@ services:
     namespace: database
     postInstall: true
     syncWave: 4
+
+  - name: postgres-backup
+    chart: ""
+    repo: ""
+    revision: ""
+    namespace: database
+    rawManifests: true
+    syncWave: 5

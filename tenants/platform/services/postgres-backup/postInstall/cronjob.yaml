@@ -1,0 +1,63 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          initContainers:
+            - name: dump
+              image: postgres:17
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: platform-postgresql-cluster-prd-superuser
+                      key: password
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  pg_dumpall \
+                    -h platform-postgresql-cluster-prd-rw.database.svc \
+                    -U postgres \
+                    --clean --if-exists \
+                  | gzip > /backup/prd-$(date +%Y%m%d).sql.gz
+              volumeMounts:
+                - mountPath: /backup
+                  name: backup
+          containers:
+            - name: upload
+              image: rclone/rclone:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  mkdir -p /root/.config/rclone
+                  cp /rclone-config/rclone.conf /root/.config/rclone/rclone.conf
+                  rclone copy /backup gdrive:postgres-backups
+                  rclone delete gdrive:postgres-backups --min-age 7d || true
+              volumeMounts:
+                - mountPath: /backup
+                  name: backup
+                - mountPath: /rclone-config
+                  name: rclone-config
+                  readOnly: true
+          volumes:
+            - name: backup
+              emptyDir: {}
+            - name: rclone-config
+              secret:
+                secretName: rclone-gdrive
