@@ -351,7 +351,7 @@ Open that file and copy the **entire contents** (the `[gdrive]` block). Then sto
 string value under the key `rclone_conf`:
 
 ```bash
-RCLONE_CONF=$(cat "$(rclone config file)")
+RCLONE_CONF=$(cat "$(rclone config file | tail -n 1)")
 
 kubectl exec -n vault platform-vault-0 -- sh -c \
   "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/rclone-gdrive \
