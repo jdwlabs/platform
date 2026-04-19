@@ -79,7 +79,7 @@ Sync options applied to all deployment repo apps: `CreateNamespace=false`, `Prun
 | Wave | Category            | Apps                                                               |
 |------|---------------------|--------------------------------------------------------------------|
 | 0    | Bootstrap           | argo-cd (self-management)                                          |
-| 1    | Core infrastructure | cert-manager, ingress-nginx, longhorn                              |
+| 1    | Core infrastructure | cert-manager, nginx-gateway-fabric, longhorn                       |
 | 2    | Platform services   | vault, external-secrets, monitoring, grafana, atlas-operator, etc. |
 | 3    | Operators           | cnpg-operator, arc-systems                                         |
 | 4    | Shared databases    | postgresql-cluster-non, postgresql-cluster-prd, db-ui              |
@@ -103,7 +103,7 @@ Sync options applied to all deployment repo apps: `CreateNamespace=false`, `Prun
 | Component                   | Purpose                                            | Namespace        |
 |-----------------------------|----------------------------------------------------|------------------|
 | cert-manager                | TLS certificates via Let's Encrypt + Porkbun DNS01 | cert-manager     |
-| ingress-nginx               | Ingress controller (NodePort via HAProxy)          | ingress-nginx    |
+| nginx-gateway-fabric        | Gateway API controller (NodePort via HAProxy)      | nginx-gateway    |
 | Longhorn                    | Distributed block storage                          | longhorn-system  |
 | Vault                       | Secret management                                  | vault            |
 | ESO                         | External Secrets Operator                          | external-secrets |
@@ -142,7 +142,7 @@ Kubernetes nodes via NodePort.
 ┌─────────────────────────────────────────────┐
 │       HAProxy (Static IP, bare-metal)       │
 │                                             │
-│         :80/:443  ➜  ingress-nginx          │
+│         :80/:443  ➜  nginx-gateway          │
 │         :6443     ➜  Kubernetes API         │
 │           :50000    ➜  Talos API            │
 │         :9000     ➜  HAProxy stats          │
@@ -155,8 +155,8 @@ Kubernetes nodes via NodePort.
 │   Control   │ │   Control   │ │    Worker   │
 │    Plane    │ │    Plane    │ │    Node     │
 │             │ │             │ │             │
-│ :30080 HTTP │ │ :30080 HTTP │ │ :30080 HTTP │
-│ :30443 HTTPS│ │ :30443 HTTPS│ │ :30443 HTTPS│
+│ :30180 HTTP │ │ :30180 HTTP │ │ :30180 HTTP │
+│ :30543 HTTPS│ │ :30543 HTTPS│ │ :30543 HTTPS│
 │ :6443  K8s  │ │ :6443  K8s  │ │             │
 │ :50000Talos │ │ :50000Talos │ │             │
 └──────┬──────┘ └──────┬──────┘ └──────┬──────┘
@@ -168,11 +168,11 @@ Kubernetes nodes via NodePort.
                        │                       
                        ▼                       
 ┌─────────────────────────────────────────────┐
-│              ingress-nginx Pod              │
+│          nginx-gateway-fabric Pod           │
 │           (Deployment, 1 replica)           │
 │                                             │
 │               Terminates TLS                │
-│           Routes by Host header:            │
+│        Routes via Gateway + HTTPRoute:      │
 │                                             │
 │         argocd.jdwlabs.com   ➜ :443         │
 │         vault.jdwlabs.com    ➜ :8200        │
@@ -216,22 +216,23 @@ graph TB
 
 - Central entry point for all cluster traffic (static IP, bare-metal VM outside the cluster)
 - IP is configured via `haproxy_ip` in terraform.tfvars
-- HTTP/HTTPS frontends use TCP mode with PROXY protocol (`send-proxy`) so ingress-nginx sees real client IPs
+- HTTP/HTTPS frontends use TCP mode with PROXY protocol (`send-proxy`) so nginx-gateway-fabric sees real client IPs
 - Health checks each backend node - if a node goes down, traffic is automatically rerouted
 - Config is auto-generated and reloaded by `talops reconcile` whenever nodes are added or removed
 
-**NodePort (ingress-nginx)**
+**NodePort (nginx-gateway-fabric)**
 
-- `service.type: NodePort` with fixed ports: `:30080` (HTTP), `:30443` (HTTPS)
+- `service.type: NodePort` with fixed ports: `:30180` (HTTP), `:30543` (HTTPS)
 - Kubernetes opens these ports on **every node** in the cluster
-- kube-proxy on each node maintains iptables rules that DNAT traffic to the ingress-nginx pod, regardless of which node
+- kube-proxy on each node maintains iptables rules that DNAT traffic to the nginx-gateway pod, regardless of which node
   the pod runs on
 - Single-replica Deployment (not DaemonSet) to conserve resources - kube-proxy handles cross-node routing
 
-**ingress-nginx**
+**nginx-gateway-fabric**
 
-- Terminates TLS using certificates from cert-manager
-- Routes requests to backend services based on the `Host` header and Ingress rules
+- Gateway API controller; a single `platform-gateway` Gateway in the `nginx-gateway` namespace fronts all HTTPS traffic
+- Terminates TLS using certificates from cert-manager (via `ReferenceGrafnt` for cross-namespace Secret access)
+- Routes requests via `HTTPRoute` resources in each backend namespace, keyed on hostname
 - Uses PROXY protocol to decode real client IPs from HAProxy
 
 ### Kubernetes API access

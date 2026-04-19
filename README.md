@@ -7,7 +7,7 @@ Tenant-centric Kubernetes GitOps platform managed by ArgoCD.
 ## Structure
 
 - `bootstrap/` - ArgoCD ApplicationSets and AppProjects
-- `platform/` - Shared infrastructure apps (Vault, cert-manager, ingress-nginx, etc.)
+- `platform/` - Shared infrastructure apps (Vault, cert-manager, nginx-gateway-fabric, etc.)
 - `tenants/` - Per-tenant configurations (ARC runners, database schemas)
 - `helm-charts/` - Custom Helm charts (porkbun-webhook)
 - `docs/` - Architecture and onboarding documentation
