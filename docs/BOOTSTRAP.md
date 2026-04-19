@@ -300,7 +300,94 @@ To discover all ExternalSecret Vault paths in the codebase:
 grep -r 'remoteRef' tenants/ --include='*.yaml' -A 2 | grep 'key:'
 ```
 
-## Phase 6: Verify convergence
+## Phase 6: Configure PostgreSQL backups
+
+A nightly CronJob at 2AM dumps the **production** PostgresSQL cluster and uploads the gzipped dump to Google Drive
+via rclone. The rclone config is stored as a single Vault secret so it survives cluster resets. Backups older
+than 7 days are deleted automatically.
+
+### 6.1 Install rclone locally
+
+```bash
+sudo apt install rclone
+```
+
+### 6.2 Authenticate with Google Drive
+
+```bash
+rclone config
+```
+
+Follow the prompts:
+
+1. `n` -> new remote
+2. Name: `gdrive`
+3. Storage type: `drive` (Google Drive)
+4. Client ID and Client Secret -> leave **blank** (press Enter)
+5. Scope: `1` (full access)
+6. Service account file -> leave **blank** (press Enter)
+7. Edit advanced config -> `n`
+8. Auto-open browser -> `y` -> log in with your Google account and approve
+9. Configure as shared drive -> `n`
+10. Confirm with `y`
+
+Verify it works:
+
+```bash
+rclone ls gdrive:
+```
+
+No error means success.
+
+### 6.3 Store rclone config in Vault
+
+Find your config file path:
+
+```bash
+rclone config file
+```
+
+Open that file and copy the **entire contents** (the `[gdrive]` block). Then store it in Vault as a single
+string value under the key `rclone_conf`:
+
+```bash
+RCLONE_CONF=$(cat "$(rclone config file)")
+
+kubectl exec -n vault platform-vault-0 -- sh -c \
+  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/rclone-gdrive \
+    rclone_conf='$RCLONE_CONF'"
+```
+
+The `postgres-backup` ExternalSecret will sync this into the `database` namespace as a Kubernetes Secret.
+
+### 6.4 Verify backup CronJob
+
+```bash
+kubectl get cronjob postgres-backup -n database
+```
+
+To trigger a manual run immediately (rather than waiting for 2AM):
+
+```bash
+kubectl create job --from=cronjob/postgres-backup postgres-backup-manual -n database
+kubectl logs -f job/postgres-backup-manual -n database
+```
+
+After the job completes, `postgres-backups/prd-YYYMMDD.sql.gz` should appear in your Google Drive.
+
+### Restoring from backup
+
+To restore after a cluster reset, once the new CNPG clusters are healthy:
+
+```bash
+rclone copy gdrive:postgres-backups/prd-<YYYYMMDD>.sql.gz /tmp/
+
+gunzip -c /tmp/prd-<YYYYMMDD>.sql.gz | kubectl exec -i -n database \
+  platform-postgresql-cluster-prd-1 -- \
+  psql -U postgres
+```
+
+## Phase 7: Verify convergence
 
 After Vault secrets are in place, all dependent chains resolve automatically within 5-10 minutes.
 

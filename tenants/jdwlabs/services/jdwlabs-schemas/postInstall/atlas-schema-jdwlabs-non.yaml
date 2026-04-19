@@ -21,3 +21,15 @@ spec:
     configMapKeyRef:
       key: schema.sql
       name: jdwlabs-postgresql-non-schema
+  devDB:
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          env:
+            - name: POSTGRES_DB
+              value: postgres
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              value: pass
