@@ -109,7 +109,7 @@ data:
                 LOOP
                     EXECUTE format('ALTER SCHEMA %I OWNER TO postgres', s);
                     EXECUTE format('GRANT USAGE ON SCHEMA %I TO app', s);
-                    
+
                     FOR r IN
                         SELECT tablename
                         FROM pg_tables
@@ -118,15 +118,15 @@ data:
                         LOOP
                             EXECUTE format('ALTER TABLE %I.%I OWNER TO postgres', s, r.tablename);
                         END LOOP;
-                    
+
                     FOR r IN SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = s
                         LOOP
                             EXECUTE format('ALTER SEQUENCE %I.%I OWNER TO postgres', s, r.sequence_name);
                         END LOOP;
-                    
+
                     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO app', s);
                     EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO app', s);
-                    
+
                     EXECUTE format(
                             'ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA %I GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app',
                             s);
