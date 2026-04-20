@@ -1,4 +1,7 @@
 extends: default
+ignore: |
+  tenants/platform/services/gateway-api-crds/postInstall/experimental-install.yaml
+  tenants/platform/services/*/postInstall/dashboard-*.yaml
 rules:
   line-length:
     max: 300
