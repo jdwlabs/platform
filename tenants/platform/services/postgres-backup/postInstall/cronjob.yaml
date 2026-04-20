@@ -6,7 +6,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
-  schedule: "0 2 * * *"
+  schedule: "0 */6 * * *"
   timeZone: "Etc/UTC"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
@@ -34,7 +34,7 @@ spec:
                     -h platform-postgresql-cluster-prd-rw.database.svc \
                     -U postgres \
                     --clean --if-exists \
-                  | gzip > /backup/prd-$(date +%Y%m%d).sql.gz
+                  | gzip > /backup/prd-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
               volumeMounts:
                 - mountPath: /backup
                   name: backup
