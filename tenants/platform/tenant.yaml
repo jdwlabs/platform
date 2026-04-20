@@ -82,6 +82,7 @@ services:
     revision: ""
     namespace: nginx-gateway
     rawManifests: true
+    postInstall: false
     syncWave: 0
 
   - name: argo-cd
@@ -247,4 +248,5 @@ services:
     revision: ""
     namespace: database
     rawManifests: true
+    postInstall: false
     syncWave: 5
