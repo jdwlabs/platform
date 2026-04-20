@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: flyway-dotablaze-tech-non-v2
+  name: flyway-dotablaze-tech-non-v3
   annotations:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
@@ -19,12 +19,12 @@ spec:
             - name: FLYWAY_URL
               value: "jdbc:postgresql://platform-postgresql-cluster-non-rw.database.svc:5432/dotablazetech_non"
             - name: FLYWAY_USER
-              value: app
+              value: postgres
             - name: FLYWAY_PASSWORD
               valueFrom:
                 secretKeyRef:
                   key: password
-                  name: platform-postgresql-cluster-non-app
+                  name: platform-postgresql-cluster-non-superuser
             - name: FLYWAY_BASELINE_ON_MIGRATE
               value: "true"
             - name: FLYWAY_BASELINE_VERSION

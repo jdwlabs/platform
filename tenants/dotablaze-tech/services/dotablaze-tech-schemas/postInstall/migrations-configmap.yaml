@@ -48,3 +48,40 @@ data:
         guild_id   TEXT PRIMARY KEY,
         channel_id TEXT NOT NULL
     );
+
+  V2__fix_permissions.sql: |
+    -- Normalize ownership + grant app role to all existing and future objects
+    -- in every user schema. Flyway runs as postgres (superuser); app is the runtime role.
+    -- Iterates all non-system schemas so this works for any FLYWAY_SCHEMAS configuration.
+    DO $$
+    DECLARE
+        s text;
+        r record;
+    BEGIN
+        FOR s IN
+            SELECT nspname FROM pg_namespace
+            WHERE nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+              AND nspname NOT LIKE 'pg_temp_%'
+              AND nspname NOT LIKE 'pg_toast_temp_%'
+        LOOP
+            EXECUTE format('ALTER SCHEMA %I OWNER TO postgres', s);
+            EXECUTE format('GRANT USAGE ON SCHEMA %I TO app', s);
+
+            FOR r IN
+                SELECT tablename FROM pg_tables
+                WHERE schemaname = s AND tablename <> 'flyway_schema_history'
+            LOOP
+                EXECUTE format('ALTER TABLE %I.%I OWNER TO postgres', s, r.tablename);
+            END LOOP;
+
+            FOR r IN SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = s LOOP
+                EXECUTE format('ALTER SEQUENCE %I.%I OWNER TO postgres', s, r.sequence_name);
+            END LOOP;
+
+            EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO app', s);
+            EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO app', s);
+
+            EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA %I GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app', s);
+            EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA %I GRANT USAGE, SELECT ON SEQUENCES TO app', s);
+        END LOOP;
+    END $$;
