@@ -7,7 +7,9 @@ externalClusters: []
 
 cluster:
   monitoring:
-    enablePodMonitor: true
+    enabled: true
+    podMonitor:
+      enabled: true
 
   initdb:
     postInitSQL:
