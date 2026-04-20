@@ -1,12 +1,12 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: postgres-backup
+  name: postgres-backup-test
   namespace: database
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
-  schedule: "0 2 * * *"
+  schedule: "*/5 * * * *"
   timeZone: "Etc/UTC"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
@@ -34,7 +34,7 @@ spec:
                     -h platform-postgresql-cluster-prd-rw.database.svc \
                     -U postgres \
                     --clean --if-exists \
-                  | gzip > /backup/prd-$(date +%Y%m%d).sql.gz
+                  | gzip > /backup/prd-test-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
               volumeMounts:
                 - mountPath: /backup
                   name: backup
@@ -48,8 +48,8 @@ spec:
                   set -euo pipefail
                   mkdir -p /root/.config/rclone
                   cp /rclone-config/rclone.conf /root/.config/rclone/rclone.conf
-                  rclone copy /backup gdrive:postgres-backups
-                  rclone delete gdrive:postgres-backups --min-age 7d || true
+                  rclone copy /backup gdrive:postgres-backups-test
+                  rclone delete gdrive:postgres-backups-test --min-age 1h || true
               volumeMounts:
                 - mountPath: /backup
                   name: backup
