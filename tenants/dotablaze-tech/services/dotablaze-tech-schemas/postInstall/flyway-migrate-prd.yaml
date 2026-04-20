@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: flyway-dotablaze-tech-prd
+  name: flyway-dotablaze-tech-prd-v2
   annotations:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
@@ -35,6 +35,7 @@ spec:
               value: public
           args:
             - "-locations=filesystem:/flyway/sql"
+            - "repair"
             - "migrate"
           volumeMounts:
             - mountPath: /flyway/sql
