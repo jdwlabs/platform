@@ -39,6 +39,16 @@ loki:
   ruler:
     enable_api: true
 
+monitoring:
+  serviceMonitor:
+    enabled: true
+  selfMonitoring:
+    enabled: true
+    grafanaAgent:
+      installOperator: false
+  lokiCanary:
+    enabled: true
+
 minio:
   resources:
     requests:
