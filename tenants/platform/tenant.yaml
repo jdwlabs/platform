@@ -212,7 +212,7 @@ services:
   - name: arc-systems
     chart: gha-runner-scale-set-controller
     repo: ghcr.io/actions/actions-runner-controller-charts
-    revision: 0.13.1
+    revision: 0.14.1
     namespace: arc-systems
     postInstall: true
     syncWave: 3
