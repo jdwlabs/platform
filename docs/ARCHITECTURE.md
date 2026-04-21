@@ -169,7 +169,7 @@ Kubernetes nodes via NodePort.
                        ▼                       
 ┌─────────────────────────────────────────────┐
 │          nginx-gateway-fabric Pod           │
-│           (Deployment, 1 replica)           │
+│         (DaemonSet, one per worker)         │
 │                                             │
 │               Terminates TLS                │
 │        Routes via Gateway + HTTPRoute:      │
@@ -224,9 +224,11 @@ graph TB
 
 - `service.type: NodePort` with fixed ports: `:30180` (HTTP), `:30543` (HTTPS)
 - Kubernetes opens these ports on **every node** in the cluster
-- kube-proxy on each node maintains iptables rules that DNAT traffic to the nginx-gateway pod, regardless of which node
-  the pod runs on
-- Single-replica Deployment (not DaemonSet) to conserve resources - kube-proxy handles cross-node routing
+- Data plane runs as a DaemonSet on worker nodes so HAProxy traffic hits a local nginx pod whenever it lands on a
+  worker; kube-proxy still handles cross-node routing if HAProxy balances to a control plane (CPs carry the
+  `node-role.kubernetes.io/control-plane:NoSchedule` taint and do not run the data plane)
+- Control plane (`nginxGateway`) remains a 2-replica Deployment - it only reconciles Gateway API CRDs and does not
+  serve traffic
 
 **nginx-gateway-fabric**
 

@@ -11,8 +11,7 @@ nginxGateway:
     port: 9113
 
 nginx:
-  kind: deployment
-  replicas: 2
+  kind: daemonset
   config:
     ipFamily: ipv4
     rewriteClientIP:
