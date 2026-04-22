@@ -48,11 +48,11 @@ _quotaTiers:
     persistentvolumeclaims: "20"
     services.loadbalancers: "5"
   ci:
-    requests.cpu: "2"
-    requests.memory: 4Gi
-    limits.cpu: "4"
-    limits.memory: 8Gi
-    persistentvolumeclaims: "5"
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    persistentvolumeclaims: "10"
     services.loadbalancers: "0"
 
 _limitRangeTiers:
