@@ -354,7 +354,7 @@ template:
   spec:
     containers:
       - name: runner
-        image: docker.io/jdwillmsen/jdw-agents:1.0.1
+        image: ghcr.io/actions/actions-runner:latest
         command: ["/home/runner/run.sh"]
         env:
           - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
