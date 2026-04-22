@@ -356,7 +356,7 @@ template:
       fsGroup: 123
     containers:
       - name: runner
-        image: ghcr.io/actions/actions-runner:latest
+        image: docker.io/jdwlabs/agents:1.0.0
         command: ["/home/runner/run.sh"]
         env:
           - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
