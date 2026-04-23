@@ -270,6 +270,12 @@ kubectl exec -n vault platform-vault-0 -- sh -c \
     github_app_id=<app-id> \
     github_app_installation_id=<installation-id> \
     github_app_private_key=<pem-private-key>"
+
+# jdwlabs OpenClaw AI keys
+kubectl exec -n vault platform-vault-0 -- sh -c \
+  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/jdwlabs-ai-keys \
+    anthropic_api_key=<sk-ant-xxx> \
+    openai_api_key=<sk-xxx>"
 ```
 
 ### Application secrets (jdwlabs deployments)
@@ -635,6 +641,8 @@ Kubernetes cluster ready
 | `letsencrypt-prod` issuer not Ready    | Porkbun secret missing from Vault           | Seed `kv/porkbun` (Phase 5)                   |
 | Vault pod CrashLoopBackOff             | Initialized but unseal key secret missing   | Create `vault-unseal-keys` secret (Phase 4.4) |
 | ARC runner pods not appearing          | GitHub App secret not seeded                | Seed `kv/<tenant>-github-app` (Phase 5)       |
+| OpenClaw pod in `CrashLoopBackOff`     | AI API keys not seeded in Vault             | Seed `kv/jdwlabs-ai-keys` (Phase 5)           |
+| `ai.jdwlabs.com` not accessible        | HTTPRoute or Ingress issue                  | Check `kubectl describe httproute openclaw`   |
 | `vault-admin-initializer` Job failed   | `vault-token` secret missing in vault ns    | Create `vault-token` secret (Phase 4.4)       |
 | Deployment apps stuck `Missing`        | Deployment repo not accessible              | Check ArgoCD repo credentials                 |
 | CNPG clusters not healthy              | Longhorn storage not ready                  | Check Longhorn pods in `longhorn-system`      |

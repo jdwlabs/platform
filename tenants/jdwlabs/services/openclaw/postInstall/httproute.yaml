@@ -1,0 +1,18 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: openclaw
+  namespace: jdwlabs-ai
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  parentRefs:
+    - name: platform-gateway
+      namespace: nginx-gateway
+      sectionName: https
+  hostnames:
+    - ai.jdwlabs.com
+  rules:
+    - backendRefs:
+        - name: openclaw
+          port: 18789
