@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ubuntu-jdwlabs-gha-rs-kube-mode
+  namespace: jdwlabs-runners
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ubuntu-jdwlabs-gha-rs-kube-mode
+  namespace: jdwlabs-runners
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/exec", "pods/log", "secrets"]
+    verbs: ["get", "list", "create", "delete", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ubuntu-jdwlabs-gha-rs-kube-mode
+  namespace: jdwlabs-runners
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ubuntu-jdwlabs-gha-rs-kube-mode
+subjects:
+  - kind: ServiceAccount
+    name: ubuntu-jdwlabs-gha-rs-kube-mode
+    namespace: jdwlabs-runners
