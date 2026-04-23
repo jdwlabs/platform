@@ -352,6 +352,7 @@ template:
   ##                 requests:
   ##                   storage: 1Gi
   spec:
+    serviceAccountName: jdwlabs-runner
     securityContext:
       fsGroup: 123
     containers:

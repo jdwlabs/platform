@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: buildx-builder
+  namespace: jdwlabs-runners
+subjects:
+  - kind: ServiceAccount
+    name: jdwlabs-runner
+    namespace: jdwlabs-runners
+roleRef:
+  kind: Role
+  name: buildx-builder
+  apiGroup: rbac.authorization.k8s.io
