@@ -363,8 +363,8 @@ template:
             cpu: "4"
             memory: 16Gi
           requests:
-            cpu: "2"
-            memory: 8Gi
+            cpu: "500m"
+            memory: 1Gi
         env:
           - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
             value: "false"
