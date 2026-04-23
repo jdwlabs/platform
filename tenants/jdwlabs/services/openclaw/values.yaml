@@ -1,0 +1,14 @@
+persistence:
+  enabled: true
+  storageClass: "longhorn"
+  size: 5Gi
+
+credentials:
+  existingSecret: "openclaw-credentials"
+
+chromium:
+  enabled: true
+
+# Note: Adjust ingress if you want to expose the control UI
+ingress:
+  enabled: false
