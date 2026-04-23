@@ -14,5 +14,5 @@ spec:
     - ai.jdwlabs.com
   rules:
     - backendRefs:
-        - name: openclaw
+        - name: jdwlabs-openclaw
           port: 18789
