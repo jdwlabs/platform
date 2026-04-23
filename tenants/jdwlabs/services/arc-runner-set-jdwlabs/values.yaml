@@ -358,6 +358,13 @@ template:
       - name: runner
         image: docker.io/jdwlabs/agents:1.0.0
         command: ["/home/runner/run.sh"]
+        resources:
+          limits:
+            cpu: "4"
+            memory: 16Gi
+          requests:
+            cpu: "2"
+            memory: 8Gi
         env:
           - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
             value: "false"
