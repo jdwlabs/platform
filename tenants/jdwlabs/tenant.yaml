@@ -35,7 +35,7 @@ services:
   - name: openclaw
     chart: openclaw
     repo: https://chrisbattarbee.github.io/openclaw-helm
-    revision: 0.1.15
+    revision: 0.1.16
     namespace: jdwlabs-ai
     postInstall: true
     syncWave: 10
