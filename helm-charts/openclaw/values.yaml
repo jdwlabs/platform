@@ -1,0 +1,24 @@
+# OpenClaw Chart Values
+image:
+  repository: ghcr.io/openclaw/openclaw
+  tag: "2026.3.13-1"
+  pullPolicy: IfNotPresent
+
+chromium:
+  enabled: true
+  image:
+    repository: zenika/alpine-chrome
+    tag: "124"
+
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClass: "longhorn"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    cpu: 2000m
+    memory: 2Gi
