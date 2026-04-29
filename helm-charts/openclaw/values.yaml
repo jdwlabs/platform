@@ -1,4 +1,7 @@
 # OpenClaw Chart Values
+replicaCount: 1
+revisionHistoryLimit: 3
+
 image:
   repository: ghcr.io/openclaw/openclaw
   tag: "2026.3.13-1"
