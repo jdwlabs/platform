@@ -26,6 +26,7 @@ config:
         baseUrl: "https://openrouter.ai/api/v1"
         # The OPENROUTER_API_KEY env var is automatically injected from the Secret
         apiKey: "${OPENROUTER_API_KEY}"
+        models: []
 
       # Example: Local Ollama (Uncomment and set up Ollama service first)
       # ollama:
