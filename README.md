@@ -15,11 +15,11 @@ Tenant-centric Kubernetes GitOps platform managed by ArgoCD.
 
 ## Tenants
 
-| Tenant                                              | GitHub Org                                          | Deployment Repo                                              | Purpose                     |
-|-----------------------------------------------------|-----------------------------------------------------|--------------------------------------------------------------|-----------------------------|
-| [jdwlabs](https://github.com/jdwlabs) | [jdwlabs](https://github.com/jdwlabs) | [deployments](https://github.com/jdwlabs/deployments) | AI Agents & Application Services |
-| [dotablaze-tech](https://github.com/dotablaze-tech) | [dotablaze-tech](https://github.com/dotablaze-tech) | [deployments](https://github.com/dotablaze-tech/deployments) | Gaming & Tech Services |
-| [platform](https://github.com/jdwlabs/platform) | [jdwlabs](https://github.com/jdwlabs) | [platform](https://github.com/jdwlabs/platform) | Cluster Core Infrastructure |
+| Tenant                                              | GitHub Org                                          | Deployment Repo                                              | Purpose                          |
+|-----------------------------------------------------|-----------------------------------------------------|--------------------------------------------------------------|----------------------------------|
+| [jdwlabs](https://github.com/jdwlabs) | [jdwlabs](https://github.com/jdwlabs) | [deployments](https://github.com/jdwlabs/deployments) | Workload Tier (AI & Browser-Automation) |
+| [dotablaze-tech](https://github.com/dotablaze-tech) | [dotablaze-tech](https://github.com/dotablaze-tech) | [deployments](https://github.com/dotablaze-tech/deployments) | Workload Tier (Distributed Services) |
+| [platform](https://github.com/jdwlabs/platform) | [jdwlabs](https://github.com/jdwlabs) | [platform](https://github.com/jdwlabs/platform) | Infrastructure Tier (Core Governance) |
 
 ## Quick Links
 
