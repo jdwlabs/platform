@@ -39,22 +39,8 @@ jobs:
       - uses: actions/checkout@v6
       - name: Validate tenant.yaml files
         run: |
-          for f in tenants/*/tenant.yaml; do
-            echo "Validating $f"
-            python3 -c "
-          import yaml, sys
-          with open('$f') as fp:
-              data = yaml.safe_load(fp)
-          assert 'name' in data, '$f missing name key'
-          assert 'namespaces' in data, '$f missing namespaces key'
-          assert 'services' in data, '$f missing services key'
-          required = {'name','chart','repo','revision','namespace','postInstall','syncWave'}
-          for svc in data['services']:
-              missing = required - set(svc.keys())
-              assert not missing, f'Service {svc.get(\"name\")} missing fields: {missing}'
-          print(f'$f valid: {len(data[\"services\"])} services')
-            "
-          done
+          pip install PyYAML
+          python3 tools/validate-tenants.py
 
   kubeconform:
     runs-on: ubuntu-latest

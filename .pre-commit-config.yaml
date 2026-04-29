@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: validate-tenants
+        name: Validate Tenant YAMLs
+        entry: python3 tools/validate-tenants.py
+        language: python
+        files: ^tenants/.*tenant\.yaml$
+        additional_dependencies: [PyYAML]
