@@ -27,6 +27,19 @@ jobs:
           git config user.name "${GITHUB_ACTOR}"
           git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
 
+      - name: Generate index.html
+        run: |
+          pip install PyYAML
+          python3 tools/generate-index.py
+
+      - name: Commit index.html to gh-pages
+        run: |
+          git checkout gh-pages
+          git add index.html
+          git commit -m "docs: update index.html" || echo "No changes to index.html"
+          git push origin gh-pages
+          git checkout main
+
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.7.0
         with:
