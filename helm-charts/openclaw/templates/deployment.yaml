@@ -5,7 +5,8 @@ metadata:
   labels:
     {{- include "openclaw.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicaCount | default 1 }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit | default 3 }}
   selector:
     matchLabels:
       {{- include "openclaw.selectorLabels" . | nindent 6 }}
