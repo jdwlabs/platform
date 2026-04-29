@@ -39,6 +39,7 @@ jobs:
           # Cleanup any existing file in the workspace
           rm -f index.html
           git checkout gh-pages
+          git pull origin gh-pages
           cp ../temp_artifacts/index.html .
           git add index.html
           git commit -m "docs: update index.html" || echo "No changes to index.html"
