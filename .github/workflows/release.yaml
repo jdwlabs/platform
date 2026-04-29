@@ -31,12 +31,13 @@ jobs:
         run: |
           pip install PyYAML
           python3 tools/generate-index.py
+          mkdir -p ../temp_artifacts
+          cp index.html ../temp_artifacts/index.html
 
       - name: Commit index.html to gh-pages
         run: |
-          cp index.html ../index.html
           git checkout gh-pages
-          mv ../index.html .
+          cp ../temp_artifacts/index.html .
           git add index.html
           git commit -m "docs: update index.html" || echo "No changes to index.html"
           git push origin gh-pages
