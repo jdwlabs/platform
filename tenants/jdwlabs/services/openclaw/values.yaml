@@ -17,7 +17,7 @@ config:
         primary: "openrouter/anthropic/claude-4.6-sonnet"
       thinkingDefault: "low"
       timeoutSeconds: 600
-  
+
   # Configure Model Providers
   models:
     providers:
@@ -26,7 +26,7 @@ config:
         baseUrl: "https://openrouter.ai/api/v1"
         # The OPENROUTER_API_KEY env var is automatically injected from the Secret
         apiKey: "${OPENROUTER_API_KEY}"
-      
+
       # Example: Local Ollama (Uncomment and set up Ollama service first)
       # ollama:
       #   baseUrl: "http://ollama.jdwlabs-ai.svc.cluster.local:11434/v1"
