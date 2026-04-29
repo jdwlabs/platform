@@ -42,12 +42,13 @@ def generate_html():
         }}
         body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 3rem 2rem; display: flex; justify-content: center; line-height: 1.6; }}
         .container {{ max-width: 900px; width: 100%; }}
-        header {{ margin-bottom: 3rem; }}
-        h1 {{ color: var(--primary); font-size: 2.5rem; margin-bottom: 0.5rem; }}
-        .setup-box {{ background: var(--card-bg); padding: 2rem; border-radius: 1rem; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }}
-        pre {{ background: var(--code-bg); color: var(--code-text); padding: 1.5rem; border-radius: 0.75rem; overflow-x: auto; position: relative; font-size: 0.95rem; }}
-        .copy-btn {{ position: absolute; top: 0.75rem; right: 0.75rem; cursor: pointer; background: #475569; border: none; color: white; padding: 0.4rem 0.8rem; border-radius: 0.5rem; font-size: 0.75rem; font-weight: 600; }}
-        .section-title {{ font-size: 1.5rem; margin: 2rem 0 1rem; display: flex; align-items: center; gap: 0.5rem; }}
+        header { margin-bottom: 3rem; }
+        h1 { font-size: 2.5rem; margin-bottom: 0.5rem; }
+        h1 a { color: var(--primary); }
+        .setup-box { background: var(--card-bg); padding: 2rem; border-radius: 1rem; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+        pre { background: var(--code-bg); color: var(--code-text); padding: 1.5rem; border-radius: 0.75rem; overflow-x: auto; position: relative; font-size: 0.95rem; }
+        .copy-btn { position: absolute; top: 0.75rem; right: 0.75rem; cursor: pointer; background: var(--border); border: 1px solid var(--border); color: var(--text); padding: 0.4rem 0.8rem; border-radius: 0.5rem; font-size: 0.75rem; font-weight: 600; }
+        .copy-btn:hover { background: var(--primary); color: white; }
         .chart-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; }}
         .chart-card {{ background: var(--card-bg); padding: 1.5rem; border-radius: 1rem; border: 1px solid var(--border); display: flex; flex-direction: column; transition: transform 0.2s; box-shadow: 0 1px 3px rgb(0 0 0 / 0.1); }}
         .chart-card:hover {{ transform: translateY(-4px); border-color: var(--primary); }}
@@ -60,7 +61,7 @@ def generate_html():
 <body>
     <div class="container">
         <header>
-            <h1>Jdwlabs Platform Helm Charts</h1>
+            <h1><a href="https://github.com/jdwlabs/platform">Jdwlabs Platform Helm Charts</a></h1>
             <p>Official Helm repository for the Jdwlabs Platform infrastructure services.</p>
         </header>
 
