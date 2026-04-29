@@ -1,0 +1,36 @@
+apiVersion: v1
+entries:
+  openclaw:
+  - apiVersion: v2
+    appVersion: 2026.3.13
+    created: "2026-04-29T04:51:30.791490679Z"
+    description: A Helm chart for OpenClaw AI Gateway
+    digest: d9fe36aef8e3c2c4d6ed605307f51b8456032ff4efdc23c8fe7b181bde3990d4
+    name: openclaw
+    type: application
+    urls:
+    - https://github.com/jdwlabs/platform/releases/download/openclaw-0.1.15/openclaw-0.1.15.tgz
+    version: 0.1.15
+  porkbun-webhook:
+  - apiVersion: v1
+    appVersion: "1.0"
+    created: "2026-04-29T04:51:30.945536223Z"
+    description: A Porkbun solver for Cert Manager.
+    digest: 099cc5a3307526e2cbcd88d75e8215a098e05b2b2a7994c978e7603de8ac670a
+    name: porkbun-webhook
+    urls:
+    - https://github.com/jdwlabs/platform/releases/download/porkbun-webhook-0.1.5/porkbun-webhook-0.1.5.tgz
+    version: 0.1.5
+  tenant-envelope:
+  - apiVersion: v2
+    created: "2026-04-29T04:51:31.080764217Z"
+    description: 'Provisions the complete governance envelope for one platform tenant:
+      namespaces, resource quotas, limit ranges, network policies, AppProject, ARC
+      RBAC, and the ArgoCD ApplicationSets that drive the tenant''s workloads.'
+    digest: 90f4405e46ae5600a21e81ac6a318a455fce6233f466988c67633cf095bfaa29
+    name: tenant-envelope
+    type: application
+    urls:
+    - https://github.com/jdwlabs/platform/releases/download/tenant-envelope-1.0.0/tenant-envelope-1.0.0.tgz
+    version: 1.0.0
+generated: "2026-04-29T04:51:31.080767874Z"
