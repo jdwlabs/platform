@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jdwlabs Helm Charts</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --text: #f8fafc;
+            --primary: #38bdf8;
+            --secondary: #94a3b8;
+            --card: #1e293b;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            max-width: 800px;
+            width: 100%;
+        }
+        h1 { font-size: 2.5rem; color: var(--primary); margin-bottom: 0.5rem; }
+        p.subtitle { font-size: 1.2rem; color: var(--secondary); margin-top: 0; }
+        .setup {
+            background: var(--card);
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            margin: 2rem 0;
+            border: 1px solid #334155;
+        }
+        code {
+            background: #000;
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.25rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
+        pre {
+            background: #000;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+        }
+        .charts {
+            display: grid;
+            gap: 1rem;
+        }
+        .chart-card {
+            background: var(--card);
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            border: 1px solid #334155;
+            transition: transform 0.2s;
+        }
+        .chart-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--primary);
+        }
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .chart-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary);
+        }
+        .version {
+            font-size: 0.875rem;
+            background: #334155;
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Jdwlabs Helm Charts</h1>
+        <p class="subtitle">Official Helm repository for Jdwlabs platform services.</p>
+
+        <div class="setup">
+            <h3>🚀 Setup</h3>
+            <p>Add this repository to Helm:</p>
+            <pre><code>helm repo add jdwlabs https://jdwlabs.github.io/platform/
+helm repo update</code></pre>
+        </div>
+
+        <h3>📦 Available Charts</h3>
+        <div class="charts">
+            <div class="chart-card">
+                <div class="chart-header">
+                    <span class="chart-title">openclaw</span>
+                    <span class="version">v0.1.15</span>
+                </div>
+                <p>Advanced OpenClaw AI Gateway with browser integration and configuration merging.</p>
+            </div>
+            <div class="chart-card">
+                <div class="chart-header">
+                    <span class="chart-title">porkbun-webhook</span>
+                    <span class="version">v0.1.5</span>
+                </div>
+                <p>Cert-manager DNS01 webhook solver for Porkbun DNS.</p>
+            </div>
+            <div class="chart-card">
+                <div class="chart-header">
+                    <span class="chart-title">tenant-envelope</span>
+                    <span class="version">v1.0.0</span>
+                </div>
+                <p>Governance and automation envelope for multi-tenant platform isolation.</p>
+            </div>
+        </div>
+
+        <footer style="margin-top: 4rem; text-align: center; color: var(--secondary); font-size: 0.875rem;">
+            &copy; 2026 Jdwlabs &bull; <a href="https://github.com/jdwlabs/platform" style="color: var(--primary); text-decoration: none;">View Source on GitHub</a>
+        </footer>
+    </div>
+</body>
+</html>
