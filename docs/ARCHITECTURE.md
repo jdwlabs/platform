@@ -2,251 +2,50 @@
 
 ## Overview
 
-`jdwlabs/platform` is a tenant-centric GitOps repository managing Kubernetes applications via ArgoCD ApplicationSets
-with explicit tenant boundaries, namespace isolation, and resource controls.
+`jdwlabs/platform` is a tenant-centric GitOps platform managing Kubernetes applications via ArgoCD. It enforces tenant boundaries, namespace isolation, and standardized resource controls.
 
 ## Repository Layout
 
 ```
 platform/
 ├── bootstrap/        # ArgoCD ApplicationSets and AppProjects
-├── platform/         # Shared infrastructure apps (cluster-wide)
-├── tenants/          # Per-tenant app configs and manifests
-├── helm-charts/      # Custom Helm charts
-└── docs/             # Documentation
+├── platform/         # Shared infrastructure apps (Vault, cert-manager, etc.)
+├── tenants/          # Per-tenant configurations (ARC runners, database schemas)
+├── helm-charts/      # Custom, versioned Helm charts (porkbun-webhook, openclaw)
+└── docs/             # Architecture and onboarding documentation
 ```
+
+## Chart Management & Publishing
+The platform manages custom Helm charts in the `helm-charts/` directory. These are versioned and published automatically to a GitHub Pages-hosted Helm repository:
+
+- **Helm Repo URL**: `https://jdwlabs.github.io/platform/`
+- **Automation**: Managed by the `.github/workflows/release.yaml` workflow, which packages charts and updates the repository index on every `main` branch push.
 
 ## ArgoCD Model
 
 ### Governance ApplicationSet (`bootstrap/governance-appset.yaml`)
+- Scans `tenants/*/tenant.yaml` via git file generator.
+- Renders `helm-charts/tenant-envelope` for each tenant.
+- Generates per-tenant `<name>-services` and `<name>-deployments` ApplicationSets.
 
-- Scans `tenants/*/tenant.yaml` via git file generator
-- Renders `helm-charts/tenant-envelope` for each tenant
-- Creates namespaces, quotas, limit ranges, network policies, AppProjects
-- Generates per-tenant `<name>-services` and `<name>-deployments` ApplicationSets
-- Services ApplicationSet deploys from Helm chart + values ref + optional postInstall raw manifests
-- Deployments ApplicationSet (if `deploymentRepo.url` set) deploys from the tenant's deployment repo
-- Automated sync with prune and self-heal
-
-### Deployments ApplicationSet
-
-When a tenant defines `deploymentRepo.url` in their `tenant.yaml`, the `tenant-envelope` chart generates a
-`<tenant>-deployments` ApplicationSet. This enables tenants to manage their own application deployments in a separate
-Git repository.
-
-The ApplicationSet uses a **matrix generator** combining:
-
-1. **Git file generator** scanning `argocd/*/config.yaml` in the deployment repo (one file per environment)
-2. **List generator** expanding the `apps` array from each matched config file
-
-Each entry in `apps` becomes an ArgoCD Application named `<tenant>-<name>`.
-
-#### Deployment repo structure
-
-```
-<deploymentRepo>/
-├── argocd/
-│   ├── non/
-│   │   └── config.yaml  # Defines apps for non environment
-│   └── prd/
-│       └── config.yaml  # Defines apps for prd environment
-└── charts/
-    └── <chart-name>/
-        ├── Chart.yaml
-        ├── templates/
-        ├── values.yaml        # Base values
-        ├── values-non.yaml    # Non-prod overrides
-        └── values-prd.yaml    # Prod overrides
-```
-
-#### Config file schema (`argocd/<env>/config.yaml`)
-
+### Services Deployment
+Services use versioned Helm charts from the repository:
 ```yaml
-apps:
-  - name: <name>                   # Used in Application name: <tenant>-<name>
-    namespace: <target-ns>         # Must be a namespace the tenant owns
-    chartPath: charts/<chart>      # Path to chart in the deployment repo
-    syncWave: "0"                  # Default ordering (default: "0")
-    valueFiles: # Helm value files relative to chartPath
-      - values.yaml
-      - values-<env>.yaml
+# tenants/jdwlabs/tenant.yaml
+services:
+  - name: openclaw
+    chart: openclaw
+    repo: https://jdwlabs.github.io/platform/
+    revision: 0.1.15
 ```
-
-Sync options applied to all deployment repo apps: `CreateNamespace=false`, `PruneLast=true`, `ServerSideApply=true`.
-
-## Sync Wave Ordering
-
-| Wave | Category            | Apps                                                               |
-|------|---------------------|--------------------------------------------------------------------|
-| 0    | Bootstrap           | argo-cd (self-management)                                          |
-| 1    | Core infrastructure | cert-manager, nginx-gateway-fabric, longhorn                       |
-| 2    | Platform services   | vault, external-secrets, monitoring, grafana, atlas-operator, etc. |
-| 3    | Operators           | cnpg-operator, arc-systems                                         |
-| 4    | Shared databases    | postgresql-cluster-non, postgresql-cluster-prd, db-ui              |
-| 5    | Tenant workloads    | ARC runner sets, Atlas schemas                                     |
-
-## Namespace Strategy
-
-- Platform namespaces: original names (`vault`, `argocd`, `monitoring`, etc.)
-- Tenant namespaces: `<tenant>-<purpose>` (e.g. `jdwlabs-runners`, `dotablaze-tech-runners`)
-- Database namespace: shared `database` (CNPG clusters platform-tier)
-
-## Secret Management
-
-- Vault at `http://vault.vault.svc.cluster.local:8200`
-- ClusterSecretStore named `vault` for platform-wide access
-- Vault KV paths: `kv/platform`, `kv/jdwlabs`, `kv/dotablaze-tech`
-- ExternalSecret CRs in each namespace pull from ClusterSecretStore
-
-## Infrastructure Stack
-
-| Component                   | Purpose                                            | Namespace        |
-|-----------------------------|----------------------------------------------------|------------------|
-| cert-manager                | TLS certificates via Let's Encrypt + Porkbun DNS01 | cert-manager     |
-| nginx-gateway-fabric        | Gateway API controller (NodePort via HAProxy)      | nginx-gateway    |
-| Longhorn                    | Distributed block storage                          | longhorn-system  |
-| Vault                       | Secret management                                  | vault            |
-| ESO                         | External Secrets Operator                          | external-secrets |
-| ArgoCD                      | GitOps continuous delivery                         | argocd           |
-| CNPG                        | CloudNativePG database operator                    | cnpg-system      |
-| Atlas                       | Database schema migration operator                 | atlas            |
-| ARC                         | GitHub Actions Runner Controller                   | arc-systems      |
-| Prometheus + Grafana + Loki | Observability stack                                | monitoring       |
 
 ## Traffic Routing
+Traffic flows through DNS ➜ Router (NAT) ➜ HAProxy ➜ NGINX Gateway Fabric (NodePort) ➜ Backend Pods.
 
-### Overview
+| Component | Purpose |
+| :--- | :--- |
+| **HAProxy** | External Load Balancer (Bare-metal) |
+| **NGINX Gateway** | Gateway API Controller (DaemonSet) |
+| **HTTPRoute** | Per-service host-based routing |
 
-All external traffic enters the cluster through a single path: DNS resolves to the
-router's public IP, the router NATs to HAProxy, and HAProxy load-balances across
-Kubernetes nodes via NodePort.
-
-```
-┌─────────────────────────────────────────────┐
-│                  Internet                   │
-└─────────────────────────────────────────────┘
-                       │                       
-              DNS: *.jdwlabs.com               
-              CNAME ➜ jdwlabs.com              
-            A ➜ <router public IP>             
-                       │                       
-                       ▼                       
-┌─────────────────────────────────────────────┐
-│          Router (NAT/Port Forward)          │
-│                                             │
-│             :80  ➜ <haproxy>:80             │
-│            :443 ➜ <haproxy>:443             │
-└─────────────────────────────────────────────┘
-                       │                       
-                       ▼                       
-┌─────────────────────────────────────────────┐
-│       HAProxy (Static IP, bare-metal)       │
-│                                             │
-│         :80/:443  ➜  nginx-gateway          │
-│         :6443     ➜  Kubernetes API         │
-│           :50000    ➜  Talos API            │
-│         :9000     ➜  HAProxy stats          │
-└─────────────────────────────────────────────┘
-                       │                       
-        ┌──────────────┼──────────────┐        
-        │              │              │        
-        ▼              ▼              ▼        
-┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-│   Control   │ │   Control   │ │    Worker   │
-│    Plane    │ │    Plane    │ │    Node     │
-│             │ │             │ │             │
-│ :30180 HTTP │ │ :30180 HTTP │ │ :30180 HTTP │
-│ :30543 HTTPS│ │ :30543 HTTPS│ │ :30543 HTTPS│
-│ :6443  K8s  │ │ :6443  K8s  │ │             │
-│ :50000Talos │ │ :50000Talos │ │             │
-└──────┬──────┘ └──────┬──────┘ └──────┬──────┘
-       │               │               │       
-       └───────────────┼───────────────┘       
-                       │                       
-             kube-proxy (iptables)             
-               routes to pod IP                
-                       │                       
-                       ▼                       
-┌─────────────────────────────────────────────┐
-│          nginx-gateway-fabric Pod           │
-│         (DaemonSet, one per worker)         │
-│                                             │
-│               Terminates TLS                │
-│        Routes via Gateway + HTTPRoute:      │
-│                                             │
-│         argocd.jdwlabs.com   ➜ :443         │
-│         vault.jdwlabs.com    ➜ :8200        │
-│          grafana.jdwlabs.com ➜ :80          │
-└─────────────────────────────────────────────┘
-                       │                       
-                       ▼                       
-┌─────────────────────────────────────────────┐
-│             Backend Service Pod             │
-│         (argocd, vault, grafana...)         │
-└─────────────────────────────────────────────┘                          
-```
-
-```mermaid
-graph TB
-    Internet --> Router
-    Router --> HAProxy
-    HAProxy --> CP1[Control Plane 1]
-    HAProxy --> CP2[Control Plane 2]
-    HAProxy --> Worker
-    CP1 --> Ingress
-    CP2 --> Ingress
-    Worker --> Ingress
-    Ingress --> Backend
-```
-
-### How each layer works
-
-**DNS (Porkbun)**
-
-- `jdwlabs.com` A record ➜ router's public IPv4
-- `*.jdwlabs.com` CNAME ➜ `jdwlabs.com` (all subdomains inherit the A record)
-- TLS certificates issued by Let's Encrypt via cert-manager DNS01 challenge (Porkbun webhook)
-
-**Router**
-
-- NAT/port-forwards TCP :80 and :443 to the HAProxy static IP
-- Only two ports needed for all HTTP/HTTPS services
-
-**HAProxy**
-
-- Central entry point for all cluster traffic (static IP, bare-metal VM outside the cluster)
-- IP is configured via `haproxy_ip` in terraform.tfvars
-- HTTP/HTTPS frontends use TCP mode with PROXY protocol (`send-proxy`) so nginx-gateway-fabric sees real client IPs
-- Health checks each backend node - if a node goes down, traffic is automatically rerouted
-- Config is auto-generated and reloaded by `talops reconcile` whenever nodes are added or removed
-
-**NodePort (nginx-gateway-fabric)**
-
-- `service.type: NodePort` with fixed ports: `:30180` (HTTP), `:30543` (HTTPS)
-- Kubernetes opens these ports on **every node** in the cluster
-- Data plane runs as a DaemonSet on worker nodes so HAProxy traffic hits a local nginx pod whenever it lands on a
-  worker; kube-proxy still handles cross-node routing if HAProxy balances to a control plane (CPs carry the
-  `node-role.kubernetes.io/control-plane:NoSchedule` taint and do not run the data plane)
-- Control plane (`nginxGateway`) remains a 2-replica Deployment - it only reconciles Gateway API CRDs and does not
-  serve traffic
-
-**nginx-gateway-fabric**
-
-- Gateway API controller; a single `platform-gateway` Gateway in the `nginx-gateway` namespace fronts all HTTPS traffic
-- Terminates TLS using certificates from cert-manager (via `ReferenceGrafnt` for cross-namespace Secret access)
-- Routes requests via `HTTPRoute` resources in each backend namespace, keyed on hostname
-- Uses PROXY protocol to decode real client IPs from HAProxy
-
-### Kubernetes API access
-
-The Kubernetes API follows a separate path through HAProxy:
-
-```
-kubectl ➜ cluster.jdwlabs.com:6443
-  ➜ HAProxy :6443 ➜ control-plane-1:6443
-                  ➜ control-plane-2:6443 (leastconn balancing)
-                  ➜ control-plane-3:6443
-```
-
-Talos nodes resolve `cluster.jdwlabs.com` to the HAProxy IP via static `/etc/hosts`
-entries injected by the machine config (`extraHostEntries`).
+See `docs/ARCHITECTURE.md` for full detailed diagrams.
