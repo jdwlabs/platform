@@ -34,7 +34,7 @@ jobs:
 
       - name: Commit index.html to gh-pages
         run: |
-          rm -f index.html
+          cp index.html ../index.html
           git checkout gh-pages
           mv ../index.html .
           git add index.html
