@@ -84,8 +84,8 @@ def generate_html():
         <h1>Jdwlabs Helm Charts</h1>
         <div class="setup-box">
             <h3>Repository Setup</h3>
-            <code>helm repo add jdwlabs https://jdwlabs.github.io/platform/</code><br>
-            <code>helm repo update</code>
+            <pre><code>helm repo add jdwlabs https://jdwlabs.github.io/platform/
+helm repo update</code></pre>
         </div>
         <div class="chart-grid">
             {charts_html}
