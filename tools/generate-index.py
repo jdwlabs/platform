@@ -22,23 +22,23 @@ def generate_html():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jdwlabs Helm Repository</title>
     <style>
-        :root {
+        :root {{
             --bg: #ffffff;
             --text: #1e293b;
             --primary: #0284c7;
             --card-bg: #f8fafc;
             --border: #e2e8f0;
-        }
-        @media (prefers-color-scheme: dark) {
-            :root {
+        }}
+        @media (prefers-color-scheme: dark) {{
+            :root {{
                 --bg: #0f172a;
                 --text: #f8fafc;
                 --primary: #38bdf8;
                 --card-bg: #1e293b;
                 --border: #334155;
-            }
-        }
-        body {
+            }}
+        }}
+        body {{
             font-family: system-ui, -apple-system, sans-serif;
             background-color: var(--bg);
             color: var(--text);
@@ -46,37 +46,37 @@ def generate_html():
             padding: 2rem;
             display: flex;
             justify-content: center;
-        }
-        .container { max-width: 800px; width: 100%; }
-        h1 { color: var(--primary); }
-        .setup-box {
+        }}
+        .container {{ max-width: 800px; width: 100%; }}
+        h1 {{ color: var(--primary); }}
+        .setup-box {{
             background: var(--card-bg);
             padding: 1.5rem;
             border-radius: 0.75rem;
             border: 1px solid var(--border);
             margin-bottom: 2rem;
-        }
-        code {
+        }}
+        code {{
             background: rgba(0,0,0,0.1);
             padding: 0.2rem 0.4rem;
             border-radius: 0.25rem;
             font-family: monospace;
-        }
-        .chart-grid { display: grid; gap: 1rem; }
-        .chart-card {
+        }}
+        .chart-grid {{ display: grid; gap: 1rem; }}
+        .chart-card {{
             background: var(--card-bg);
             padding: 1.25rem;
             border-radius: 0.5rem;
             border: 1px solid var(--border);
-        }
-        .chart-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
-        .badge {
+        }}
+        .chart-meta {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }}
+        .badge {{
             font-size: 0.8rem;
             background: var(--primary);
             color: white;
             padding: 0.2rem 0.6rem;
             border-radius: 1rem;
-        }
+        }}
     </style>
 </head>
 <body>
