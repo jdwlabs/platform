@@ -275,7 +275,8 @@ kubectl exec -n vault platform-vault-0 -- sh -c \
 kubectl exec -n vault platform-vault-0 -- sh -c \
   "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/jdwlabs-ai-keys \
     anthropic_api_key=<sk-ant-xxx> \
-    openai_api_key=<sk-xxx>"
+    openai_api_key=<sk-xxx> \
+    openrouter_api_key=<sk-or-xxx>"
 ```
 
 ### Application secrets (jdwlabs deployments)
