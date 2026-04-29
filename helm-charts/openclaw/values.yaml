@@ -1,6 +1,6 @@
 # OpenClaw Chart Values
 replicaCount: 1
-revisionHistoryLimit: 3
+revisionHistoryLimit: 0
 
 image:
   repository: ghcr.io/openclaw/openclaw
