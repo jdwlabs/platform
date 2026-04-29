@@ -15,6 +15,11 @@ persistence:
   size: 5Gi
   storageClass: "longhorn"
 
+credentials:
+  existingSecret: ""
+
+config: {}
+
 resources:
   requests:
     cpu: 100m
