@@ -20,7 +20,7 @@ def generate_html():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jdwlabs Helm Repository</title>
+    <title>Jdwlabs Platform Helm Repository</title>
     <style>
         :root {
             --bg: #ffffff; --text: #1e293b; --primary: #0284c7; --card-bg: #f8fafc; --border: #e2e8f0; --code-bg: #1e293b; --code-text: #e2e8f0;
