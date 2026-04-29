@@ -14,6 +14,54 @@ spec:
       labels:
         {{- include "openclaw.selectorLabels" . | nindent 8 }}
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+      {{- if .Values.config }}
+      - name: init-config
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        securityContext:
+          runAsUser: 0
+          runAsNonRoot: false
+        command:
+          - /bin/sh
+          - -c
+          - |
+            mkdir -p /home/openclaw/.openclaw
+            if [ -f /home/openclaw/.openclaw/openclaw.json ]; then
+              # Merge: existing config as base, helm config overwrites
+              node -e "
+                const fs = require('fs');
+                const existing = JSON.parse(fs.readFileSync('/home/openclaw/.openclaw/openclaw.json', 'utf8'));
+                const helm = JSON.parse(fs.readFileSync('/config/openclaw.json', 'utf8'));
+                const deepMerge = (target, source) => {
+                  for (const key of Object.keys(source)) {
+                    if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+                      target[key] = target[key] || {};
+                      deepMerge(target[key], source[key]);
+                    } else {
+                      target[key] = source[key];
+                    }
+                  }
+                  return target;
+                };
+                const merged = deepMerge(existing, helm);
+                fs.writeFileSync('/home/openclaw/.openclaw/openclaw.json', JSON.stringify(merged, null, 2));
+              "
+            else
+              cp /config/openclaw.json /home/openclaw/.openclaw/openclaw.json
+            fi
+            chown -R 1000:1000 /home/openclaw/.openclaw
+        volumeMounts:
+          - name: data
+            mountPath: /home/openclaw/.openclaw
+          - name: config
+            mountPath: /config
+            readOnly: true
+      {{- end }}
       containers:
       - name: openclaw
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -24,12 +72,16 @@ spec:
           value: /home/openclaw
         - name: TZ
           value: UTC
+        {{- if .Values.credentials.existingSecret }}
         envFrom:
         - secretRef:
-            name: openclaw-credentials
+            name: {{ .Values.credentials.existingSecret }}
+        {{- end }}
         ports:
         - name: gateway
           containerPort: 18789
+        - name: canvas
+          containerPort: 18793
         volumeMounts:
         - name: data
           mountPath: /home/openclaw/.openclaw
@@ -42,8 +94,13 @@ spec:
       volumes:
       - name: data
         persistentVolumeClaim:
-          claimName: jdwlabs-openclaw
+          claimName: {{ include "openclaw.fullname" . }}
       - name: dshm
         emptyDir:
           medium: Memory
           sizeLimit: 1Gi
+      {{- if .Values.config }}
+      - name: config
+        configMap:
+          name: {{ include "openclaw.fullname" . }}
+      {{- end }}
