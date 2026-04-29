@@ -36,6 +36,8 @@ jobs:
 
       - name: Commit index.html to gh-pages
         run: |
+          # Cleanup any existing file in the workspace
+          rm -f index.html
           git checkout gh-pages
           cp ../temp_artifacts/index.html .
           git add index.html
