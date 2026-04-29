@@ -34,7 +34,9 @@ jobs:
 
       - name: Commit index.html to gh-pages
         run: |
+          rm -f index.html
           git checkout gh-pages
+          mv ../index.html .
           git add index.html
           git commit -m "docs: update index.html" || echo "No changes to index.html"
           git push origin gh-pages
