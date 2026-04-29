@@ -15,10 +15,11 @@ Tenant-centric Kubernetes GitOps platform managed by ArgoCD.
 
 ## Tenants
 
-| Tenant         | GitHub Org | Deployment Repo | Purpose |
-|----------------|------------|-----------------|---------|
+| Tenant                                              | GitHub Org                                          | Deployment Repo                                              | Purpose                 |
+|-----------------------------------------------------|-----------------------------------------------------|--------------------------------------------------------------|-------------------------|
 | [jdwlabs](https://github.com/jdwlabs) | [jdwlabs](https://github.com/jdwlabs) | [deployments](https://github.com/jdwlabs/deployments) | Jdwlabs platform |
 | [dotablaze-tech](https://github.com/dotablaze-tech) | [dotablaze-tech](https://github.com/dotablaze-tech) | [dotablaze-deployments](https://github.com/dotablaze-tech/dotablaze-deployments) | Dotablaze Tech platform |
+| [platform](https://github.com/jdwlabs/platform) | [jdwlabs](https://github.com/jdwlabs) | [N/A](https://github.com/jdwlabs/platform) | Cluster Core Infrastructure |
 
 ## Quick Links
 
