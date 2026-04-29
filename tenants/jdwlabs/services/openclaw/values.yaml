@@ -1,3 +1,5 @@
+replicaCount: 0
+
 persistence:
   enabled: true
   storageClass: "longhorn"
@@ -40,6 +42,10 @@ config:
     controlUi:
       dangerouslyAllowHostHeaderOriginFallback: true
 
-# Note: Adjust ingress if you want to expose the control UI
-ingress:
-  enabled: false
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 256Mi

@@ -9,10 +9,10 @@
 ```
 platform/
 ├── bootstrap/        # ArgoCD ApplicationSets and AppProjects
-├── platform/         # Shared infrastructure apps (Vault, cert-manager, etc.)
+├── platform/         # Shared infrastructure apps (cluster-wide)
 ├── tenants/          # Per-tenant configurations (ARC runners, database schemas)
 ├── helm-charts/      # Custom, versioned Helm charts (porkbun-webhook, openclaw)
-└── docs/             # Architecture and onboarding documentation
+└── docs/             # Documentation
 ```
 
 ## Chart Management & Publishing
@@ -42,10 +42,88 @@ services:
 ## Traffic Routing
 Traffic flows through DNS ➜ Router (NAT) ➜ HAProxy ➜ NGINX Gateway Fabric (NodePort) ➜ Backend Pods.
 
+```
+┌─────────────────────────────────────────────┐
+│                  Internet                   │
+└─────────────────────────────────────────────┘
+                       │                       
+              DNS: *.jdwlabs.com               
+              CNAME ➜ jdwlabs.com              
+            A ➜ <router public IP>             
+                       │                       
+                       ▼                       
+┌─────────────────────────────────────────────┐
+│          Router (NAT/Port Forward)          │
+│                                             │
+│             :80  ➜ <haproxy>:80             │
+│            :443 ➜ <haproxy>:443             │
+└─────────────────────────────────────────────┘
+                       │                       
+                       ▼                       
+┌─────────────────────────────────────────────┐
+│       HAProxy (Static IP, bare-metal)       │
+│                                             │
+│         :80/:443  ➜  nginx-gateway          │
+│         :6443     ➜  Kubernetes API         │
+│           :50000    ➜  Talos API            │
+│         :9000     ➜  HAProxy stats          │
+└─────────────────────────────────────────────┘
+                       │                       
+        ┌──────────────┼──────────────┐        
+        │              │              │        
+        ▼              ▼              ▼        
+┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+│   Control   │ │   Control   │ │    Worker   │
+│    Plane    │ │    Plane    │ │    Node     │
+│             │ │             │ │             │
+│ :30180 HTTP │ │ :30180 HTTP │ │ :30180 HTTP │
+│ :30543 HTTPS│ │ :30543 HTTPS│ │ :30543 HTTPS│
+│ :6443  K8s  │ │ :6443  K8s  │ │             │
+│ :50000Talos │ │ :50000Talos │ │             │
+└──────┬──────┘ └──────┬──────┘ └──────┬──────┘
+       │               │               │       
+       └───────────────┼───────────────┘       
+                       │                       
+             kube-proxy (iptables)             
+               routes to pod IP                
+                       │                       
+                       ▼                       
+┌─────────────────────────────────────────────┐
+│          nginx-gateway-fabric Pod           │
+│         (DaemonSet, one per worker)         │
+│                                             │
+│               Terminates TLS                │
+│        Routes via Gateway + HTTPRoute:      │
+│                                             │
+│         argocd.jdwlabs.com   ➜ :443         │
+│         vault.jdwlabs.com    ➜ :8200        │
+│          grafana.jdwlabs.com ➜ :80          │
+└─────────────────────────────────────────────┘
+                       │                       
+                       ▼                       
+┌─────────────────────────────────────────────┐
+│             Backend Service Pod             │
+│         (argocd, vault, grafana...)         │
+└─────────────────────────────────────────────┘                          
+```
+
+```mermaid
+graph TB
+    Internet --> Router
+    Router --> HAProxy
+    HAProxy --> CP1[Control Plane 1]
+    HAProxy --> CP2[Control Plane 2]
+    HAProxy --> Worker
+    CP1 --> Ingress
+    CP2 --> Ingress
+    Worker --> Ingress
+    Ingress --> Backend
+```
+
+### Components Summary
+
 | Component | Purpose |
 | :--- | :--- |
 | **HAProxy** | External Load Balancer (Bare-metal) |
 | **NGINX Gateway** | Gateway API Controller (DaemonSet) |
 | **HTTPRoute** | Per-service host-based routing |
-
-See `docs/ARCHITECTURE.md` for full detailed diagrams.
