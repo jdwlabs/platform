@@ -25,6 +25,8 @@ namespaces:
 
 project:
   elevated: false
+  extraSourceRepos:
+    - https://github.com/jdwlabs/platform.git
   clusterResourceWhitelist:
     - group: rbac.authorization.k8s.io
       kind: ClusterRole
