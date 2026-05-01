@@ -36,6 +36,8 @@ project:
 services:
   - name: openclaw
     chartPath: helm-charts/openclaw
+    repo: https://github.com/jdwlabs/platform.git
+    revision: main
     namespace: jdwlabs-ai
     postInstall: true
     syncWave: 10
