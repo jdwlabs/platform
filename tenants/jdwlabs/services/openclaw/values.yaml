@@ -4,7 +4,6 @@ revisionHistoryLimit: 0
 image:
   tag: "2026.4.29"
 
-
 persistence:
   enabled: true
   storageClass: "longhorn"
