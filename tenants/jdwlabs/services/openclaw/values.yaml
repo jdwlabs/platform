@@ -47,9 +47,17 @@ config:
         - "https://ai.jdwlabs.com"
 
 resources:
-  limits:
-    cpu: 2000m
-    memory: 2Gi
-  requests:
-    cpu: 100m
-    memory: 512Mi
+  openclaw:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 100m
+      memory: 512Mi
+  chromium:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi
