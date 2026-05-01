@@ -67,7 +67,7 @@ spec:
       - name: openclaw
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
-        {{- with .Values.resources }}
+        {{- with .Values.resources.openclaw }}
         resources:
           {{- toYaml . | nindent 10 }}
         {{- end }}
@@ -92,6 +92,10 @@ spec:
           mountPath: /home/openclaw/.openclaw
       - name: chromium
         image: "{{ .Values.chromium.image.repository }}:{{ .Values.chromium.image.tag }}"
+        {{- with .Values.resources.chromium }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         command: ["chromium-browser", "--headless", "--disable-gpu", "--no-sandbox", "--remote-debugging-address=0.0.0.0", "--remote-debugging-port=9222"]
         volumeMounts:
         - name: dshm
