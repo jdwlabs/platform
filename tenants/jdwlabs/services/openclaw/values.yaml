@@ -2,7 +2,8 @@ replicaCount: 1
 revisionHistoryLimit: 0
 
 image:
-  tag: "2026.4.27"
+  tag: "2026.4.29"
+
 
 persistence:
   enabled: true
