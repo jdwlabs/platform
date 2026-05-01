@@ -1,5 +1,8 @@
-replicaCount: 0
+replicaCount: 1
 revisionHistoryLimit: 0
+
+image:
+  tag: "2026.4.27"
 
 persistence:
   enabled: true
@@ -31,17 +34,17 @@ config:
         apiKey: "${OPENROUTER_API_KEY}"
         models: []
 
-      # Example: Local Ollama (Uncomment and set up Ollama service first)
-      # ollama:
-      #   baseUrl: "http://ollama.jdwlabs-ai.svc.cluster.local:11434/v1"
-      #   apiKey: "ollama" # Usually ignored but required by schema
-
   browser:
     cdpUrl: "http://localhost:9222"
   gateway:
     mode: "local"
+    trustedProxies: 
+      - "10.244.0.0/16"
+      - "192.168.1.0/24"
     controlUi:
       dangerouslyAllowHostHeaderOriginFallback: true
+      allowedOrigins:
+        - "https://ai.jdwlabs.com"
 
 resources:
   limits:
