@@ -11,6 +11,7 @@ singleBinary:
     enabled: true
     storageClassName: ""
     storageClass: ""
+    size: 20Gi
 
 chunksCache:
   enabled: true
@@ -59,6 +60,7 @@ minio:
     enabled: true
     storageClassName: ""
     storageClass: ""
+    size: 20Gi
   enabled: true
 
 # Zero out other deployment modes
