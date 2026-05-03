@@ -4,9 +4,9 @@ singleBinary:
   replicas: 1
   resources:
     requests:
-      memory: 512Mi
-    limits:
       memory: 1Gi
+    limits:
+      memory: 2Gi
   persistence:
     enabled: true
     storageClassName: ""
