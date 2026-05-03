@@ -76,6 +76,7 @@ backend:
     enabled: true
     storageClassName: ""
     storageClass: ""
+    size: 20Gi
   replicas: 0
 read:
   replicas: 0
