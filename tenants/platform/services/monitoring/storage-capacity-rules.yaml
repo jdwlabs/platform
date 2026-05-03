@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: storage-capacity-rules
+  namespace: monitoring
+  labels:
+    app: kube-prometheus-stack
+    release: platform-kube-prometheus-stack
+spec:
+  groups:
+  - name: storage-capacity
+    rules:
+    - alert: PVCUsageHigh
+      annotations:
+        description: PVC {{ $labels.persistentvolumeclaim }} in namespace {{ $labels.namespace }} is {{ $value | humanizePercentage }} full.
+        summary: Persistent volume usage above 85%
+      expr: (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) > 0.85
+      for: 10m
+      labels:
+        severity: warning
