@@ -2,15 +2,16 @@ deploymentMode: SingleBinary
 
 singleBinary:
   replicas: 1
+  priorityClassName: platform-critical
   resources:
     requests:
-      memory: 1Gi
-    limits:
+      cpu: 500m
       memory: 2Gi
+    limits:
+      memory: 4Gi
   persistence:
     enabled: true
-    storageClassName: ""
-    storageClass: ""
+    storageClassName: "longhorn"
     size: 20Gi
 
 chunksCache:
@@ -23,6 +24,17 @@ loki:
   auth_enabled: false
   commonConfig:
     replication_factor: 1
+  
+  storage:
+    type: s3
+    s3:
+      s3ForcePathStyle: true
+      insecure: true
+    bucketNames:
+      chunks: loki-chunks
+      ruler: loki-ruler
+      admin: loki-admin
+
   schemaConfig:
     configs:
       - from: "2024-04-01"
@@ -32,18 +44,21 @@ loki:
         index:
           prefix: loki_index_
           period: 24h
+
   pattern_ingester:
     enabled: true
+  
   limits_config:
     allow_structured_metadata: true
     volume_enabled: true
     retention_period: 14d
-    ingestion_rate_mb: 10
-    ingestion_burst_size_mb: 20
+    ingestion_rate_mb: 20
+    ingestion_burst_size_mb: 40
     retention_stream:
       - selector: '{job="integrations/kubernetes/eventhandler"}'
         priority: 1
         period: 48h
+  
   ruler:
     enable_api: true
 
@@ -58,45 +73,14 @@ monitoring:
     enabled: true
 
 minio:
+  enabled: true
   resources:
     requests:
-      memory: 256Mi
-    limits:
+      cpu: 100m
       memory: 512Mi
+    limits:
+      memory: 1Gi
   persistence:
     enabled: true
-    storageClassName: ""
-    storageClass: ""
+    storageClassName: "longhorn"
     size: 20Gi
-  enabled: true
-
-# Zero out other deployment modes
-backend:
-  persistence:
-    enabled: true
-    storageClassName: ""
-    storageClass: ""
-    size: 20Gi
-  replicas: 0
-read:
-  replicas: 0
-write:
-  replicas: 0
-ingester:
-  replicas: 0
-querier:
-  replicas: 0
-queryFrontend:
-  replicas: 0
-queryScheduler:
-  replicas: 0
-distributor:
-  replicas: 0
-compactor:
-  replicas: 0
-indexGateway:
-  replicas: 0
-bloomCompactor:
-  replicas: 0
-bloomGateway:
-  replicas: 0
