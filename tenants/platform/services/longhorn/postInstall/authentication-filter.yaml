@@ -1,0 +1,11 @@
+apiVersion: gateway.nginx.org/v1alpha1
+kind: AuthenticationFilter
+metadata:
+  name: longhorn-auth
+  namespace: longhorn-system
+spec:
+  type: Basic
+  basic:
+    realm: "Authentication Required - Longhorn"
+    secretRef:
+      name: longhorn-basic-auth
