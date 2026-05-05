@@ -122,7 +122,7 @@ services:
   - name: longhorn
     chart: longhorn
     repo: https://charts.longhorn.io
-    revision: 1.10.1
+    revision: 1.11.1
     namespace: longhorn-system
     postInstall: true
     syncWave: 1
