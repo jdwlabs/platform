@@ -244,9 +244,11 @@ kubectl exec -n vault platform-vault-0 -- sh -c \
     admin-password=<grafana-admin-password>"
 
 # Longhorn UI basic auth
+# The value must be a valid htpasswd line (e.g. "admin:hashed_password")
+# You can generate this with: htpasswd -nb admin mypassword
 kubectl exec -n vault platform-vault-0 -- sh -c \
   "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/longhorn \
-    htpasswd_string=<htpasswd-value>"
+    htpasswd_string='admin:$(echo -n "mypassword" | openssl passwd -apr1)'"
 
 # AlertmanagerDiscord webhook (cluster alert notifications)
 kubectl exec -n vault platform-vault-0 -- sh -c \

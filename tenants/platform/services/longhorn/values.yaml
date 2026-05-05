@@ -1,2 +1,55 @@
-preUpgradeChecker:
-  jobEnabled: false
+global:
+  priorityClassName: platform-critical
+
+networkPolicies:
+  enabled: false
+
+defaultSettings:
+  defaultReplicaCount: 3
+  replicaSoftAntiAffinity: true
+  replicaAutoBalance: "best-effort"
+  storageOverProvisioningPercentage: 150
+  storageMinimalAvailablePercentage: 20
+  upgradeChecker: false
+  autoCleanupSystemGeneratedSnapshot: true
+  orphanResourceAutoDeletion: "replica-data"
+  dataLocality: "best-effort"
+  deletingConfirmationFlag: true
+
+longhornManager:
+  priorityClassName: platform-critical
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+
+longhornDriver:
+  priorityClassName: platform-critical
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+longhornUI:
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+ingress:
+  enabled: false # Managed via Gateway API in postInstall
+
+persistence:
+  defaultClass: true
+  defaultClassReplicaCount: 3
+  reclaimPolicy: Retain
