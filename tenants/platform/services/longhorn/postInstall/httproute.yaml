@@ -17,8 +17,8 @@ spec:
         - type: ExtensionRef
           extensionRef:
             group: gateway.nginx.org
-            kind: SnippetsFilter
-            name: longhorn-basic-auth
+            kind: AuthenticationFilter
+            name: longhorn-auth
       backendRefs:
         - name: longhorn-frontend
           port: 80
