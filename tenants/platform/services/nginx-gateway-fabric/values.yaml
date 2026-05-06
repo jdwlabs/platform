@@ -3,15 +3,6 @@ nginxGateway:
   replicas: 2
   snippets:
     enable: true
-  extraVolumes:
-    - name: longhorn-basic-auth
-      secret:
-        secretName: longhorn-basic-auth
-  extraVolumeMounts:
-    - name: longhorn-basic-auth
-      mountPath: /etc/nginx/secrets/longhorn-basic-auth
-      subPath: auth
-      readOnly: true
   config:
     logging:
       level: info
@@ -21,15 +12,6 @@ nginxGateway:
 
 nginx:
   kind: daemonSet
-  extraVolumes:
-    - name: longhorn-basic-auth
-      secret:
-        secretName: longhorn-basic-auth
-  extraVolumeMounts:
-    - name: longhorn-basic-auth
-      mountPath: /etc/nginx/secrets/longhorn-basic-auth
-      subPath: auth
-      readOnly: true
   config:
     ipFamily: ipv4
     rewriteClientIP:
