@@ -651,6 +651,24 @@ Kubernetes cluster ready
 
 ## Troubleshooting
 
+### Handling GitOps Takeover Conflicts
+
+If an ArgoCD application (like `platform-argo-cd`) fails with "immutable field" errors, it means the manual resources
+installed in Phase 1 conflict with the Helm-managed resources. To resolve this, delete the conflicting resources
+so ArgoCD can recreate them:
+
+```bash
+# Delete conflicting deployments and statefulsets
+kubectl delete deployment -n argocd argocd-server argocd-repo-server argocd-dex-server argocd-applicationset-controller argocd-notifications-controller
+kubectl delete statefulset -n argocd argocd-application-controller
+
+# Restart Redis to clear conflict
+kubectl delete pod -n argocd -l app.kubernetes.io/name=argocd-redis
+
+# Refresh ArgoCD
+kubectl annotate application platform-argo-cd -n argocd argocd.argoproj.io/refresh=normal --overwrite
+```
+
 | Symptom                                | Likely cause                                | Resolution                                    |
 |----------------------------------------|---------------------------------------------|-----------------------------------------------|
 | `governance-*` apps stuck Progressing  | Namespace creation in progress              | Wait 2-3 min, check `kubectl get ns`          |
