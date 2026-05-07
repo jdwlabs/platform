@@ -3,9 +3,9 @@ ui:
 
 server:
   dataStorage:
-    storageClass: ""
+    storageClass: null
   auditStorage:
-    storageClass: ""
+    storageClass: null
   standalone:
     config: |
       listener "tcp" {
@@ -38,3 +38,19 @@ server:
            tls_disable = "true"
         }
         service_registration "kubernetes" {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+injector:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
