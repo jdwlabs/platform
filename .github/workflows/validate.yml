@@ -25,7 +25,7 @@ jobs:
           config_data: |
             extends: default
             ignore: |
-              tenants/platform/services/gateway-api-crds/postInstall/experimental-install.yaml
+              bootstrap/crds/foundation-crds.yaml
               tenants/platform/services/*/postInstall/dashboard-*.yaml
             rules:
               line-length:
