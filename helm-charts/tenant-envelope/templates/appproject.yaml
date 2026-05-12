@@ -16,6 +16,8 @@ kind: AppProject
 metadata:
   name: tenant-{{ .Values.name }}
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   description: "Tenant {{ .Values.displayName }} — managed by governance"
   sourceRepos:

@@ -4,6 +4,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: {{ .name }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
   labels:
     platform.jdwlabs.io/tenant: {{ $.Values.name }}
     platform.jdwlabs.io/quota-tier: {{ .quotaTier }}
