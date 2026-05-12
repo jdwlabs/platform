@@ -4,6 +4,8 @@ kind: ApplicationSet
 metadata:
   name: {{ .Values.name }}-deployments
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   goTemplate: true
   goTemplateOptions:

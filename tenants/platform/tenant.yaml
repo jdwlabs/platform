@@ -75,16 +75,7 @@ project:
     - 'ghcr.io/nginx/charts'
 
 services:
-  # Wave 0: Bare metal networking + ArgoCD self-management
-  - name: gateway-api-crds
-    chart: ""
-    repo: ""
-    revision: ""
-    namespace: nginx-gateway
-    rawManifests: true
-    postInstall: false
-    syncWave: 0
-
+  # Wave 0: Management plane self-hosting
   - name: argo-cd
     chart: argo-cd
     repo: https://argoproj.github.io/argo-helm
@@ -93,7 +84,7 @@ services:
     postInstall: true
     syncWave: 0
 
-  # Wave 1: Core infrastructure
+  # Wave 1: Core infrastructure (Networking, TLS, Storage)
   - name: cert-manager
     chart: cert-manager
     repo: https://charts.jetstack.io

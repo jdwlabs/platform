@@ -14,13 +14,19 @@ see [ONBOARDING.md](ONBOARDING.md).
 
 ## Phase 1: Install ArgoCD
 
-ArgoCD must exist before it can manage itself. Install it once manually to seed the cluster, then the platform takes
-over via the `argo-cd` Helm chart in `tenants/platform/tenant.yaml` - managing ArgoCD's configuration, version, and
-upgrades through GitOps from that point forward.
+ArgoCD must exist before it can manage itself. To avoid label conflicts and ensure a seamless takeover, we install
+ArgoCD using the exact same Helm chart and release name that the platform will use later.
 
 ```bash
-kubectl create namespace argocd
-kubectl apply -n argocd --server-side --force-conflicts -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+# Add the ArgoCD Helm repository
+helm repo add argo https://argoproj.github.io/argo-helm
+helm repo update
+
+# Install ArgoCD with matching labels and configuration
+helm upgrade --install platform-argo-cd argo/argo-cd \
+  --namespace argocd --create-namespace \
+  --values tenants/platform/services/argo-cd/values.yaml \
+  --set global.trackingMethod=annotation
 ```
 
 Wait for all pods to be ready:
@@ -29,57 +35,20 @@ Wait for all pods to be ready:
 kubectl wait --for=condition=Available deployment --all -n argocd --timeout=120s
 ```
 
-Verify:
-
-```bash
-kubectl get pods -n argocd
-```
-
-All pods should be Running and Ready. Do not configure ArgoCD repositories or applications manually - the bootstrap
-manifests handle everything. After Phase 2, the platform's `argo-cd` service (wave 0) will reconcile ArgoCD to the
-Helm-managed version, replacing the manually-installed manifests.
-
-### Retrieve ArgoCD admin credentials
-
-ArgoCD generates a random admin password on first install, stored in the `argocd-initial-admin-secret` Secret:
-
-```bash
-ARGOCD_PASS=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)
-echo "$ARGOCD_PASS"
-```
-
-Login via CLI (optional - not required for bootstrap, but useful for debugging):
-
-```bash
-argocd login argocd.jdwlabs.com --username admin --password "$ARGOCD_PASS"
-```
-
-Change the default password after the platform is stable:
-
-```bash
-argocd account update-password
-```
-
-After changing the password, delete the initial secret:
-
-```bash
-kubectl -n argocd delete secret argocd-initial-admin-secret
-```
-
 ## Phase 2: Apply root-app
 
-This single command starts the entire automated cascade:
+This single command starts the entire automated cascade. The platform now uses a **Layered Seed** architecture
+to ensure CRDs and foundational resources are established before their dependents.
 
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/jdwlabs/platform/main/bootstrap/root-app.yaml
 ```
 
-The `bootstrap` Application uses the `default` AppProject (which always exists in ArgoCD) and recursively applies
-everything in `bootstrap/`, which creates:
-
-1. `bootstrap` AppProject (`bootstrap/argocd/projects/project-bootstrap.yaml`)
-2. `governance` ApplicationSet (`bootstrap/governance-appset.yaml`)
-3. Itself (self-managing via `selfHeal: true` and `prune: true`)
+**The Automated Cascade Layers:**
+- **Wave -1:** `platform-crds` - Installs Gateway API, Prometheus, and Cert-Manager CRDs.
+- **Wave 0:** `bootstrap` - Configures AppProjects and initial management logic.
+- **Wave 1:** `governance` - Creates per-tenant Namespaces, RBAC, and Service AppSets.
+- **Wave 2+:** Services - Infrastructure and tenant workloads deploy in dependency order.
 
 Verify:
 
@@ -608,23 +577,26 @@ The `kubelet-serving-cert-approver` is currently deployed as part of the initial
    ```bash
    kubectl patch deployment -n kubelet-serving-cert-approver kubelet-serving-cert-approver -p '{"spec":{"template":{"spec":{"containers":[{"name":"cert-approver","livenessProbe":{"initialDelaySeconds":30},"readinessProbe":{"initialDelaySeconds":30}}]}}}}'
    ```
-
 ## Dependency Chain
 
 ```
 Kubernetes cluster ready
   |
-  +-- ArgoCD installed (Phase 1)
+  +-- ArgoCD installed (Phase 1: Helm)
        |
        +-- bootstrap/root-app.yaml applied (Phase 2)
             |
-            +-- Governance cascade (Phase 3, automated)
-                 |
-                 +-- Wave 0: ArgoCD (self-managed)
+            +-- Wave -1: platform-crds (Gateway API, Prometheus, Cert-Manager)
+            |
+            +-- Wave 0: bootstrap (AppProjects, argo-cd self-management)
+            |
+            +-- Wave 1: governance cascade (Namespaces, RBAC, NetworkPolicies)
                  |
                  +-- Wave 1: cert-manager, nginx-gateway-fabric, Longhorn
                  |
                  +-- Wave 2: Vault + ESO deployed (+ ClusterSecretStores)
+```
+
                  |    |
                  |    +-- Vault initialized + secrets created (Phase 4)  <-- MANUAL
                  |         |

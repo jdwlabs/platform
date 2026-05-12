@@ -6,6 +6,8 @@ kind: NetworkPolicy
 metadata:
   name: default-deny-all
   namespace: {{ .name }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   podSelector: {}
   policyTypes:
@@ -17,6 +19,8 @@ kind: NetworkPolicy
 metadata:
   name: allow-dns-egress
   namespace: {{ .name }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   podSelector: {}
   policyTypes:
@@ -34,6 +38,8 @@ kind: NetworkPolicy
 metadata:
   name: allow-ingress-controller
   namespace: {{ .name }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   podSelector: {}
   policyTypes:
@@ -50,6 +56,7 @@ metadata:
   name: allow-gateway-tls
   namespace: {{ .name }}
   annotations:
+    argocd.argoproj.io/sync-wave: "3"
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   from:
@@ -67,6 +74,8 @@ kind: NetworkPolicy
 metadata:
   name: allow-all-egress
   namespace: {{ .name }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   podSelector: {}
   policyTypes:
@@ -81,6 +90,8 @@ kind: NetworkPolicy
 metadata:
   name: allow-all-ingress
   namespace: {{ .name }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   podSelector: {}
   policyTypes:
