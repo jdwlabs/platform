@@ -1,0 +1,65 @@
+version: 2
+
+project_name: platformctl
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: platformctl
+    main: ./cmd/platformctl
+    binary: platformctl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: platformctl
+    formats: [tar.gz]
+    name_template: "platformctl-{{ .Os }}-{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE*
+      - README*
+
+checksum:
+  name_template: "platformctl-checksums.txt"
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+release:
+  github:
+    owner: jdwlabs
+    name: platform
+  draft: false
+  prerelease: auto
+  name_template: "platformctl {{ .Tag }}"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
