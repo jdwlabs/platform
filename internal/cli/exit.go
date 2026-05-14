@@ -3,6 +3,8 @@ package cli
 import (
 	"errors"
 	"os"
+
+	"github.com/jdwlabs/platform/internal/bootstrap"
 )
 
 const (
@@ -35,8 +37,16 @@ func ExitCode(err error) int {
 	if errors.As(err, &progressing) {
 		return ExitProgressing
 	}
+	var bsProgressing *bootstrap.ProgressingError
+	if errors.As(err, &bsProgressing) {
+		return ExitProgressing
+	}
 	var broken *BrokenStateError
 	if errors.As(err, &broken) {
+		return ExitBroken
+	}
+	var bsBroken *bootstrap.BrokenError
+	if errors.As(err, &bsBroken) {
 		return ExitBroken
 	}
 	var abort *UserAbortError
