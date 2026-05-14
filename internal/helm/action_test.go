@@ -7,7 +7,8 @@ import (
 
 func TestFakeRunner_RecordsCalls(t *testing.T) {
 	f := &FakeRunner{}
-	if err := f.UpgradeInstall(context.Background(), "platform-argo-cd", "argo/argo-cd", nil, "argocd"); err != nil {
+	opts := InstallOpts{Namespace: "argocd"}
+	if err := f.UpgradeInstall(context.Background(), "platform-argo-cd", "argo/argo-cd", opts); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(f.Calls) != 1 || f.Calls[0] != "platform-argo-cd/argo/argo-cd" {
@@ -17,7 +18,7 @@ func TestFakeRunner_RecordsCalls(t *testing.T) {
 
 func TestFakeRunner_ReturnsErr(t *testing.T) {
 	f := &FakeRunner{Err: context.DeadlineExceeded}
-	err := f.UpgradeInstall(context.Background(), "demo", "argo/argo-cd", nil, "argocd")
+	err := f.UpgradeInstall(context.Background(), "demo", "argo/argo-cd", InstallOpts{Namespace: "argocd"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
