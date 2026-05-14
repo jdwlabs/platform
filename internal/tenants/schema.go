@@ -12,12 +12,13 @@ type Namespace struct {
 }
 
 type Service struct {
-	Name        string `yaml:"name" json:"name"`
-	Chart       string `yaml:"chart,omitempty" json:"chart,omitempty"`
-	ChartPath   string `yaml:"chartPath,omitempty" json:"chartPath,omitempty"`
-	Repo        string `yaml:"repo" json:"repo"`
-	Revision    string `yaml:"revision" json:"revision"`
-	Namespace   string `yaml:"namespace" json:"namespace"`
-	PostInstall *bool  `yaml:"postInstall" json:"postInstall"`
-	SyncWave    *int   `yaml:"syncWave" json:"syncWave"`
+	Name         string `yaml:"name" json:"name"`
+	Chart        string `yaml:"chart,omitempty" json:"chart,omitempty"`
+	ChartPath    string `yaml:"chartPath,omitempty" json:"chartPath,omitempty"`
+	Repo         string `yaml:"repo" json:"repo"`
+	Revision     string `yaml:"revision" json:"revision"`
+	Namespace    string `yaml:"namespace" json:"namespace"`
+	PostInstall  *bool  `yaml:"postInstall" json:"postInstall"`
+	SyncWave     *int   `yaml:"syncWave" json:"syncWave"`
+	RawManifests bool   `yaml:"rawManifests,omitempty" json:"rawManifests,omitempty"`
 }
