@@ -21,12 +21,45 @@ The platform manages custom Helm charts in the `helm-charts/` directory. These a
 - **Helm Repo URL**: `https://jdwlabs.github.io/platform/`
 - **Automation**: Managed by the `.github/workflows/release.yaml` workflow, which packages charts and updates the repository index on every `main` branch push.
 
+## Bootstrap surface
+
+`platformctl` is the only entry point for cluster lifecycle operations.
+It coordinates these four surfaces:
+
+```
+platformctl
+  ├─ Helm exec ─────────────► Kubernetes API (argocd install in phase 1)
+  ├─ Dynamic client ─────────► Kubernetes API (Applications, AppProjects, ApplicationSets)
+  ├─ Vault HTTP API ─────────► Vault (init, unseal, kv-v2 read/write)
+  └─ Embedded YAML ──────────► bootstrap/root-app.yaml (in-memory --branch patch)
+```
+
+All four surfaces are read by both `bootstrap` and `bootstrap verify`;
+mutating phases (1–5) write to them. `bootstrap heal` subcommands target
+specific surfaces directly to recover from known-bad states.
+
 ## ArgoCD Model
 
 ### Governance ApplicationSet (`bootstrap/governance-appset.yaml`)
 - Scans `tenants/*/tenant.yaml` via git file generator.
 - Renders `helm-charts/tenant-envelope` for each tenant.
 - Generates per-tenant `<name>-services` and `<name>-deployments` ApplicationSets.
+
+### `extraSourceRepos` and multi-source Apps
+
+When a tenant's ArgoCD AppProject must reference more than one source
+repo (e.g. tenant uses `helm-charts/openclaw` from this repo and also
+needs its private deployment manifests from `<tenant>/deployments`),
+declare additional repos in `tenant.yaml`:
+
+```yaml
+project:
+  extraSourceRepos:
+    - https://github.com/jdwlabs/platform.git
+```
+
+Failure to set this causes ArgoCD to reject the Application with "repo
+not permitted" errors.
 
 ### Services Deployment
 Services use versioned Helm charts from the repository:
