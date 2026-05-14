@@ -17,7 +17,7 @@ func newTenantsCmd(g *Globals) *cobra.Command {
 func newTenantsValidateCmd(g *Globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "validate [path]",
-		Short: "Validate tenant.yaml files (replaces tools/validate-tenants.py)",
+		Short: "Validate tenant.yaml files",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "tenants"

@@ -3,7 +3,7 @@ repos:
     hooks:
       - id: validate-tenants
         name: Validate Tenant YAMLs
-        entry: python3 tools/validate-tenants.py
-        language: python
+        entry: platformctl tenants validate
+        language: system
         files: ^tenants/.*tenant\.yaml$
-        additional_dependencies: [PyYAML]
+        pass_filenames: false
