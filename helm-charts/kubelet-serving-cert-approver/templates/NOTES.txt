@@ -1,0 +1,12 @@
+{{ include "kubelet-serving-cert-approver.fullname" . }} {{ .Chart.AppVersion }} installed in namespace "{{ .Values.namespace.name }}".
+
+Verify the controller is running:
+  kubectl -n {{ .Values.namespace.name }} get deploy {{ include "kubelet-serving-cert-approver.fullname" . }}
+
+Verify kubelet serving CSRs are being approved:
+  kubectl get csr | grep kubelet-serving
+
+If the Deployment crashloops on a fresh node-cold-start, the bundled
+probe override (initialDelaySeconds: 30) should already prevent it.
+Confirm via:
+  kubectl -n {{ .Values.namespace.name }} get pod -l app.kubernetes.io/name={{ include "kubelet-serving-cert-approver.name" . }} -o yaml | grep initialDelaySeconds
