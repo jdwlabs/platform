@@ -566,17 +566,10 @@ Common issues:
 
 ## Phase 8: Post-Bootstrap Manual Overrides
 
-The `kubelet-serving-cert-approver` is currently deployed as part of the initial bootstrap process and is not monitored by ArgoCD. If the cluster is re-initialized, apply these patches to ensure stability:
-
-1. **Permissions Patch:** Set container security context to run as non-root.
-   ```bash
-   kubectl patch deployment -n kubelet-serving-cert-approver kubelet-serving-cert-approver -p '{"spec":{"template":{"spec":{"containers":[{"name":"cert-approver","securityContext":{"runAsUser":65534,"runAsGroup":65534}}]}}}}'
-   ```
-
-2. **Probe Delay Patch:** Increase initialization delays to prevent crash-looping during startup.
-   ```bash
-   kubectl patch deployment -n kubelet-serving-cert-approver kubelet-serving-cert-approver -p '{"spec":{"template":{"spec":{"containers":[{"name":"cert-approver","livenessProbe":{"initialDelaySeconds":30},"readinessProbe":{"initialDelaySeconds":30}}]}}}}'
-   ```
+> **Retired.** `kubelet-serving-cert-approver` is now a GitOps-managed Helm
+> chart at `helm-charts/kubelet-serving-cert-approver/` that bakes in the
+> previously-manual security-context and probe-delay patches. No manual
+> action required after a fresh install.
 ## Dependency Chain
 
 ```
