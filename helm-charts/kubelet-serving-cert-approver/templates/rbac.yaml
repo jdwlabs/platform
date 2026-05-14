@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "kubelet-serving-cert-approver.fullname" . }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "kubelet-serving-cert-approver.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: certificates:{{ include "kubelet-serving-cert-approver.fullname" . }}
+  labels:
+    {{- include "kubelet-serving-cert-approver.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - certificates.k8s.io
+    resources:
+      - certificatesigningrequests
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - certificates.k8s.io
+    resources:
+      - certificatesigningrequests/approval
+    verbs:
+      - update
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - subjectaccessreviews
+    verbs:
+      - create
+  - apiGroups:
+      - certificates.k8s.io
+    resourceNames:
+      - kubernetes.io/kubelet-serving
+    resources:
+      - signers
+    verbs:
+      - approve
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: events:{{ include "kubelet-serving-cert-approver.fullname" . }}
+  labels:
+    {{- include "kubelet-serving-cert-approver.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: events:{{ include "kubelet-serving-cert-approver.fullname" . }}
+  namespace: default
+  labels:
+    {{- include "kubelet-serving-cert-approver.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: events:{{ include "kubelet-serving-cert-approver.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubelet-serving-cert-approver.fullname" . }}
+    namespace: {{ .Values.namespace.name }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubelet-serving-cert-approver.fullname" . }}
+  labels:
+    {{- include "kubelet-serving-cert-approver.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: certificates:{{ include "kubelet-serving-cert-approver.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubelet-serving-cert-approver.fullname" . }}
+    namespace: {{ .Values.namespace.name }}
