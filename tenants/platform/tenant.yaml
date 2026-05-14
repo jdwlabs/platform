@@ -54,6 +54,9 @@ namespaces:
   - name: porkbun-webhook
     quotaTier: platform
     networkPolicy: platform
+  - name: kubelet-serving-cert-approver
+    quotaTier: platform
+    networkPolicy: platform
 
 project:
   elevated: true
@@ -99,6 +102,15 @@ services:
     repo: https://github.com/jdwlabs/platform.git
     revision: main
     namespace: porkbun-webhook
+    postInstall: false
+    syncWave: 1
+
+  - name: kubelet-serving-cert-approver
+    chart: ""
+    chartPath: helm-charts/kubelet-serving-cert-approver
+    repo: https://github.com/jdwlabs/platform.git
+    revision: main
+    namespace: kubelet-serving-cert-approver
     postInstall: false
     syncWave: 1
 
