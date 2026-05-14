@@ -38,15 +38,19 @@ jobs:
 
   platformctl-validate:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: cli/go.mod
           cache: true
       - name: Build platformctl
         run: go build -o /tmp/platformctl ./cmd/platformctl
       - name: Validate tenants
+        working-directory: .
         run: /tmp/platformctl tenants validate tenants/
 
   kubeconform:
@@ -73,11 +77,14 @@ jobs:
 
   go-build-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: cli/go.mod
           cache: true
       - name: Build
         run: go build ./...

@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Validate all YAML files: `yamllint tenants/ bootstrap/`
 - Validate tenant.yaml files: `platformctl tenants validate`
 - Validate Kubernetes manifests: `kubeconform` (used in CI)
-- Build/test the binary: `go build ./... && go test ./...`
+- Build/test the binary: `cd cli && go build ./... && go test ./...`
 
 ### Bootstrap Process
 Run `platformctl bootstrap` from the repo root. See [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md) for the phase summary and manual-touch points.
@@ -21,8 +21,7 @@ Run `platformctl bootstrap` from the repo root. See [docs/BOOTSTRAP.md](docs/BOO
 - `tenants/` - Per-tenant configurations (tenant.yaml defines namespaces, services, ARC runners)
 - `helm-charts/` - Custom Helm charts (porkbun-webhook, openclaw, tenant-envelope)
 - `docs/` - Architecture and onboarding documentation (BOOTSTRAP.md, ARCHITECTURE.md, TENANT-MODEL.md, ONBOARDING.md, OPERATIONS.md)
-- `internal/` - Go source for `platformctl` (bootstrap phases, CLI, k8s, vault, helm, prompt packages)
-- `cmd/platformctl/` - Binary entry point
+- `cli/` - Go source for `platformctl` (`go.mod`, `internal/`, `cmd/`, `Makefile`, `.goreleaser.yaml`)
 
 ### GitOps Flow
 - ArgoCD watches this repository for changes
