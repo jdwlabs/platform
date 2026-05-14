@@ -3,22 +3,121 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
 	"github.com/jdwlabs/platform/internal/bootstrap"
 	"github.com/jdwlabs/platform/internal/bootstrap/heal"
+	"github.com/jdwlabs/platform/internal/helm"
 	"github.com/jdwlabs/platform/internal/k8s"
 	"github.com/jdwlabs/platform/internal/tenants"
+	"github.com/jdwlabs/platform/internal/vault"
 )
 
 func newBootstrapCmd(g *Globals) *cobra.Command {
-	cmd := &cobra.Command{Use: "bootstrap", Short: "Cluster bootstrap operations"}
+	cmd := &cobra.Command{
+		Use:   "bootstrap",
+		Short: "Cluster bootstrap operations",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCascade(cmd.Context(), g, cmd.OutOrStdout(), 0)
+		},
+	}
 	cmd.AddCommand(newBootstrapVerifyCmd(g))
 	cmd.AddCommand(newBootstrapHealCmd(g))
+	cmd.AddCommand(newBootstrapPhaseCmd(g))
 	return cmd
+}
+
+func newBootstrapPhaseCmd(g *Globals) *cobra.Command {
+	return &cobra.Command{
+		Use:   "phase <number>",
+		Short: "Run a single bootstrap phase by number (1-5)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			num, err := strconv.Atoi(args[0])
+			if err != nil || num < 1 || num > 5 {
+				return fmt.Errorf("phase must be 1..5")
+			}
+			return runCascade(cmd.Context(), g, cmd.OutOrStdout(), num)
+		},
+	}
+}
+
+// runCascade builds the phase list and runs the cascade. If phaseNum > 0, only
+// that phase is run; if 0, all phases run in order.
+func runCascade(ctx context.Context, g *Globals, w io.Writer, phaseNum int) error {
+	kc := testKubeClient
+	dc := testDynamicClient
+	if kc == nil {
+		var err error
+		kc, err = k8s.NewClient()
+		if err != nil {
+			return fmt.Errorf("kube client: %w", err)
+		}
+	}
+	if dc == nil {
+		var err error
+		dc, err = k8s.NewDynamic()
+		if err != nil {
+			return fmt.Errorf("dynamic client: %w", err)
+		}
+	}
+
+	vaultAddr := os.Getenv("PLATFORMCTL_VAULT_ADDR")
+	if vaultAddr == "" {
+		vaultAddr = "http://vault.vault.svc:8200"
+	}
+	vc, err := vault.NewClient(vaultAddr, os.Getenv("PLATFORMCTL_VAULT_TOKEN"))
+	if err != nil {
+		return fmt.Errorf("vault client: %w", err)
+	}
+
+	tenantNames, err := collectTenantNames("tenants")
+	if err != nil {
+		return fmt.Errorf("collect tenants: %w", err)
+	}
+
+	valuesPath := "tenants/platform/services/argo-cd/values.yaml"
+	allPhases := []bootstrap.Phase{
+		bootstrap.NewArgocdInstallPhase(kc, helm.ExecRunner{}, valuesPath),
+		bootstrap.NewRootApplyPhase(kc, dc, g.Branch, "bootstrap/root-app.yaml"),
+		bootstrap.NewVaultInitPhase(kc, vault.NewBuilder(vaultAddr), g.NonInteractive),
+		bootstrap.NewVaultSeedPhase(vc, g.NonInteractive, "secret", tenantNames, nil),
+		bootstrap.NewBackupsInitPhase(vc, g.NonInteractive, "secret"),
+	}
+
+	phases := allPhases
+	if phaseNum > 0 {
+		phases = []bootstrap.Phase{allPhases[phaseNum-1]}
+	}
+
+	em := NewEmitter(w, g.JSON)
+	opts := bootstrap.CascadeOptions{
+		OnEvent: func(phase, name, status, message string) {
+			em.Emit(Event{Phase: phase, Name: name, Status: status, Message: message})
+		},
+	}
+	return bootstrap.RunCascade(ctx, phases, opts)
+}
+
+func collectTenantNames(root string) ([]string, error) {
+	matches, _ := filepath.Glob(filepath.Join(root, "*", "tenant.yaml"))
+	var names []string
+	for _, m := range matches {
+		t, err := tenants.LoadFile(m)
+		if err != nil {
+			return nil, err
+		}
+		if t.Name == "platform" {
+			continue
+		}
+		names = append(names, t.Name)
+	}
+	return names, nil
 }
 
 type verifyGate struct {
