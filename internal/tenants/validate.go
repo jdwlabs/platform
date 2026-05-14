@@ -50,12 +50,6 @@ func validateTenant(path string, t *Tenant) error {
 		if svc.Name == "" {
 			missing = append(missing, "name")
 		}
-		if svc.Repo == "" {
-			missing = append(missing, "repo")
-		}
-		if svc.Revision == "" {
-			missing = append(missing, "revision")
-		}
 		if svc.Namespace == "" {
 			missing = append(missing, "namespace")
 		}
@@ -65,10 +59,19 @@ func validateTenant(path string, t *Tenant) error {
 		if svc.SyncWave == nil {
 			missing = append(missing, "syncWave")
 		}
+		// rawManifests services don't use chart/repo/revision
+		if !svc.RawManifests {
+			if svc.Repo == "" {
+				missing = append(missing, "repo")
+			}
+			if svc.Revision == "" {
+				missing = append(missing, "revision")
+			}
+		}
 		if len(missing) > 0 {
 			return fmt.Errorf("%s: service %s missing fields: %s", path, svc.Name, strings.Join(missing, ","))
 		}
-		if svc.Chart == "" && svc.ChartPath == "" {
+		if !svc.RawManifests && svc.Chart == "" && svc.ChartPath == "" {
 			return fmt.Errorf(`%s: service %s must have either "chart" or "chartPath"`, path, svc.Name)
 		}
 	}
