@@ -1,0 +1,75 @@
+image:
+  repository: ghcr.io/alex1989hu/kubelet-serving-cert-approver
+  tag: "0.10.3"
+  pullPolicy: IfNotPresent
+
+replicas: 1
+
+namespace:
+  name: kubelet-serving-cert-approver
+  create: true
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  fsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  privileged: false
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 16Mi
+  limits:
+    cpu: 250m
+    memory: 32Mi
+
+probes:
+  # initialDelaySeconds raised from upstream defaults to prevent CrashLoop during
+  # node-cold-start. This is the second of the two patches in the old BOOTSTRAP Phase 8.
+  liveness:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+priorityClassName: system-cluster-critical
+
+nodeSelector: {}
+tolerations:
+  - effect: NoSchedule
+    key: node.cloudprovider.kubernetes.io/uninitialized
+    operator: Exists
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/master
+    operator: Exists
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/control-plane
+    operator: Exists
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - preference:
+          matchExpressions:
+            - key: node-role.kubernetes.io/master
+              operator: DoesNotExist
+            - key: node-role.kubernetes.io/control-plane
+              operator: DoesNotExist
+        weight: 100
