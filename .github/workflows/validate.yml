@@ -36,14 +36,18 @@ jobs:
                 min-spaces-from-content: 1
               document-start: disable
 
-  validate-tenants:
+  platformctl-validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Validate tenant.yaml files
-        run: |
-          pip install PyYAML
-          python3 tools/validate-tenants.py
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build platformctl
+        run: go build -o /tmp/platformctl ./cmd/platformctl
+      - name: Validate tenants
+        run: /tmp/platformctl tenants validate tenants/
 
   kubeconform:
     runs-on: ubuntu-latest
@@ -79,3 +83,33 @@ jobs:
         run: go build ./...
       - name: Test
         run: go test -race ./...
+
+  helm-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v4
+        with:
+          version: latest
+      - name: Lint all charts
+        run: |
+          for chart in helm-charts/*/; do
+            echo "Linting $chart"
+            helm lint "$chart"
+          done
+      - name: Install kubeconform
+        run: |
+          curl -sSLo kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz
+          tar -xzf kubeconform.tar.gz
+          sudo mv kubeconform /usr/local/bin/
+      - name: Render + validate each chart
+        run: |
+          for chart in helm-charts/*/; do
+            echo "Rendering $chart"
+            helm template "$(basename "$chart")" "$chart" | kubeconform \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+              -ignore-missing-schemas \
+              -summary
+          done
