@@ -595,8 +595,6 @@ Kubernetes cluster ready
                  +-- Wave 1: cert-manager, nginx-gateway-fabric, Longhorn
                  |
                  +-- Wave 2: Vault + ESO deployed (+ ClusterSecretStores)
-```
-
                  |    |
                  |    +-- Vault initialized + secrets created (Phase 4)  <-- MANUAL
                  |         |
