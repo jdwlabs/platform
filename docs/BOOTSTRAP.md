@@ -1,647 +1,155 @@
 # Platform Bootstrap
 
-Step-by-step guide for bringing the platform up on a fresh Kubernetes cluster. For architecture details,
-see [ARCHITECTURE.md](ARCHITECTURE.md). For adding tenants after the platform is running,
-see [ONBOARDING.md](ONBOARDING.md).
+Step-by-step guide for bringing the platform up on a fresh Kubernetes cluster.
+This document covers the happy path. For day-2 operations and troubleshooting
+see [OPERATIONS.md](OPERATIONS.md). For architecture see
+[ARCHITECTURE.md](ARCHITECTURE.md). For adding tenants after the platform is
+running, see [ONBOARDING.md](ONBOARDING.md).
 
-## Prerequisites
+## 1. Prerequisites
 
-- [ ] Kubernetes cluster provisioned via `jdwlabs/infrastructure` (Terraform + `talops`)
-- [ ] All nodes in Ready state: `kubectl get nodes`
-- [ ] `kubeconfig` context set: `kubectl config current-context`
-- [ ] `kubectl` and `jq` installed locally
-- [ ] Platform repo cloned: `git clone https://github.com/jdwlabs/platform.git`
+- [ ] Kubernetes cluster provisioned via `jdwlabs/infrastructure`
+      (Terraform + `talops`); all nodes Ready
+- [ ] `kubeconfig` context selected: `kubectl config current-context`
+- [ ] Vault accessible from the operator workstation
+      (default `http://vault.vault.svc:8200`; override via
+      `PLATFORMCTL_VAULT_ADDR`)
+- [ ] Platform repo cloned:
+      `git clone https://github.com/jdwlabs/platform.git`
+- [ ] `rclone` installed locally (only needed to authorize the Google Drive
+      remote for Phase 5)
 
-## Phase 1: Install ArgoCD
+## 2. Install `platformctl`
 
-ArgoCD must exist before it can manage itself. To avoid label conflicts and ensure a seamless takeover, we install
-ArgoCD using the exact same Helm chart and release name that the platform will use later.
+`platformctl` is a single static binary. Pick a release from
+[Releases](https://github.com/jdwlabs/platform/releases) and drop it in
+your PATH.
 
-```bash
-# Add the ArgoCD Helm repository
-helm repo add argo https://argoproj.github.io/argo-helm
-helm repo update
-
-# Install ArgoCD with matching labels and configuration
-helm upgrade --install platform-argo-cd argo/argo-cd \
-  --namespace argocd --create-namespace \
-  --values tenants/platform/services/argo-cd/values.yaml \
-  --set global.trackingMethod=annotation
-```
-
-Wait for all pods to be ready:
+**Linux/macOS:**
 
 ```bash
-kubectl wait --for=condition=Available deployment --all -n argocd --timeout=120s
+curl -fsSL \
+  "https://github.com/jdwlabs/platform/releases/latest/download/platformctl-$(uname -s | tr A-Z a-z)-$(uname -m)" \
+  -o /usr/local/bin/platformctl
+chmod +x /usr/local/bin/platformctl
 ```
 
-## Phase 2: Apply root-app
+**Windows (PowerShell):**
 
-This single command starts the entire automated cascade. The platform now uses a **Layered Seed** architecture
-to ensure CRDs and foundational resources are established before their dependents.
+```powershell
+Invoke-WebRequest -Uri https://github.com/jdwlabs/platform/releases/latest/download/platformctl-windows-amd64.exe `
+  -OutFile $env:USERPROFILE\bin\platformctl.exe
+```
+
+**From source:**
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/jdwlabs/platform/main/bootstrap/root-app.yaml
+go install github.com/jdwlabs/platform/cmd/platformctl@latest
 ```
 
-**The Automated Cascade Layers:**
-- **Wave -1:** `platform-crds` - Installs Gateway API, Prometheus, and Cert-Manager CRDs.
-- **Wave 0:** `bootstrap` - Configures AppProjects and initial management logic.
-- **Wave 1:** `governance` - Creates per-tenant Namespaces, RBAC, and Service AppSets.
-- **Wave 2+:** Services - Infrastructure and tenant workloads deploy in dependency order.
+## 3. One-shot bootstrap
 
-Verify:
+The fast path. Run from a checkout of this repo:
 
 ```bash
-kubectl get application bootstrap -n argocd
-kubectl get appproject bootstrap -n argocd
-kubectl get applicationset governance -n argocd
+platformctl bootstrap
 ```
 
-The `bootstrap` Application should show `Synced`. From this point forward, all changes go through Git - do not manually
-edit ArgoCD objects owned by GitOps.
+`platformctl` walks the five phases (see §4), pausing for the manual touches
+each phase requires. To skip prompts, set every required `PLATFORMCTL_*`
+env var and add `--non-interactive`. See [OPERATIONS.md §6](OPERATIONS.md#6-non-interactive--ci-mode) for the full env
+contract.
 
-## Phase 3: Automated cascade
-
-No user action required. This section explains what happens automatically.
-
-The `governance` ApplicationSet scans `tenants/*/tenant.yaml` and creates one governance Application per tenant:
-`governance-<tenant>`.
-
-Each governance Application renders the `tenant-envelope` Helm chart, which creates per-tenant:
-
-- Namespaces with labels and Pod Security Standards
-- ResourceQuotas and LimitRanges
-- NetworkPolicies
-- ArgoCD AppProject scoped to tenant namespaces
-- ARC RBAC for runner namespaces
-- `<tenant>-services` ApplicationSet
-- `<tenant>-deployments` ApplicationSet (if `deploymentRepo.url` set)
-
-Platform services then deploy in sync wave order:
-
-| Wave | What deploys                                                                                             |
-|------|----------------------------------------------------------------------------------------------------------|
-| 0    | argo-cd (self-management)                                                                                |
-| 1    | cert-manager, porkbun-webhook, nginx-gateway-fabric, longhorn                                            |
-| 2    | vault, external-secrets (+ ClusterSecretStores), vault-config-operator, monitoring stack, atlas-operator |
-| 3    | cnpg-operator, arc-systems                                                                               |
-| 4    | postgresql clusters, db-ui                                                                               |
-
-Watch sync progress:
+To bootstrap from a non-`main` branch (e.g. testing a PR):
 
 ```bash
-kubectl get applications -n argocd --watch
+platformctl bootstrap --branch feature/my-change
 ```
 
-Services at wave 2+ will remain degraded until Vault is initialized in Phase 4. This is expected - proceed immediately.
+## 4. Phase summary
 
-## Phase 4: Initialize Vault
+| # | Phase            | What it does                                                      | Manual touch                  |
+|---|------------------|-------------------------------------------------------------------|-------------------------------|
+| 1 | `argocd-install` | `helm upgrade --install platform-argo-cd` from tenant values      | —                             |
+| 2 | `root-apply`     | Apply `bootstrap/root-app.yaml`; wait AppProjects + governance AppSet | —                          |
+| 3 | `vault-init`     | `vault operator init`, unseal, store keys/token, enable kv-v2     | Save `vault-init.json` offline (interactive prompt) |
+| 4 | `vault-seed`     | Write all platform + tenant kv paths                              | Provide secret values via prompts or `PLATFORMCTL_*` env |
+| 5 | `backups-init`   | Capture rclone Google Drive OAuth token                           | Run `rclone authorize "drive"` out-of-band, paste block |
 
-Vault deploys at wave 2 but starts sealed and uninitialized. The External Secrets Operator, cert-manager DNS
-credentials, and all tenant secrets depend on Vault. This phase cannot be automated.
-
-### 4.1 Wait for Vault pod
+After all five phases, run:
 
 ```bash
-kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=vault -n vault --timeout=120s
+platformctl bootstrap verify
 ```
 
-### 4.2 Initialize Vault
+`verify` asserts every readiness gate (ArgoCD ready, root applied, Vault
+initialized, ExternalSecrets synced, backups configured, all healthy).
+
+## 5. Re-running phases
+
+Every phase is idempotent. Re-run a single phase:
 
 ```bash
-kubectl exec -n vault platform-vault-0 -- vault operator init \
-  -key-shares=1 \
-  -key-threshold=1 \
-  -format=json > vault-init.json
+platformctl bootstrap phase 3       # vault-init only
+platformctl bootstrap verify        # verify gates
 ```
 
-Extract the values:
+If a phase reports `state=already_done` on Detect, only Verify runs.
 
-```bash
-UNSEAL_KEY=$(jq -r '.unseal_keys_b64[0]' vault-init.json)
-ROOT_TOKEN=$(jq -r '.root_token' vault-init.json)
-```
+## 6. DNS records
 
-**Store `vault-init.json` securely offline.** If the unseal key is lost, Vault data cannot be recovered after a pod
-restart.
+After `verify` reports green, configure DNS at the registrar:
 
-### 4.3 Unseal Vault
+| Record              | Type   | Target                                |
+|---------------------|--------|---------------------------------------|
+| `*.jdwlabs.com`     | A/AAAA | Cluster gateway external IP           |
+| `_acme-challenge.*` | (auto) | Managed by porkbun-webhook for DNS-01 |
 
-```bash
-kubectl exec -n vault platform-vault-0 -- vault operator unseal "$UNSEAL_KEY"
-```
+Apex records and per-service hostnames are documented per-tenant in
+`tenants/<tenant>/services/<svc>/`.
 
-### 4.4 Create Kubernetes secrets
+## 7. Non-interactive bootstrap
 
-These secrets are consumed by the `vault-auto-unseal` CronJob, the `vault-admin-initializer` Job, and the
-`vault` ClusterSecretStore. Only two secrets are needed - both ClusterSecretStores (`vault` and `k8s-secret-store`)
-are managed by the platform and require no per-tenant setup.
+For CI or scripted re-installs, see [OPERATIONS.md §6](OPERATIONS.md#6-non-interactive--ci-mode).
 
-```bash
-# Unseal key - vault-auto-unseal CronJob (runs every 2 min)
-kubectl create secret generic vault-unseal-keys \
-  -n vault \
-  --from-literal=unseal_key_1="$UNSEAL_KEY"
+## 8. Heal commands index
 
-# Root token - vault-admin-initializer Job
-kubectl create secret generic vault-token \
-  -n vault \
-  --from-literal=token="$ROOT_TOKEN"
+If a fresh bootstrap leaves the cluster in a known-bad state:
 
-# Root token - vault ClusterSecretStore (used by all ExternalSecrets cluster-wide)
-kubectl create secret generic vault-token \
-  -n external-secrets \
-  --from-literal=token="$ROOT_TOKEN"
-```
+| Symptom                                              | Command                                                                     |
+|------------------------------------------------------|-----------------------------------------------------------------------------|
+| `applicationset/platform-services` stuck terminating | `platformctl bootstrap heal --stuck-finalizer --kind ApplicationSet --name platform-services` |
+| `default` AppProject missing                         | `platformctl bootstrap heal --default-project`                              |
+| `kubelet-serving-cert-approver` Application stale    | `platformctl bootstrap heal --cert-approver`                                |
+| TLS certs not reissuing                              | `platformctl bootstrap heal --tls-reissue`                                  |
+| Tenant ns left over after removing a tenant          | `platformctl bootstrap heal --orphan-namespaces`                            |
+| Run every safe recovery in order                     | `platformctl bootstrap heal --all`                                          |
 
-No `vault-token` secrets are needed in tenant namespaces - all tenants use the platform-managed
-`vault` ClusterSecretStore which reads from the single token in `external-secrets`.
+All heal subcommands are idempotent and emit `--json` events when that flag is set.
 
-### 4.5 Enable KV secrets engine
-
-```bash
-kubectl exec -n vault platform-vault-0 -- sh -c \
-  "VAULT_TOKEN=$ROOT_TOKEN vault secrets enable -path=kv kv-v2"
-```
-
-### 4.6 Verify Vault automation
-
-The `vault-admin-initializer` Job runs automatically once the `vault-token` secret exists. It enables Kubernetes auth,
-the database secrets engine, and writes the `vault-admin` policy.
-
-```bash
-kubectl annotate application platform-vault -n argocd argocd.argoproj.io/refresh=normal --overwrite
-kubectl get job vault-admin-initializer -n vault
-kubectl logs job/vault-admin-initializer -n vault
-```
-
-The `vault-auto-unseal` CronJob runs every 2 minutes to re-unseal after pod restarts:
-
-```bash
-kubectl get cronjob vault-auto-unseal -n vault
-```
-
-Verify the ClusterSecretStores are ready:
-
-```bash
-kubectl get clustersecretstore vault
-kubectl get clustersecretstore k8s-secret-store
-```
-
-Both should show status `Valid`. The `vault` store reads from Vault KV v2, and `k8s-secret-store` reads
-Kubernetes secrets from the `database` namespace (CNPG-generated credentials).
-
-## Phase 5: Seed Vault secrets
-
-ExternalSecrets across the platform pull from Vault KV v2 at the `kv/` mount. Until these paths exist, dependent
-services will remain in error state.
-
-### Platform secrets
-
-```bash
-# Porkbun DNS API credentials (cert-manager DNS01 webhook)
-kubectl exec -n vault platform-vault-0 -- sh -c \
-  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/porkbun \
-    api-key=<porkbun-api-key> \
-    secret-key=<porkbun-secret-key>"
-
-# Grafana admin credentials
-kubectl exec -n vault platform-vault-0 -- sh -c \
-  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/grafana \
-    admin-user=admin \
-    admin-password=<grafana-admin-password>"
-
-# Longhorn UI basic auth
-# The value must be a valid htpasswd line (e.g. "admin:hashed_password")
-# You can generate this with: htpasswd -nb admin mypassword
-kubectl exec -n vault platform-vault-0 -- sh -c \
-  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/longhorn \
-    htpasswd_string='admin:$(echo -n "mypassword" | openssl passwd -apr1)'"
-
-# AlertmanagerDiscord webhook (cluster alert notifications)
-kubectl exec -n vault platform-vault-0 -- sh -c \
-  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/alertmanager \
-    discord_webhook_url=<discord-webhook-url>"
-```
-
-### Tenant secrets
-
-```bash
-# jdwlabs ARC GitHub App
-kubectl exec -n vault platform-vault-0 -- sh -c \
-  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/jdwlabs-github-app \
-    github_app_id=<app-id> \
-    github_app_installation_id=<installation-id> \
-    github_app_private_key=<pem-private-key>"
-
-# dotablaze-tech ARC GitHub App
-kubectl exec -n vault platform-vault-0 -- sh -c \
-  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/dotablaze-tech-github-app \
-    github_app_id=<app-id> \
-    github_app_installation_id=<installation-id> \
-    github_app_private_key=<pem-private-key>"
-
-# jdwlabs OpenClaw AI keys
-kubectl exec -n vault platform-vault-0 -- sh -c \
-  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/jdwlabs-ai-keys \
-    anthropic_api_key=<sk-ant-xxx> \
-    openai_api_key=<sk-xxx> \
-    openrouter_api_key=<sk-or-xxx>"
-```
-
-### Application secrets (jdwlabs deployments)
-
-```bash
-# usersrole JWT signing keys
-kubectl exec -n vault platform-vault-0 -- sh -c \
-  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/usersrole \
-    jwt_key_non=<jwt-secret-non> \
-    jwt_key_prd=<jwt-secret-prd>"
-```
-
-### Application secrets (dotablaze-tech deployments)
-
-```bash
-# Discord bot token for meowbot
-kubectl exec -n vault platform-vault-0 -- sh -c \
-  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/dotablaze-tech-discord-bot-token \
-    token=<discord-bot-token>"
-```
-
-CNPG-generated secrets (`platform-postgresql-cluster-non-app`, `platform-postgresql-cluster-prd-app`) are created
-automatically by the CNPG operator and read via the Kubernetes SecretStore - no manual seeding needed.
-
-To discover all ExternalSecret Vault paths in the codebase:
-
-```bash
-grep -r 'remoteRef' tenants/ --include='*.yaml' -A 2 | grep 'key:'
-```
-
-## Phase 6: Configure PostgreSQL backups
-
-A nightly CronJob at 2AM dumps the **production** PostgresSQL cluster and uploads the gzipped dump to Google Drive
-via rclone. The rclone config is stored as a single Vault secret so it survives cluster resets. Backups older
-than 7 days are deleted automatically.
-
-### 6.1 Install rclone locally
-
-```bash
-sudo apt install rclone
-```
-
-### 6.2 Authenticate with Google Drive
-
-```bash
-rclone config
-```
-
-Follow the prompts:
-
-1. `n` -> new remote
-2. Name: `gdrive`
-3. Storage type: `drive` (Google Drive)
-4. Client ID and Client Secret -> leave **blank** (press Enter)
-5. Scope: `1` (full access)
-6. Service account file -> leave **blank** (press Enter)
-7. Edit advanced config -> `n`
-8. Auto-open browser -> `y` -> log in with your Google account and approve
-9. Configure as shared drive -> `n`
-10. Confirm with `y`
-
-Verify it works:
-
-```bash
-rclone ls gdrive:
-```
-
-No error means success.
-
-### 6.3 Store rclone config in Vault
-
-Find your config file path:
-
-```bash
-rclone config file
-```
-
-Open that file and copy the **entire contents** (the `[gdrive]` block). Then store it in Vault as a single
-string value under the key `rclone_conf`:
-
-```bash
-RCLONE_CONF=$(cat "$(rclone config file | tail -n 1)")
-
-kubectl exec -n vault platform-vault-0 -- sh -c \
-  "VAULT_TOKEN=$ROOT_TOKEN vault kv put kv/rclone-gdrive \
-    rclone_conf='$RCLONE_CONF'"
-```
-
-The `postgres-backup` ExternalSecret will sync this into the `database` namespace as a Kubernetes Secret.
-
-### 6.4 Verify backup CronJob
-
-```bash
-kubectl get cronjob postgres-backup -n database
-```
-
-To trigger a manual run immediately (rather than waiting for 2AM):
-
-```bash
-kubectl create job --from=cronjob/postgres-backup postgres-backup-manual -n database
-kubectl logs -f job/postgres-backup-manual -n database
-```
-
-After the job completes, `postgres-backups/prd-YYYMMDD.sql.gz` should appear in your Google Drive.
-
-### Restoring from backup
-
-To restore after a cluster reset, once the new CNPG clusters are healthy:
-
-```bash
-rclone copy gdrive:postgres-backups/prd-<YYYYMMDD>.sql.gz /tmp/
-
-gunzip -c /tmp/prd-<YYYYMMDD>.sql.gz | kubectl exec -i -n database \
-  platform-postgresql-cluster-prd-1 -- \
-  psql -U postgres
-```
-
-## Phase 7: Verify convergence
-
-After Vault secrets are in place, all dependent chains resolve automatically within 5-10 minutes.
-
-### ExternalSecrets
-
-```bash
-kubectl get externalsecrets -A
-```
-
-All should show `SecretSynced` / `True`.
-
-### cert-manager ClusterIssuers
-
-```bash
-kubectl get clusterissuer
-```
-
-`letsencrypt-prod` and `letsencrypt-staging` should show `Ready: true`.
-
-### ArgoCD Applications
-
-```bash
-kubectl get applications -n argocd
-```
-
-All should show `Synced` and `Healthy`.
-
-### ARC runners
-
-```bash
-kubectl get pods -n jdwlabs-runners
-kubectl get pods -n dotablaze-tech-runners
-```
-
-Runners should appear in each GitHub org's Settings > Actions > runners within a few minutes.
-
-### CNPG clusters
-
-```bash
-kubectl get cluster -n database
-```
-
-Both `platform-postgresql-cluster-non` and `platform-postgresql-cluster-prd` should show `Cluster in healthy state`.
-
-Verify tenant databases were created automatically:
-
-```bash
-kubectl get databases -n database
-```
-
-Expected databases: `jdwlabs_non`, `dotablazetech_non` (non cluster), `jdwlabs_prd`, `dotablazetech_prd` (prd cluster).
-These are declared in the CNPG cluster values and managed by the `Database` CRD - no manual creation needed.
-
-### Tenant deployments
-
-```bash
-kubectl get applications -n argocd -l 'app.kubernetes.io/instance=jdwlabs-deployments'
-```
-
-All `jdwlabs-*` deployment Applications should show `Synced` and `Healthy`.
-
-### Platform UIs
-
-| Service               | URL                               |
-|-----------------------|-----------------------------------|
-| ArgoCD                | `https://argocd.jdwlabs.com`      |
-| Vault                 | `https://vault.jdwlabs.com`       |
-| Database UI (Adminer) | `https://dbui.jdwlabs.com`        |
-| Grafana               | `https://grafana.jdwlabs.com`     |
-| Prometheus            | `https://prometheus.jdwlabs.com`  |
-| Alertmanager          | `https://alertmanager.jdwlabs.com |
-| Longhorn              | `https://longhorn.jdwlabs.com`    |
-| Headlamp              | `https://dashboard.jdwlabs.com`   |
-
-### Accessing Grafana
-
-The Grafana Helm chart generates a random admin password on first install, stored in the `platform-grafana` Secret:
-
-```bash
-GRAFANA_PASS=$(kubectl -n monitoring get secret platform-grafana -o jsonpath='{.data.admin-password}' | base64 -d)
-echo "$GRAFANA_PASS"
-```
-
-Login at `https://grafana.jdwlabs.com` with username `admin` and the password above.
-
-Two datasources are pre-configured:
-
-| Datasource | Type       | URL                                      |
-|------------|------------|------------------------------------------|
-| Prometheus | Prometheus | `http://platform-prometheus-server:9000` |
-| Loki       | Loki       | `http://platform-loki:3100`              |
-
-To change the admin password, go to **Profile > Change password** in the Grafana UI, or:
-
-```bash
-kubectl -n monitoring exec deploy/platform-grafana -- \
-  grafana cli admin reset-admin-password <new-password>
-```
-
-### Connecting to databases via db-ui
-
-Adminer at `https://dbui.jdwlabs.com` provides browser-based access to the PostgreSQL clusters. No credentials are
-pre-configured - you supply them on the login page.
-
-**1. Get cluster credentials**
-
-CNPG creates a superuser and an app-level secret per cluster. Retrieve them with:
-
-```bash
-# Non-production superuser
-kubectl -n database get secret platform-postgresql-cluster-non-superuser \
-  -o jsonpath='{.data.username}' | base64 -d; echo
-kubectl -n database get secret platform-postgresql-cluster-non-superuser \
-  -o jsonpath='{.data.password}' | base64 -d; echo
-  
-# Production superuser
-kubectl -n database get secret platform-postgresql-cluster-prd-superuser \
-  -o jsonpath='{.data.username}' | base64 -d; echo
-kubectl -n database get secret platform-postgresql-cluster-prd-superuser \
-  -o jsonpath='{.data.password}' | base64 -d; echo
- 
-# Non-production app-level credentials (used by application pods) 
-kubectl -n database get secret platform-postgresql-cluster-non-app \
-  -o jsonpath='{.data.username}' | base64 -d; echo
-kubectl -n database get secret platform-postgresql-cluster-non-app \
-  -o jsonpath='{.data.password}' | base64 -d; echo
-  
-# Production app-level credentials (used by application pods) 
-kubectl -n database get secret platform-postgresql-cluster-prd-app \
-  -o jsonpath='{.data.username}' | base64 -d; echo
-kubectl -n database get secret platform-postgresql-cluster-prd-app \
-  -o jsonpath='{.data.password}' | base64 -d; echo
-```
-
-**2. Login to Adminer**
-
-Open `https://dbui.jdwlabs.com` and fill in:
-
-| Field    | Non-production                                    | Production                                        |
-|----------|---------------------------------------------------|---------------------------------------------------|
-| System   | PostgreSQL                                        | PostgreSQL                                        |
-| Server   | `platform-postgresql-cluster-non-rw.database.svc` | `platform-postgresql-cluster-prd-rw.database.svc` |
-| Username | *(from superuser or app secret above)*            | *(from superuser or app secret above)*            |
-| Password | *(from secret above)*                             | *(from secret above)*                             |
-| Database | `jdwlabs_non` / `dotablazetech_non`               | `jdwlabs_prd` / `dotablazetech_prd`               |
-
-Read-only endpoints are also available at `platform-postgresql-cluster-{non,prd}-ro.database.svc`.
-
-**3. Available databases**
-
-| Cluster                           | Database            | Schemas  | Tenant         | Owner Role |
-|-----------------------------------|---------------------|----------|----------------|------------|
-| `platform-postgresql-cluster-non` | `jdwlabs_non`       | `auth`   | jdwlabs        | `app`      |
-| `platform-postgresql-cluster-non` | `dotablazetech_non` | `public` | dotablaze-tech | `app`      |
-| `platform-postgresql-cluster-prd` | `jdwlabs_prd`       | `auth`   | jdwlabs        | `app`      |
-| `platform-postgresql-cluster-prd` | `dotablazetech_prd` | `public` | dotablaze-tech | `app`      |
-
-Databases are declared in the CNPG cluster values (`postgresql-cluster-{non,prd}/values.yaml`) and created 
-automatically via the CNPG `Database` CRD at wave 4. All tenant databases share the CNPG-generated `app` role as
-their owner; isolation is enforced at the database boundary, not the role level. Schema migrations are managed by 
-the Atlas operator (wave 5) and also run as `app`. Do not manually alter tables or databases - changes should go 
-through CNPG values for databases/roles and AtlasSchema ConfigMaps in `tenants/*/services/*-schemas/` for DDL.
-
-### Re-issuing TLS certificates
-
-If the Porkbun API keys were not available when cert-manager first attempted DNS-01 validation (e.g., Vault was not yet
-seeded), all ingress certificates will be in a failed state. After seeding `kv/porkbun` in Phase 5, force cert-manager
-to retry by deleting the TLS secrets - cert-manager will automatically re-create them:
-
-```bash
-kubectl delete secret argo-cd-tls -n argocd
-kubectl delete secret db-ui-tls -n database
-kubectl delete secret grafana-tls -n monitoring
-kubectl delete secret headlamp-tls -n headlamp
-kubectl delete secret longhorn-tls -n longhorn-system
-kubectl delete secret prometheus-tls -n monitoring
-kubectl delete secret vault-tls -n vault
-```
-
-Verify certificates are re-issued:
-
-```bash
-kubectl get certificates -A
-```
-
-All should show `Ready: True` within a few minutes. If any remain `False`, check the certificate request:
-
-```bash
-kubectl get certificaterequest -A
-kubectl describe certificaterequest <name> -n <namespace>
-```
-
-Common issues:
-
-- `porkbun` secret not synced - check `kubectl get externalsecret porkbun -n cert-manager`
-- ClusterIssuer not ready - check `kubectl get clusterissuer letsencrypt-prod`
-- DNS propagation delay - wait 2-5 minutes and check again
-
-## Phase 8: Post-Bootstrap Manual Overrides
-
-> **Retired.** `kubelet-serving-cert-approver` is now a GitOps-managed Helm
-> chart at `helm-charts/kubelet-serving-cert-approver/` that bakes in the
-> previously-manual security-context and probe-delay patches. No manual
-> action required after a fresh install.
-## Dependency Chain
+## 9. Dependency chain reference
 
 ```
 Kubernetes cluster ready
   |
-  +-- ArgoCD installed (Phase 1: Helm)
+  +-- argocd-install (Phase 1: Helm)
        |
-       +-- bootstrap/root-app.yaml applied (Phase 2)
+       +-- root-apply (Phase 2)
             |
             +-- Wave -1: platform-crds (Gateway API, Prometheus, Cert-Manager)
-            |
-            +-- Wave 0: bootstrap (AppProjects, argo-cd self-management)
-            |
-            +-- Wave 1: governance cascade (Namespaces, RBAC, NetworkPolicies)
-                 |
-                 +-- Wave 1: cert-manager, nginx-gateway-fabric, Longhorn
-                 |
-                 +-- Wave 2: Vault + ESO deployed (+ ClusterSecretStores)
-                 |    |
-                 |    +-- Vault initialized + secrets created (Phase 4)  <-- MANUAL
-                 |         |
-                 |         +-- vault ClusterSecretStore becomes Valid
-                 |         +-- k8s-secret-store ClusterSecretStore becomes Valid
-                 |              |
-                 |              +-- Vault KV paths seeded (Phase 5)  <-- MANUAL
-                 |                   |
-                 |                   +-- ExternalSecrets resolve (all tenants, no per-ns setup)
-                 |                   |    +-- cert-manager ClusterIssuers --> TLS certs
-                 |                   |    +-- Longhorn ingress auth
-                 |                   |    +-- ARC runners register with GitHub
-                 |                   |
-                 |                   +-- Tenant deployment apps resolve
-                 |                        +-- usersrole JWT secret (via vault ClusterSecretStore)
-                 |                        +-- DB credentials (via k8s-secret-store ClusterSecretStore)
-                 |
-                 +-- Wave 3: CNPG operator, ARC controller
-                 |
-                 +-- Wave 4: PostgreSQL clusters, db-ui
-                 |
-                 +-- Wave 5: Tenant ARC runner sets, Atlas schema migrations
+            +-- Wave 0:  bootstrap (AppProjects, argo-cd self-management)
+            +-- Wave 1:  governance cascade (Namespaces, RBAC, NetworkPolicies)
+                          + cert-manager, nginx-gateway-fabric, Longhorn
+            +-- Wave 2:  Vault + ESO (+ ClusterSecretStores)
+                          |
+                          +-- vault-init (Phase 3) initializes Vault
+                          +-- vault-seed (Phase 4) populates kv paths
+                                |
+                                +-- ExternalSecrets resolve (all tenants)
+                                +-- cert-manager ClusterIssuers + TLS certs
+                                +-- Longhorn ingress auth
+                                +-- ARC runners register with GitHub
+            +-- Wave 3:  CNPG operator, ARC controller
+            +-- Wave 4:  PostgreSQL clusters, db-ui
+            +-- Wave 5:  Tenant ARC runner sets, Atlas schema migrations
 ```
-
-## Troubleshooting
-
-### Handling GitOps Takeover Conflicts
-
-If an ArgoCD application (like `platform-argo-cd`) fails with "immutable field" errors, it means the manual resources
-installed in Phase 1 conflict with the Helm-managed resources. To resolve this, delete the conflicting resources
-so ArgoCD can recreate them:
-
-```bash
-# Delete conflicting deployments and statefulsets
-kubectl delete deployment -n argocd argocd-server argocd-repo-server argocd-dex-server argocd-applicationset-controller argocd-notifications-controller
-kubectl delete statefulset -n argocd argocd-application-controller
-
-# Restart Redis to clear conflict
-kubectl delete pod -n argocd -l app.kubernetes.io/name=argocd-redis
-
-# Refresh ArgoCD
-kubectl annotate application platform-argo-cd -n argocd argocd.argoproj.io/refresh=normal --overwrite
-```
-
-| Symptom                                | Likely cause                                | Resolution                                    |
-|----------------------------------------|---------------------------------------------|-----------------------------------------------|
-| `governance-*` apps stuck Progressing  | Namespace creation in progress              | Wait 2-3 min, check `kubectl get ns`          |
-| ExternalSecrets in `SecretSyncedError` | Vault not initialized or secrets not seeded | Complete Phase 4 and 5                        |
-| `letsencrypt-prod` issuer not Ready    | Porkbun secret missing from Vault           | Seed `kv/porkbun` (Phase 5)                   |
-| Vault pod CrashLoopBackOff             | Initialized but unseal key secret missing   | Create `vault-unseal-keys` secret (Phase 4.4) |
-| ARC runner pods not appearing          | GitHub App secret not seeded                | Seed `kv/<tenant>-github-app` (Phase 5)       |
-| OpenClaw pod in `CrashLoopBackOff`     | AI API keys not seeded in Vault             | Seed `kv/jdwlabs-ai-keys` (Phase 5)           |
-| `ai.jdwlabs.com` not accessible        | HTTPRoute or Ingress issue                  | Check `kubectl describe httproute openclaw`   |
-| `vault-admin-initializer` Job failed   | `vault-token` secret missing in vault ns    | Create `vault-token` secret (Phase 4.4)       |
-| Deployment apps stuck `Missing`        | Deployment repo not accessible              | Check ArgoCD repo credentials                 |
-| CNPG clusters not healthy              | Longhorn storage not ready                  | Check Longhorn pods in `longhorn-system`      |
-| Alertmanager alerts not sent           | `kv/alertmanager` not seeded in Vault       | Seed `kv/alertmanager` (Phase 5)              |
