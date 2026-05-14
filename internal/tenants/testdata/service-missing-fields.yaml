@@ -1,0 +1,7 @@
+name: jdwlabs
+namespaces:
+  - name: x
+services:
+  - name: bad
+    chartPath: helm-charts/openclaw
+    # missing repo, revision, namespace, postInstall, syncWave
