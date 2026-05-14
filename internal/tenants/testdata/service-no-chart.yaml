@@ -1,0 +1,11 @@
+name: jdwlabs
+namespaces:
+  - name: x
+services:
+  - name: bad
+    repo: x
+    revision: main
+    namespace: y
+    postInstall: false
+    syncWave: 1
+    # neither chart nor chartPath
