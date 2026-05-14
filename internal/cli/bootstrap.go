@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jdwlabs/platform/internal/bootstrap"
+	"github.com/jdwlabs/platform/internal/bootstrap/heal"
 	"github.com/jdwlabs/platform/internal/k8s"
 )
 
@@ -88,5 +89,50 @@ func newBootstrapVerifyCmd(g *Globals) *cobra.Command {
 }
 
 func newBootstrapHealCmd(g *Globals) *cobra.Command {
-	return &cobra.Command{Use: "heal", Short: "Recovery primitives"}
+	var (
+		stuckFinalizer bool
+		stuckKind      string
+		stuckNamespace string
+		stuckName      string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "heal",
+		Short: "Recovery primitives",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			em := NewEmitter(os.Stdout, g.JSON)
+
+			dc := testDynamicClient
+			if dc == nil {
+				var err error
+				dc, err = k8s.NewDynamic()
+				if err != nil {
+					return fmt.Errorf("build dynamic client: %w", err)
+				}
+			}
+
+			if stuckFinalizer {
+				opts := heal.StuckOptions{
+					Namespace: stuckNamespace,
+					Kind:      stuckKind,
+					Name:      stuckName,
+				}
+				if err := heal.StripStuck(ctx, dc, opts); err != nil {
+					em.Emit(Event{Phase: "heal", Name: "stuck-finalizer", Status: "fail", Message: err.Error()})
+					return err
+				}
+				em.Emit(Event{Phase: "heal", Name: "stuck-finalizer", Status: "ok",
+					Message: fmt.Sprintf("stripped finalizers from %s/%s (%s)", stuckNamespace, stuckName, stuckKind)})
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&stuckFinalizer, "stuck-finalizer", false, "strip finalizers from a stuck ArgoCD resource")
+	cmd.Flags().StringVar(&stuckKind, "kind", "applicationset", "resource kind (applicationset|application|appproject)")
+	cmd.Flags().StringVar(&stuckNamespace, "namespace", "argocd", "namespace of the stuck resource")
+	cmd.Flags().StringVar(&stuckName, "name", "", "name of the stuck resource")
+	return cmd
 }
