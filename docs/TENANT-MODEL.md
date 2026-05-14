@@ -53,3 +53,45 @@ See [ARCHITECTURE.md](ARCHITECTURE.md#deployments-applicationset) for the deploy
 - **NetworkPolicy**: Default-deny with explicit allow rules per namespace
 - **ResourceQuota**: Prevents resource exhaustion by any single tenant
 - **Vault**: Tenant secrets are under separate KV path prefixes
+
+## Tenant secret seeding
+
+`platformctl bootstrap phase 4` discovers tenant-scoped kv paths from each
+`tenant.yaml` and prompts for the required fields. For each tenant
+`<name>` listed in `tenants/`, the following paths are populated:
+
+| Path                          | Fields                                     |
+|-------------------------------|--------------------------------------------|
+| `kv/<name>-github-app`        | `app_id`, `installation_id`, `private_key` |
+| `kv/<name>-ai-keys`           | `openai`, `anthropic`                      |
+| `kv/<name>-discord-bot-token` | `token`                                    |
+
+In non-interactive mode, each field reads from
+`PLATFORMCTL_<NAME>_<FIELD>` (uppercase, `-` → `_`). See
+[OPERATIONS.md §6](OPERATIONS.md#6-non-interactive--ci-mode) for the full env contract.
+
+## `deploymentRepo.url`
+
+A tenant may keep its application manifests in a separate private repo.
+Set `deploymentRepo.url` in `tenant.yaml`:
+
+```yaml
+deploymentRepo:
+  url: https://github.com/<tenant>/deployments.git
+  revision: main
+```
+
+When set, the tenant's `<tenant>-deployments` ApplicationSet auto-generates
+Apps from that repo. Leave the field unset if all of the tenant's
+workloads live in `tenants/<name>/services/`.
+
+## Removing a tenant
+
+1. Delete the `tenants/<name>/` directory.
+2. Commit and push — ArgoCD will prune the tenant's Apps and AppProject.
+3. Run `platformctl bootstrap heal --orphan-namespaces` to clean up
+   namespaces that ArgoCD left behind (governance cascade does not delete
+   tenant ns automatically, by design — operator confirms each one).
+
+> `platformctl tenants remove <name>` orchestrating all three steps is
+> a tracked v2 feature.
