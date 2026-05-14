@@ -23,7 +23,8 @@ Tenant-centric Kubernetes GitOps platform managed by ArgoCD.
 
 ## Quick Links
 
-- [Bootstrap Guide](docs/BOOTSTRAP.md) - first-time cluster setup
+- [Bootstrap Guide](docs/BOOTSTRAP.md) — install `platformctl` + first-time cluster setup
+- [Operations Manual](docs/OPERATIONS.md) — day-2 ops, troubleshooting, CI mode
 - [Architecture](docs/ARCHITECTURE.md)
 - [Tenant Model](docs/TENANT-MODEL.md)
 - [Onboarding Guide](docs/ONBOARDING.md)
