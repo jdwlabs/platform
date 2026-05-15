@@ -4,3 +4,5 @@ vault-init.json
 cli/bin/
 cli/dist/
 docs/superpowers/
+.claude/worktrees/
+worktrees/
