@@ -32,9 +32,13 @@ spec:
     {{- range .Values.services }}
     {{- $_ := set $dests .namespace true }}
     {{- end }}
+    {{- if $dests }}
     {{- range $ns, $_ := $dests }}
     - server: https://kubernetes.default.svc
       namespace: {{ $ns | quote }}
+    {{- end }}
+    {{- else }}
+    []
     {{- end }}
   {{- if .Values.project.elevated }}
   clusterResourceWhitelist:
