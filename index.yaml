@@ -1,5 +1,22 @@
 apiVersion: v1
 entries:
+  kubelet-serving-cert-approver:
+  - apiVersion: v2
+    appVersion: 0.10.3
+    created: "2026-05-15T03:24:59.472970812Z"
+    description: GitOps-managed wrapper around alex1989hu/kubelet-serving-cert-approver
+      with platform-specific security and probe overrides baked in.
+    digest: 1f57395ad533ca41134da9882375916595c4c71b1eee17f75f4d5f04cfecf4e5
+    maintainers:
+    - email: jdwillmsen@gmail.com
+      name: jdwlabs
+    name: kubelet-serving-cert-approver
+    sources:
+    - https://github.com/alex1989hu/kubelet-serving-cert-approver
+    type: application
+    urls:
+    - https://github.com/jdwlabs/platform/releases/download/kubelet-serving-cert-approver-0.1.0/kubelet-serving-cert-approver-0.1.0.tgz
+    version: 0.1.0
   openclaw:
   - apiVersion: v2
     appVersion: 2026.3.13
@@ -33,4 +50,4 @@ entries:
     urls:
     - https://github.com/jdwlabs/platform/releases/download/tenant-envelope-1.0.0/tenant-envelope-1.0.0.tgz
     version: 1.0.0
-generated: "2026-04-29T04:51:31.080767874Z"
+generated: "2026-05-15T03:24:59.804967445Z"
