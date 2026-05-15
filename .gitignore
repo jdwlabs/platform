@@ -3,3 +3,4 @@ vault-init.json
 .claude/settings.local.json
 cli/bin/
 cli/dist/
+docs/superpowers/
