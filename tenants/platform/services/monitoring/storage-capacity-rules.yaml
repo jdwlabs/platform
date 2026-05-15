@@ -8,9 +8,9 @@ metadata:
     release: platform-kube-prometheus-stack
 spec:
   groups:
-  - name: storage-capacity
-    rules:
-    - alert: PVCUsageHigh
+    - name: storage-capacity
+      rules:
+        - alert: PVCUsageHigh
       annotations:
         description: PVC {{ $labels.persistentvolumeclaim }} in namespace {{ $labels.namespace }} is {{ $value | humanizePercentage }} full.
         summary: Persistent volume usage above 85%
