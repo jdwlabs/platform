@@ -191,18 +191,19 @@ func newBootstrapVerifyCmd(g *Globals) *cobra.Command {
 
 func newBootstrapHealCmd(g *Globals) *cobra.Command {
 	var (
-		stuckFinalizer  bool
-		stuckKind       string
-		stuckNamespace  string
-		stuckName       string
-		defaultProject  bool
-		projectPath     string
-		certApprover    bool
-		tlsReissue      bool
-		tlsNamespace    string
-		orphanNamespaces bool
-		tenantsDir      string
-		all             bool
+		stuckFinalizer       bool
+		stuckKind            string
+		stuckNamespace       string
+		stuckName            string
+		defaultProject       bool
+		projectPath          string
+		certApprover         bool
+		tlsReissue           bool
+		tlsNamespace         string
+		orphanNamespaces     bool
+		tenantsDir           string
+		longhornFreshInstall bool
+		all                  bool
 	)
 
 	cmd := &cobra.Command{
@@ -233,6 +234,7 @@ func newBootstrapHealCmd(g *Globals) *cobra.Command {
 			runCertApprover := certApprover || all
 			runTLSReissue := tlsReissue || all
 			runOrphanNamespaces := orphanNamespaces || all
+			runLonghornFreshInstall := longhornFreshInstall || all
 
 			if stuckFinalizer {
 				opts := heal.StuckOptions{Namespace: stuckNamespace, Kind: stuckKind, Name: stuckName}
@@ -287,6 +289,15 @@ func newBootstrapHealCmd(g *Globals) *cobra.Command {
 					Message: fmt.Sprintf("deleted %d orphan namespaces", len(deleted))})
 			}
 
+			if runLonghornFreshInstall {
+				if err := heal.LonghornFreshInstall(ctx, kc, dc); err != nil {
+					em.Emit(Event{Phase: "heal", Name: "longhorn-fresh-install", Status: "fail", Message: err.Error()})
+					return err
+				}
+				em.Emit(Event{Phase: "heal", Name: "longhorn-fresh-install", Status: "ok",
+					Message: "created longhorn-service-account + pre-upgrade CRB; triggered ArgoCD refresh"})
+			}
+
 			return nil
 		},
 	}
@@ -302,6 +313,7 @@ func newBootstrapHealCmd(g *Globals) *cobra.Command {
 	cmd.Flags().StringVar(&tlsNamespace, "tls-namespace", "cert-manager", "namespace to scan for cert-manager TLS secrets")
 	cmd.Flags().BoolVar(&orphanNamespaces, "orphan-namespaces", false, "delete tenant-labeled namespaces not found in any tenant.yaml")
 	cmd.Flags().StringVar(&tenantsDir, "tenants-dir", "tenants", "directory containing per-tenant subdirectories")
+	cmd.Flags().BoolVar(&longhornFreshInstall, "longhorn-fresh-install", false, "create longhorn SA + RBAC so the pre-upgrade hook can run on a fresh cluster")
 	cmd.Flags().BoolVar(&all, "all", false, "run all heal operations (except --stuck-finalizer which requires a target)")
 	return cmd
 }
