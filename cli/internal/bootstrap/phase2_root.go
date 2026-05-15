@@ -87,12 +87,17 @@ func (p *RootApplyPhase) Apply(ctx context.Context) error {
 }
 
 func (p *RootApplyPhase) Verify(ctx context.Context) error {
-	deadlineCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	deadline, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	return k8s.WaitFor(deadlineCtx, 10*time.Second, func(ctx context.Context) (bool, error) {
+	// Wait for bootstrap App to be Synced+Healthy.
+	if err := k8s.WaitFor(deadline, 10*time.Second, func(ctx context.Context) (bool, error) {
 		st, _ := p.Detect(ctx)
 		return st == StateAlreadyDone, nil
-	})
+	}); err != nil {
+		return err
+	}
+	// Then wait for repo-server after self-managed ArgoCD upgrade restarts pods.
+	return VerifyRootApplied(deadline, p.kube, p.dyn)
 }
 
 // PatchRootAppBranch rewrites spec.source.targetRevision in the YAML manifest.

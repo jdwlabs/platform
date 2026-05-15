@@ -123,6 +123,7 @@ state transition emits one newline-delimited JSON object:
 | `bootstrap heal --cert-approver`                                 | Trigger ArgoCD refresh of cert-approver App  |
 | `bootstrap heal --tls-reissue`                                   | Delete cert-manager-managed TLS secrets      |
 | `bootstrap heal --orphan-namespaces`                             | Delete tenant-labeled ns with no tenant.yaml |
+| `bootstrap heal --longhorn-fresh-install`                        | Create Longhorn SA + RBAC for pre-upgrade hook on fresh cluster |
 | `bootstrap heal --all`                                           | Run every healer in safe order               |
 
 ### Spec workflow

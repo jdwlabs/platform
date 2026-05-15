@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -34,14 +35,18 @@ func TestVerifyArgocdReady_NotAvailable(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "argocd-server", Namespace: "argocd"},
 	}
 	c := k8s.NewFake(deploy)
-	if err := VerifyArgocdReady(context.Background(), c); err == nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := VerifyArgocdReady(ctx, c); err == nil {
 		t.Fatalf("expected error, got nil")
 	}
 }
 
 func TestVerifyArgocdReady_Missing(t *testing.T) {
 	c := k8s.NewFake()
-	if err := VerifyArgocdReady(context.Background(), c); err == nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := VerifyArgocdReady(ctx, c); err == nil {
 		t.Fatalf("expected error, got nil")
 	}
 }
