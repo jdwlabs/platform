@@ -123,6 +123,7 @@ If a fresh bootstrap leaves the cluster in a known-bad state:
 | `kubelet-serving-cert-approver` Application stale    | `platformctl bootstrap heal --cert-approver`                                |
 | TLS certs not reissuing                              | `platformctl bootstrap heal --tls-reissue`                                  |
 | Tenant ns left over after removing a tenant          | `platformctl bootstrap heal --orphan-namespaces`                            |
+| Longhorn pre-upgrade hook fails on fresh cluster     | `platformctl bootstrap heal --longhorn-fresh-install`                       |
 | Run every safe recovery in order                     | `platformctl bootstrap heal --all`                                          |
 
 All heal subcommands are idempotent and emit `--json` events when that flag is set.

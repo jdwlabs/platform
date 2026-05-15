@@ -26,6 +26,14 @@ func staticObjects() []runtime.Object {
 				},
 			},
 		},
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: "argocd-repo-server", Namespace: "argocd"},
+			Status: appsv1.DeploymentStatus{
+				Conditions: []appsv1.DeploymentCondition{
+					{Type: appsv1.DeploymentAvailable, Status: corev1.ConditionTrue},
+				},
+			},
+		},
 		&corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: "vault-token", Namespace: "external-secrets"},
 		},
@@ -66,15 +74,25 @@ func TestBootstrapVerify_AllGatesPass(t *testing.T) {
 	}
 }
 
-func TestBootstrapVerify_NilDynamic_Errors(t *testing.T) {
+func TestBootstrapVerify_EmptyDynamic_Errors(t *testing.T) {
 	kc := k8s.NewFake(staticObjects()...)
 
-	root := NewRootForTest(kc, nil)
+	// Empty fake: dynamic client that can't find any resources.
+	// Verifies that missing ArgoCD resources cause gate failures.
+	scheme := runtime.NewScheme()
+	dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applicationsets"}: "ApplicationSetList",
+		},
+		// no objects → ApplicationSet not found → gate 2 fails
+	)
+
+	root := NewRootForTest(kc, dc)
 	var out bytes.Buffer
 	root.SetOut(&out)
 	root.SetArgs([]string{"bootstrap", "verify"})
 
 	if err := root.Execute(); err == nil {
-		t.Fatalf("expected error with nil dynamic client, got nil\noutput: %s", out.String())
+		t.Fatalf("expected error when ArgoCD resources missing, got nil\noutput: %s", out.String())
 	}
 }

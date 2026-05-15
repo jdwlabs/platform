@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -57,5 +58,7 @@ func (p *ArgocdInstallPhase) Apply(ctx context.Context) error {
 }
 
 func (p *ArgocdInstallPhase) Verify(ctx context.Context) error {
-	return VerifyArgocdReady(ctx, p.kube)
+	deadline, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	return VerifyArgocdReady(deadline, p.kube)
 }
