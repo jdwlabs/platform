@@ -6,3 +6,4 @@ cli/dist/
 docs/superpowers/
 .claude/worktrees/
 worktrees/
+.worktrees/
