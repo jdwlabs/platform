@@ -12,5 +12,5 @@ spec:
     - argocd.jdwlabs.com
   rules:
     - backendRefs:
-        - name: platform-argo-cd-argocd-server
+        - name: argocd-server
           port: 80
