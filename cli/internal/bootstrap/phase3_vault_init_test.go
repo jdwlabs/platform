@@ -55,7 +55,7 @@ func TestVaultInitPhase_Apply_PersistsSecrets(t *testing.T) {
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "vault"}},
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "external-secrets"}},
 	)
-	p := NewVaultInitPhase(kube, vault.NewBuilder(srv.URL), true)
+	p := NewVaultInitPhase(kube, vault.NewBuilder(srv.URL), srv.URL, true)
 	if err := p.Apply(context.Background()); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -69,13 +69,108 @@ func TestVaultInitPhase_Apply_PersistsSecrets(t *testing.T) {
 
 func TestVaultInitPhase_Detect_NotStarted(t *testing.T) {
 	srv := mockVaultServer(t)
-	kube := k8s.NewFake()
-	p := NewVaultInitPhase(kube, vault.NewBuilder(srv.URL), true)
+	// Detect() checks pod readiness before HTTP; provide a Running vault pod.
+	kube := k8s.NewFake(
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "platform-vault-0",
+				Namespace: "vault",
+				Labels:    map[string]string{"app.kubernetes.io/name": "vault"},
+			},
+			Status: corev1.PodStatus{
+				Phase:             corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{{Ready: true}},
+			},
+		},
+	)
+	p := NewVaultInitPhase(kube, vault.NewBuilder(srv.URL), srv.URL, true)
 	st, err := p.Detect(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if st != StateNotStarted {
-		t.Fatalf("got %s", st)
+		t.Fatalf("got %s, want StateNotStarted", st)
+	}
+}
+
+func TestVaultInitPhase_Detect_InProgress_PodNotReady(t *testing.T) {
+	srv := mockVaultServer(t)
+	// No vault pods → pod not ready → StateInProgress
+	kube := k8s.NewFake()
+	p := NewVaultInitPhase(kube, vault.NewBuilder(srv.URL), srv.URL, true)
+	st, err := p.Detect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st != StateInProgress {
+		t.Fatalf("got %s, want StateInProgress", st)
+	}
+}
+
+func TestVaultInitPhase_Detect_InProgress_NamespaceMissing(t *testing.T) {
+	srv := mockVaultServer(t)
+	// No vault namespace → InProgress with descriptive message
+	kube := k8s.NewFake()
+	p := NewVaultInitPhase(kube, vault.NewBuilder(srv.URL), srv.URL, true)
+	st, err := p.Detect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st != StateInProgress {
+		t.Fatalf("got %s, want StateInProgress", st)
+	}
+	msg := p.ProgressMessage(context.Background())
+	if msg == "" {
+		t.Fatal("expected a progress message when vault namespace missing")
+	}
+}
+
+func TestVaultInitPhase_Detect_InProgress_NamespaceExistsNoPods(t *testing.T) {
+	srv := mockVaultServer(t)
+	kube := k8s.NewFake(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "vault"}},
+	)
+	p := NewVaultInitPhase(kube, vault.NewBuilder(srv.URL), srv.URL, true)
+	st, err := p.Detect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st != StateInProgress {
+		t.Fatalf("got %s, want StateInProgress", st)
+	}
+	msg := p.ProgressMessage(context.Background())
+	if msg == "" {
+		t.Fatal("expected a progress message when vault namespace exists but no pods")
+	}
+}
+
+func TestVaultInitPhase_Detect_Unknown_CrashLoop(t *testing.T) {
+	srv := mockVaultServer(t)
+	kube := k8s.NewFake(
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "platform-vault-0",
+				Namespace: "vault",
+				Labels:    map[string]string{"app.kubernetes.io/name": "vault"},
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Name:  "vault",
+					Ready: false,
+					State: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"},
+					},
+				}},
+			},
+		},
+	)
+	p := NewVaultInitPhase(kube, vault.NewBuilder(srv.URL), srv.URL, true)
+	st, err := p.Detect(context.Background())
+	if err == nil {
+		t.Fatal("expected error for CrashLoopBackOff vault pod")
+	}
+	if st != StateUnknown {
+		t.Fatalf("got %s, want StateUnknown", st)
 	}
 }
