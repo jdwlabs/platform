@@ -96,9 +96,18 @@ func runCascade(ctx context.Context, g *Globals, w io.Writer, phaseNum int) erro
 	}
 
 	em := NewEmitter(w, g.JSON)
+	if g.Session != nil {
+		em.SetSession(g.Session)
+	}
 	opts := bootstrap.CascadeOptions{
 		OnEvent: func(phase, name, status, message string) {
 			em.Emit(Event{Phase: phase, Name: name, Status: status, Message: message})
+			if g.Session != nil {
+				switch status {
+				case "ok", "failed", "broken":
+					g.Session.RecordPhase(name, status, message)
+				}
+			}
 		},
 	}
 	return bootstrap.RunCascade(ctx, phases, opts)
