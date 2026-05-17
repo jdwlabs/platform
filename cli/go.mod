@@ -6,6 +6,7 @@ require (
 	github.com/charmbracelet/huh v1.0.0
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/spf13/cobra v1.10.2
+	go.uber.org/zap v1.27.0
 	helm.sh/helm/v3 v3.17.0
 	k8s.io/api v0.36.1
 	k8s.io/apimachinery v0.36.1
@@ -72,7 +73,6 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.uber.org/multierr v1.10.0 // indirect
-	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.49.0 // indirect
