@@ -9,3 +9,4 @@ docs/superpowers/
 .claude/worktrees/
 worktrees/
 .worktrees/
+.secrets/
