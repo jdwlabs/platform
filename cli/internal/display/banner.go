@@ -1,0 +1,24 @@
+package display
+
+import (
+	"fmt"
+	"io"
+)
+
+const platformASCIIArt = `██████╗ ██╗      █████╗ ████████╗███████╗ ██████╗ ██████╗ ███╗   ███╗
+██╔══██╗██║     ██╔══██╗╚══██╔══╝██╔════╝██╔═══██╗██╔══██╗████╗ ████║
+██████╔╝██║     ███████║   ██║   █████╗  ██║   ██║██████╔╝██╔████╔██║
+██╔═══╝ ██║     ██╔══██║   ██║   ██╔══╝  ██║   ██║██╔══██╗██║╚██╔╝██║
+██║     ███████╗██║  ██║   ██║   ██║     ╚██████╔╝██║  ██║██║ ╚═╝ ██║
+╚═╝     ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚═╝      ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝`
+
+// PrintBanner writes the PLATFORM banner to w. No-op when noColor is true for
+// the colored variant — plain text fallback is always written.
+func PrintBanner(w io.Writer, version string, noColor bool) {
+	cc, cb, cd, cr := cCyan, cBold, cDim, cReset
+	if noColor {
+		cc, cb, cd, cr = "", "", "", ""
+	}
+	_, _ = fmt.Fprintf(w, "%s%s%s\n%s%s━━━ Platform Bootstrap Tool %s ━━━%s\n",
+		cc, cb, platformASCIIArt, cr, cd, version, cr)
+}
