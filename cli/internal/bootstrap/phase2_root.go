@@ -29,6 +29,7 @@ type RootApplyPhase struct {
 	dyn      dynamic.Interface
 	branch   string
 	manifest string
+	lastMsg  string // set by Detect; read by ProgressMessage
 }
 
 func NewRootApplyPhase(kube kubernetes.Interface, dyn dynamic.Interface, branch, manifestPath string) *RootApplyPhase {
@@ -37,6 +38,9 @@ func NewRootApplyPhase(kube kubernetes.Interface, dyn dynamic.Interface, branch,
 
 func (p *RootApplyPhase) Name() string { return "root-apply" }
 func (p *RootApplyPhase) Number() int  { return 2 }
+
+// ProgressMessage implements ProgressMessenger.
+func (p *RootApplyPhase) ProgressMessage(_ context.Context) string { return p.lastMsg }
 
 func (p *RootApplyPhase) Detect(ctx context.Context) (State, error) {
 	app, err := p.dyn.Resource(appGVR).Namespace("argocd").Get(ctx, "bootstrap", metav1.GetOptions{})
@@ -51,9 +55,12 @@ func (p *RootApplyPhase) Detect(ctx context.Context) (State, error) {
 	}
 	sync, _, _ := unstructured.NestedString(app.Object, "status", "sync", "status")
 	health, _, _ := unstructured.NestedString(app.Object, "status", "health", "status")
-	if sync == "Synced" && health == "Healthy" {
+	// Healthy = all managed resources are operational; OutOfSync on its own
+	// (e.g. Helm-chart CRD version drift) does not block platform readiness.
+	if health == "Healthy" {
 		return StateAlreadyDone, nil
 	}
+	p.lastMsg = fmt.Sprintf("bootstrap app: sync=%s health=%s", sync, health)
 	return StateInProgress, nil
 }
 
