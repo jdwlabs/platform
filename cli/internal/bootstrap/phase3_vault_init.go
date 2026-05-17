@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -19,11 +20,12 @@ import (
 type VaultInitPhase struct {
 	kube           kubernetes.Interface
 	builder        vault.Builder
+	vaultAddr      string
 	nonInteractive bool
 }
 
-func NewVaultInitPhase(kube kubernetes.Interface, b vault.Builder, nonInteractive bool) *VaultInitPhase {
-	return &VaultInitPhase{kube: kube, builder: b, nonInteractive: nonInteractive}
+func NewVaultInitPhase(kube kubernetes.Interface, b vault.Builder, vaultAddr string, nonInteractive bool) *VaultInitPhase {
+	return &VaultInitPhase{kube: kube, builder: b, vaultAddr: vaultAddr, nonInteractive: nonInteractive}
 }
 
 func (p *VaultInitPhase) Name() string { return "vault-init" }
@@ -42,7 +44,7 @@ func (p *VaultInitPhase) Detect(ctx context.Context) (State, error) {
 
 	c, err := p.builder.New(ctx, "")
 	if err != nil {
-		return StateUnknown, fmt.Errorf("vault connect: %w", err)
+		return StateUnknown, p.vaultConnectError(err)
 	}
 	initialized, err := c.IsInitialized(ctx)
 	if err != nil {
@@ -127,6 +129,23 @@ func (p *VaultInitPhase) Verify(ctx context.Context) error {
 		return fmt.Errorf("vault-init verify: state %s", st)
 	}
 	return nil
+}
+
+// vaultConnectError wraps vault connection errors with actionable guidance when
+// the address is an in-cluster DNS name that won't resolve from outside the cluster.
+func (p *VaultInitPhase) vaultConnectError(err error) error {
+	msg := err.Error()
+	if strings.Contains(p.vaultAddr, ".svc") &&
+		(strings.Contains(msg, "no such host") || strings.Contains(msg, "connection refused")) {
+		return fmt.Errorf(
+			"vault not reachable at %s (in-cluster DNS — running outside the cluster?)\n"+
+				"  Fix: kubectl port-forward svc/platform-vault 8200:8200 -n vault\n"+
+				"  Then: export PLATFORMCTL_VAULT_ADDR=http://localhost:8200\n"+
+				"  original: %w",
+			p.vaultAddr, err,
+		)
+	}
+	return fmt.Errorf("vault connect: %w", err)
 }
 
 // upsertSecret creates or updates a k8s Secret.
