@@ -58,7 +58,7 @@ func (p *ArgocdInstallPhase) Apply(ctx context.Context) error {
 }
 
 func (p *ArgocdInstallPhase) Verify(ctx context.Context) error {
-	deadline, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	deadline, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	return VerifyArgocdReady(deadline, p.kube)
 }
