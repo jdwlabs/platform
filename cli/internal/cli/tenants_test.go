@@ -18,7 +18,7 @@ func TestTenantsValidate_HappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root := NewRoot()
+	root, _ := NewRoot("test")
 	var out, errOut bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&errOut)
@@ -39,7 +39,7 @@ func TestTenantsValidate_InvalidFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root := NewRoot()
+	root, _ := NewRoot("test")
 	var out, errOut bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&errOut)
