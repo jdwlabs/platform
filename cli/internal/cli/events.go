@@ -5,6 +5,11 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+
+	"github.com/jdwlabs/platform/internal/display"
 )
 
 // Event is one structured progress record. Stable JSON schema — external AI
@@ -19,12 +24,18 @@ type Event struct {
 }
 
 type Emitter struct {
-	out  io.Writer
-	json bool
+	out     io.Writer
+	json    bool
+	session *display.RunSession
 }
 
 func NewEmitter(out io.Writer, asJSON bool) *Emitter {
 	return &Emitter{out: out, json: asJSON}
+}
+
+// SetSession wires the emitter to a RunSession so Emit delegates to zap.
+func (e *Emitter) SetSession(sess *display.RunSession) {
+	e.session = sess
 }
 
 func (e *Emitter) Emit(ev Event) {
@@ -36,7 +47,30 @@ func (e *Emitter) Emit(ev Event) {
 		fmt.Fprintln(e.out, string(b))
 		return
 	}
+	if e.session != nil {
+		lvl := statusZapLevel(ev.Status)
+		e.session.Logger.Log(lvl, ev.Name,
+			zap.String("phase", ev.Phase),
+			zap.String("state", ev.Status),
+			zap.String("msg", ev.Message),
+		)
+		return
+	}
+	// Fallback: plain text (used in tests and when no session is present)
 	fmt.Fprintf(e.out, "[%s] %s/%s %s — %s\n", ev.Status, ev.Phase, ev.Name, statusGlyph(ev.Status), ev.Message)
+}
+
+func statusZapLevel(s string) zapcore.Level {
+	switch s {
+	case "ok":
+		return zapcore.InfoLevel
+	case "progressing":
+		return zapcore.WarnLevel
+	case "broken", "failed":
+		return zapcore.ErrorLevel
+	default:
+		return zapcore.InfoLevel
+	}
 }
 
 func statusGlyph(s string) string {
