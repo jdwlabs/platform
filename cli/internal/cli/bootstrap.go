@@ -142,6 +142,9 @@ func newBootstrapVerifyCmd(g *Globals) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			em := NewEmitter(os.Stdout, g.JSON)
+			if g.Session != nil {
+				em.SetSession(g.Session)
+			}
 
 			kc := testKubeClient
 			dc := testDynamicClient
@@ -221,6 +224,9 @@ func newBootstrapHealCmd(g *Globals) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			em := NewEmitter(os.Stdout, g.JSON)
+			if g.Session != nil {
+				em.SetSession(g.Session)
+			}
 
 			kc := testKubeClient
 			dc := testDynamicClient
