@@ -22,6 +22,7 @@ type VaultInitPhase struct {
 	builder        vault.Builder
 	vaultAddr      string
 	nonInteractive bool
+	lastMsg        string // set by vaultPodReady; read by ProgressMessage
 }
 
 func NewVaultInitPhase(kube kubernetes.Interface, b vault.Builder, vaultAddr string, nonInteractive bool) *VaultInitPhase {
@@ -30,6 +31,10 @@ func NewVaultInitPhase(kube kubernetes.Interface, b vault.Builder, vaultAddr str
 
 func (p *VaultInitPhase) Name() string { return "vault-init" }
 func (p *VaultInitPhase) Number() int  { return 3 }
+
+// ProgressMessage implements ProgressMessenger, surfacing live pod status in the
+// cascade's "waiting (X elapsed)" log lines.
+func (p *VaultInitPhase) ProgressMessage(_ context.Context) string { return p.lastMsg }
 
 func (p *VaultInitPhase) Detect(ctx context.Context) (State, error) {
 	// Check pod readiness before attempting HTTP — avoids misleading network errors
@@ -61,29 +66,65 @@ func (p *VaultInitPhase) Detect(ctx context.Context) (State, error) {
 
 // vaultPodReady returns true when at least one vault pod (label app.kubernetes.io/name=vault
 // in namespace vault) is Running and all its containers are Ready.
+// It sets p.lastMsg on every call so ProgressMessage can surface live status.
+// Returns a non-nil error only for unrecoverable states (CrashLoopBackOff, API errors).
 func (p *VaultInitPhase) vaultPodReady(ctx context.Context) (bool, error) {
 	pods, err := p.kube.CoreV1().Pods("vault").List(ctx, metav1.ListOptions{
 		LabelSelector: "app.kubernetes.io/name=vault",
 	})
+	if k8serrors.IsNotFound(err) {
+		p.lastMsg = "vault namespace not yet created (ArgoCD deploying wave-1 services)"
+		return false, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("list vault pods: %w", err)
 	}
-	for _, pod := range pods.Items {
-		if pod.Status.Phase != corev1.PodRunning {
-			continue
+	if len(pods.Items) == 0 {
+		if exists, _ := p.namespaceExists(ctx, "vault"); !exists {
+			p.lastMsg = "vault namespace not yet created (ArgoCD deploying wave-1 services)"
+		} else {
+			p.lastMsg = "vault pod not yet created (ArgoCD deploying wave-2 services)"
 		}
-		allReady := true
+		return false, nil
+	}
+	for _, pod := range pods.Items {
 		for _, cs := range pod.Status.ContainerStatuses {
-			if !cs.Ready {
-				allReady = false
-				break
+			if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
+				return false, fmt.Errorf("vault pod %s in CrashLoopBackOff — check logs: kubectl logs -n vault %s", pod.Name, pod.Name)
 			}
 		}
-		if allReady {
-			return true, nil
+		if pod.Status.Phase == corev1.PodRunning {
+			allReady := true
+			for _, cs := range pod.Status.ContainerStatuses {
+				if !cs.Ready {
+					allReady = false
+					if cs.State.Waiting != nil {
+						p.lastMsg = fmt.Sprintf("pod %s: container %s waiting (%s)", pod.Name, cs.Name, cs.State.Waiting.Reason)
+					} else {
+						p.lastMsg = fmt.Sprintf("pod %s: container %s not yet ready", pod.Name, cs.Name)
+					}
+				}
+			}
+			if allReady {
+				p.lastMsg = ""
+				return true, nil
+			}
+		} else {
+			p.lastMsg = fmt.Sprintf("pod %s: phase=%s (waiting for Longhorn PVC?)", pod.Name, pod.Status.Phase)
 		}
 	}
 	return false, nil
+}
+
+func (p *VaultInitPhase) namespaceExists(ctx context.Context, name string) (bool, error) {
+	_, err := p.kube.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+	if k8serrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (p *VaultInitPhase) Apply(ctx context.Context) error {

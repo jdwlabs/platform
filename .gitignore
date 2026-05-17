@@ -3,6 +3,8 @@ vault-init.json
 .claude/settings.local.json
 cli/bin/
 cli/dist/
+platformctl
+platformctl.exe
 docs/superpowers/
 .claude/worktrees/
 worktrees/

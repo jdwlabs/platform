@@ -25,7 +25,7 @@ func (o CascadeOptions) emit(phase, name, status, message string) {
 // is no longer InProgress, then applies if NotStarted, then verifies.
 func RunCascade(ctx context.Context, phases []Phase, opts CascadeOptions) error {
 	if opts.InProgressTimeout == 0 {
-		opts.InProgressTimeout = 10 * time.Minute
+		opts.InProgressTimeout = 45 * time.Minute
 	}
 
 	for _, p := range phases {
@@ -77,7 +77,13 @@ func runPhase(ctx context.Context, p Phase, opts CascadeOptions) error {
 				return &ProgressingError{Detail: fmt.Sprintf("phase %d (%s): %s", p.Number(), p.Name(), msg)}
 			}
 			elapsed := time.Until(deadline.Add(-opts.InProgressTimeout)).Abs()
-			opts.emit("bootstrap", p.Name(), "progressing", fmt.Sprintf("waiting (%s elapsed)", elapsed.Round(time.Second)))
+			detail := fmt.Sprintf("waiting (%s elapsed)", elapsed.Round(time.Second))
+			if pm, ok := p.(ProgressMessenger); ok {
+				if msg := pm.ProgressMessage(ctx); msg != "" {
+					detail = fmt.Sprintf("waiting (%s elapsed): %s", elapsed.Round(time.Second), msg)
+				}
+			}
+			opts.emit("bootstrap", p.Name(), "progressing", detail)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
