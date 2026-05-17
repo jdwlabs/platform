@@ -94,18 +94,21 @@ func (p *VaultInitPhase) vaultPodReady(ctx context.Context) (bool, error) {
 			}
 		}
 		if pod.Status.Phase == corev1.PodRunning {
-			allReady := true
+			// Check container is started (Running state), not cs.Ready — Vault's
+			// readiness probe fails until after initialization, creating a deadlock
+			// if we wait for Ready before calling Init.
+			allStarted := true
 			for _, cs := range pod.Status.ContainerStatuses {
-				if !cs.Ready {
-					allReady = false
+				if cs.State.Running == nil {
+					allStarted = false
 					if cs.State.Waiting != nil {
 						p.lastMsg = fmt.Sprintf("pod %s: container %s waiting (%s)", pod.Name, cs.Name, cs.State.Waiting.Reason)
 					} else {
-						p.lastMsg = fmt.Sprintf("pod %s: container %s not yet ready", pod.Name, cs.Name)
+						p.lastMsg = fmt.Sprintf("pod %s: container %s not yet started", pod.Name, cs.Name)
 					}
 				}
 			}
-			if allReady {
+			if allStarted {
 				p.lastMsg = ""
 				return true, nil
 			}
