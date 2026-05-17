@@ -31,6 +31,7 @@ func NewRoot(version string) (*cobra.Command, func(error)) {
 
 	cmd := &cobra.Command{
 		Use:           "platformctl",
+		Version:       version,
 		Short:         "Operate the jdwlabs platform: bootstrap, verify, heal, tenants.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
