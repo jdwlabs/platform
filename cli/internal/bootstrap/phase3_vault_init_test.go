@@ -69,7 +69,8 @@ func TestVaultInitPhase_Apply_PersistsSecrets(t *testing.T) {
 
 func TestVaultInitPhase_Detect_NotStarted(t *testing.T) {
 	srv := mockVaultServer(t)
-	// Detect() checks pod readiness before HTTP; provide a Running vault pod.
+	// Detect() checks container Running state (not cs.Ready) — Vault's readiness
+	// probe fails until after init, so we must not gate on Ready here.
 	kube := k8s.NewFake(
 		&corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -78,8 +79,12 @@ func TestVaultInitPhase_Detect_NotStarted(t *testing.T) {
 				Labels:    map[string]string{"app.kubernetes.io/name": "vault"},
 			},
 			Status: corev1.PodStatus{
-				Phase:             corev1.PodRunning,
-				ContainerStatuses: []corev1.ContainerStatus{{Ready: true}},
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Name:  "vault",
+					Ready: false, // readiness probe failing — expected before init
+					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+				}},
 			},
 		},
 	)
