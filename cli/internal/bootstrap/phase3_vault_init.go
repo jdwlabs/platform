@@ -30,6 +30,16 @@ func (p *VaultInitPhase) Name() string { return "vault-init" }
 func (p *VaultInitPhase) Number() int  { return 3 }
 
 func (p *VaultInitPhase) Detect(ctx context.Context) (State, error) {
+	// Check pod readiness before attempting HTTP — avoids misleading network errors
+	// while vault is still starting up.
+	ready, err := p.vaultPodReady(ctx)
+	if err != nil {
+		return StateUnknown, err
+	}
+	if !ready {
+		return StateInProgress, nil
+	}
+
 	c, err := p.builder.New(ctx, "")
 	if err != nil {
 		return StateUnknown, fmt.Errorf("vault connect: %w", err)
@@ -45,6 +55,33 @@ func (p *VaultInitPhase) Detect(ctx context.Context) (State, error) {
 		return StateBroken, fmt.Errorf("vault initialized but vault-token secret missing — re-run to recover or restore from backup")
 	}
 	return StateAlreadyDone, nil
+}
+
+// vaultPodReady returns true when at least one vault pod (label app.kubernetes.io/name=vault
+// in namespace vault) is Running and all its containers are Ready.
+func (p *VaultInitPhase) vaultPodReady(ctx context.Context) (bool, error) {
+	pods, err := p.kube.CoreV1().Pods("vault").List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=vault",
+	})
+	if err != nil {
+		return false, fmt.Errorf("list vault pods: %w", err)
+	}
+	for _, pod := range pods.Items {
+		if pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		allReady := true
+		for _, cs := range pod.Status.ContainerStatuses {
+			if !cs.Ready {
+				allReady = false
+				break
+			}
+		}
+		if allReady {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (p *VaultInitPhase) Apply(ctx context.Context) error {
