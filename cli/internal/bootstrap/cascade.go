@@ -72,8 +72,13 @@ func RunCascade(ctx context.Context, phases []Phase, opts CascadeOptions) error 
 			}
 			opts.emit("bootstrap", p.Name(), "ok", "converged")
 
+		case StateUnknown:
+			msg := fmt.Sprintf("cannot determine state: %s", errStr(stErr))
+			opts.emit("bootstrap", p.Name(), "failed", msg)
+			return fmt.Errorf("phase %d (%s): %s", p.Number(), p.Name(), msg)
+
 		default:
-			return fmt.Errorf("phase %d returned unknown state %d", p.Number(), st)
+			return fmt.Errorf("phase %d returned unhandled state %d", p.Number(), st)
 		}
 	}
 	return nil
