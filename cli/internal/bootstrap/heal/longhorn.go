@@ -23,21 +23,37 @@ const (
 	longhornAppName = "platform-longhorn"
 )
 
-// LonghornFreshInstall creates the ServiceAccount and temporary ClusterRoleBinding
-// that Longhorn's pre-upgrade hook requires on a fresh install. On subsequent
-// syncs ArgoCD replaces these with the chart-managed equivalents.
+// LonghornFreshInstall creates the namespace, ServiceAccount, and temporary
+// ClusterRoleBinding that Longhorn's pre-upgrade hook requires on a fresh install.
+// On subsequent syncs ArgoCD replaces chart-managed equivalents.
 //
 // Root cause: Longhorn's Helm chart defines a pre-upgrade PreSync hook that runs
 // the longhorn-manager image. ArgoCD fires PreSync hooks before applying any chart
 // resources, so the hook pod can't find the SA or its RBAC on a green-field cluster.
 func LonghornFreshInstall(ctx context.Context, kube kubernetes.Interface, dyn dynamic.Interface) error {
+	if err := ensureLonghornNamespace(ctx, kube); err != nil {
+		return err
+	}
 	if err := ensureLonghornSA(ctx, kube); err != nil {
 		return err
 	}
 	if err := ensureLonghornCRB(ctx, kube); err != nil {
 		return err
 	}
-	return triggerArgoRefresh(ctx, dyn, "argocd", longhornAppName)
+	// Trigger ArgoCD refresh only if the app already exists; non-fatal if not.
+	_ = triggerArgoRefresh(ctx, dyn, "argocd", longhornAppName)
+	return nil
+}
+
+func ensureLonghornNamespace(ctx context.Context, kube kubernetes.Interface) error {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: longhornNS},
+	}
+	_, err := kube.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("create longhorn-system namespace: %w", err)
+	}
+	return nil
 }
 
 func ensureLonghornSA(ctx context.Context, kube kubernetes.Interface) error {

@@ -85,7 +85,7 @@ func runCascade(ctx context.Context, g *Globals, w io.Writer, phaseNum int) erro
 	allPhases := []bootstrap.Phase{
 		bootstrap.NewArgocdInstallPhase(kc, helm.ExecRunner{}, valuesPath),
 		bootstrap.NewRootApplyPhase(kc, dc, g.Branch, "bootstrap/root-app.yaml"),
-		bootstrap.NewVaultInitPhase(kc, vault.NewBuilder(vaultAddr), g.NonInteractive),
+		bootstrap.NewVaultInitPhase(kc, vault.NewBuilder(vaultAddr), vaultAddr, g.NonInteractive),
 		bootstrap.NewVaultSeedPhase(vc, g.NonInteractive, "secret", tenantNames, nil),
 		bootstrap.NewBackupsInitPhase(vc, g.NonInteractive, "secret"),
 	}
@@ -99,6 +99,18 @@ func runCascade(ctx context.Context, g *Globals, w io.Writer, phaseNum int) erro
 	if g.Session != nil {
 		em.SetSession(g.Session)
 	}
+
+	// Pre-flight: ensure Longhorn SA+RBAC exist before ArgoCD fires the PreSync hook.
+	// Idempotent — safe on every run. Only runs for full bootstrap (not single-phase).
+	if phaseNum == 0 {
+		em.Emit(Event{Phase: "bootstrap", Name: "longhorn-preflight", Status: "progressing", Message: "ensuring longhorn-service-account exists"})
+		if err := heal.LonghornFreshInstall(ctx, kc, dc); err != nil {
+			em.Emit(Event{Phase: "bootstrap", Name: "longhorn-preflight", Status: "progressing", Message: fmt.Sprintf("warn: %v (continuing)", err)})
+		} else {
+			em.Emit(Event{Phase: "bootstrap", Name: "longhorn-preflight", Status: "ok", Message: "longhorn SA+RBAC ready"})
+		}
+	}
+
 	opts := bootstrap.CascadeOptions{
 		OnEvent: func(phase, name, status, message string) {
 			em.Emit(Event{Phase: phase, Name: name, Status: status, Message: message})

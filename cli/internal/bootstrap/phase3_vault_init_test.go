@@ -55,7 +55,7 @@ func TestVaultInitPhase_Apply_PersistsSecrets(t *testing.T) {
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "vault"}},
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "external-secrets"}},
 	)
-	p := NewVaultInitPhase(kube, vault.NewBuilder(srv.URL), true)
+	p := NewVaultInitPhase(kube, vault.NewBuilder(srv.URL), srv.URL, true)
 	if err := p.Apply(context.Background()); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestVaultInitPhase_Detect_NotStarted(t *testing.T) {
 			},
 		},
 	)
-	p := NewVaultInitPhase(kube, vault.NewBuilder(srv.URL), true)
+	p := NewVaultInitPhase(kube, vault.NewBuilder(srv.URL), srv.URL, true)
 	st, err := p.Detect(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestVaultInitPhase_Detect_InProgress_PodNotReady(t *testing.T) {
 	srv := mockVaultServer(t)
 	// No vault pods → pod not ready → StateInProgress
 	kube := k8s.NewFake()
-	p := NewVaultInitPhase(kube, vault.NewBuilder(srv.URL), true)
+	p := NewVaultInitPhase(kube, vault.NewBuilder(srv.URL), srv.URL, true)
 	st, err := p.Detect(context.Background())
 	if err != nil {
 		t.Fatal(err)
