@@ -36,3 +36,10 @@ type Phase interface {
 	Apply(ctx context.Context) error
 	Verify(ctx context.Context) error
 }
+
+// ProgressMessenger is an optional Phase extension. Phases that implement it
+// can return a human-readable status string that RunCascade appends to the
+// "waiting (X elapsed)" progress event during StateInProgress polling.
+type ProgressMessenger interface {
+	ProgressMessage(ctx context.Context) string
+}

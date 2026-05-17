@@ -6,8 +6,8 @@ import (
 )
 
 func TestRoot_HasGlobalFlags(t *testing.T) {
-	cmd := NewRoot()
-	for _, name := range []string{"branch", "dry-run", "non-interactive", "json"} {
+	cmd, _ := NewRoot("test")
+	for _, name := range []string{"branch", "dry-run", "non-interactive", "json", "no-color"} {
 		if cmd.PersistentFlags().Lookup(name) == nil {
 			t.Errorf("missing global flag --%s", name)
 		}
@@ -15,7 +15,7 @@ func TestRoot_HasGlobalFlags(t *testing.T) {
 }
 
 func TestRoot_HelpRuns(t *testing.T) {
-	cmd := NewRoot()
+	cmd, _ := NewRoot("test")
 	cmd.SetArgs([]string{"--help"})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
