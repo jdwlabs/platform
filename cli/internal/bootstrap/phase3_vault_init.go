@@ -143,7 +143,7 @@ func (p *VaultInitPhase) Apply(ctx context.Context) error {
 		return fmt.Errorf("unseal: %w", err)
 	}
 	c.SetToken(res.RootToken)
-	if err := c.EnableKVv2(ctx, "secret"); err != nil {
+	if err := c.EnableKVv2(ctx, "kv"); err != nil {
 		return fmt.Errorf("enable kv: %w", err)
 	}
 
