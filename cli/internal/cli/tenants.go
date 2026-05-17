@@ -25,6 +25,9 @@ func newTenantsValidateCmd(g *Globals) *cobra.Command {
 				path = args[0]
 			}
 			out := NewEmitter(cmd.OutOrStdout(), g.JSON)
+			if g.Session != nil {
+				out.SetSession(g.Session)
+			}
 			if err := tenants.ValidateDir(path); err != nil {
 				out.Emit(Event{Phase: "tenants", Name: "validate", Status: "failed", Message: err.Error()})
 				return err
