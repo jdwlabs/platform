@@ -66,6 +66,7 @@ spec:
           - PruneLast=true
           - ServerSideApply=true
           - RespectIgnoreDifferences=true
+          - SkipDryRunOnMissingResource=true
       destination:
         namespace: '{{ "{{" }} .namespace {{ "}}" }}'
         server: https://kubernetes.default.svc
