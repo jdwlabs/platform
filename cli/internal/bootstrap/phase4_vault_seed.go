@@ -117,7 +117,16 @@ func (p *VaultSeedPhase) Apply(ctx context.Context) error {
 	return nil
 }
 
-func (p *VaultSeedPhase) Verify(ctx context.Context) error { return nil }
+func (p *VaultSeedPhase) Verify(ctx context.Context) error {
+	c, err := p.client(ctx)
+	if err != nil {
+		return err
+	}
+	if _, err := c.GetKV(ctx, p.mount, "porkbun"); err != nil {
+		return fmt.Errorf("vault-seed verify: kv/%s/porkbun not seeded: %w", p.mount, err)
+	}
+	return nil
+}
 
 func (p *VaultSeedPhase) buildSpecs() map[string]seedSpec {
 	out := map[string]seedSpec{}
