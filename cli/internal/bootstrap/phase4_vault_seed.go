@@ -57,9 +57,6 @@ var staticSeedSpecs = map[string]seedSpec{
 	"usersrole": {Path: "usersrole", Fields: []seedField{
 		{"jwt_secret", "PLATFORMCTL_USERSROLE_JWT_SECRET", true, false},
 	}},
-	"rclone-gdrive": {Path: "rclone-gdrive", Fields: []seedField{
-		{"rclone_conf", "PLATFORMCTL_RCLONE_CONF", true, false},
-	}},
 }
 
 // VaultSeedPhase writes kv secrets for all platform and tenant paths.

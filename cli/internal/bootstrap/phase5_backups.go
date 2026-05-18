@@ -58,7 +58,7 @@ func (p *BackupsInitPhase) Apply(ctx context.Context) error {
 	}
 	block, err := prompt.Secret(
 		"Paste the rclone config block for [gdrive] (obtain via: rclone authorize \"drive\")",
-		"PLATFORMCTL_RCLONE_GDRIVE_BLOCK", p.nonInteractive,
+		"PLATFORMCTL_RCLONE_CONF", p.nonInteractive,
 	)
 	if err != nil {
 		return err
@@ -66,7 +66,7 @@ func (p *BackupsInitPhase) Apply(ctx context.Context) error {
 	if err := validateRcloneBlock(block); err != nil {
 		return fmt.Errorf("rclone block invalid: %w", err)
 	}
-	return c.PutKV(ctx, p.mount, "rclone-gdrive", map[string]any{"rclone.conf": block})
+	return c.PutKV(ctx, p.mount, "rclone-gdrive", map[string]any{"rclone_conf": block})
 }
 
 func (p *BackupsInitPhase) Verify(ctx context.Context) error {
@@ -78,9 +78,9 @@ func (p *BackupsInitPhase) Verify(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	conf, ok := got["rclone.conf"].(string)
+	conf, ok := got["rclone_conf"].(string)
 	if !ok || conf == "" {
-		return fmt.Errorf("rclone-gdrive missing rclone.conf field")
+		return fmt.Errorf("rclone-gdrive missing rclone_conf field")
 	}
 	return validateRcloneBlock(conf)
 }
