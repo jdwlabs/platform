@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -24,9 +25,10 @@ func (p *VaultSeedPhase) client(ctx context.Context) (*vault.Client, error) {
 }
 
 type seedField struct {
-	Name   string
-	EnvVar string
-	Secret bool
+	Name     string
+	EnvVar   string
+	Secret   bool
+	Optional bool // skip silently when env var not set
 }
 
 type seedSpec struct {
@@ -34,25 +36,29 @@ type seedSpec struct {
 	Fields []seedField
 }
 
-// staticSeedSpecs holds platform-wide kv paths. Tenant-scoped ones are added
-// by NewVaultSeedPhase based on the discovered tenant list.
+// staticSeedSpecs holds platform-wide kv paths. Field names must match the
+// `property:` keys in each service's ExternalSecret. Tenant-scoped paths are
+// added by NewVaultSeedPhase based on the discovered tenant list.
 var staticSeedSpecs = map[string]seedSpec{
 	"porkbun": {Path: "porkbun", Fields: []seedField{
-		{"api_key", "PLATFORMCTL_PORKBUN_API_KEY", true},
-		{"api_secret_key", "PLATFORMCTL_PORKBUN_API_SECRET_KEY", true},
+		{"api-key", "PLATFORMCTL_PORKBUN_API_KEY", true, false},
+		{"secret-key", "PLATFORMCTL_PORKBUN_SECRET_KEY", true, false},
 	}},
 	"grafana": {Path: "grafana", Fields: []seedField{
-		{"admin_user", "PLATFORMCTL_GRAFANA_ADMIN_USER", false},
-		{"admin_password", "PLATFORMCTL_GRAFANA_ADMIN_PASSWORD", true},
+		{"admin-user", "PLATFORMCTL_GRAFANA_ADMIN_USER", false, false},
+		{"admin-password", "PLATFORMCTL_GRAFANA_ADMIN_PASSWORD", true, false},
 	}},
 	"longhorn": {Path: "longhorn", Fields: []seedField{
-		{"auth", "PLATFORMCTL_LONGHORN_AUTH", true},
+		{"htpasswd_string", "PLATFORMCTL_LONGHORN_HTPASSWD", true, false},
 	}},
 	"alertmanager": {Path: "alertmanager", Fields: []seedField{
-		{"slack_webhook", "PLATFORMCTL_ALERTMANAGER_SLACK_WEBHOOK", true},
+		{"discord_webhook_url", "PLATFORMCTL_ALERTMANAGER_DISCORD_WEBHOOK", true, false},
 	}},
 	"usersrole": {Path: "usersrole", Fields: []seedField{
-		{"jwt_secret", "PLATFORMCTL_USERSROLE_JWT_SECRET", true},
+		{"jwt_secret", "PLATFORMCTL_USERSROLE_JWT_SECRET", true, false},
+	}},
+	"rclone-gdrive": {Path: "rclone-gdrive", Fields: []seedField{
+		{"rclone_conf", "PLATFORMCTL_RCLONE_CONF", true, false},
 	}},
 }
 
@@ -100,7 +106,12 @@ func (p *VaultSeedPhase) Apply(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("seed %s/%s: %w", spec.Path, f.Name, err)
 			}
-			values[f.Name] = v
+			if v != "" {
+				values[f.Name] = v
+			}
+		}
+		if len(values) == 0 {
+			continue // all optional fields absent — skip this path
 		}
 		if err := c.PutKV(ctx, p.mount, spec.Path, values); err != nil {
 			return fmt.Errorf("put kv %s: %w", spec.Path, err)
@@ -119,16 +130,19 @@ func (p *VaultSeedPhase) buildSpecs() map[string]seedSpec {
 	for _, t := range p.tenants {
 		u := toEnvKey(t)
 		out[t+"-github-app"] = seedSpec{Path: t + "-github-app", Fields: []seedField{
-			{"app_id", "PLATFORMCTL_" + u + "_GITHUB_APP_ID", false},
-			{"installation_id", "PLATFORMCTL_" + u + "_GITHUB_INSTALLATION_ID", false},
-			{"private_key", "PLATFORMCTL_" + u + "_GITHUB_PRIVATE_KEY", true},
+			{"github_app_id", "PLATFORMCTL_" + u + "_GITHUB_APP_ID", false, false},
+			{"github_app_installation_id", "PLATFORMCTL_" + u + "_GITHUB_INSTALLATION_ID", false, false},
+			{"github_app_private_key", "PLATFORMCTL_" + u + "_GITHUB_PRIVATE_KEY", true, false},
 		}}
+		// ai-keys and discord are optional — not all tenants deploy these services.
 		out[t+"-ai-keys"] = seedSpec{Path: t + "-ai-keys", Fields: []seedField{
-			{"openai", "PLATFORMCTL_" + u + "_OPENAI_API_KEY", true},
-			{"anthropic", "PLATFORMCTL_" + u + "_ANTHROPIC_API_KEY", true},
+			{"openai_api_key", "PLATFORMCTL_" + u + "_OPENAI_API_KEY", true, true},
+			{"anthropic_api_key", "PLATFORMCTL_" + u + "_ANTHROPIC_API_KEY", true, true},
+			{"openrouter_api_key", "PLATFORMCTL_" + u + "_OPENROUTER_API_KEY", true, true},
+			{"htpasswd_string", "PLATFORMCTL_" + u + "_OPENCLAW_HTPASSWD", true, true},
 		}}
 		out[t+"-discord-bot-token"] = seedSpec{Path: t + "-discord-bot-token", Fields: []seedField{
-			{"token", "PLATFORMCTL_" + u + "_DISCORD_BOT_TOKEN", true},
+			{"token", "PLATFORMCTL_" + u + "_DISCORD_BOT_TOKEN", true, true},
 		}}
 	}
 	return out
@@ -146,6 +160,9 @@ func (p *VaultSeedPhase) keysToRun(specs map[string]seedSpec) []string {
 }
 
 func promptField(f seedField, specName string, nonInteractive bool) (string, error) {
+	if f.Optional && os.Getenv(f.EnvVar) == "" {
+		return "", nil
+	}
 	label := fmt.Sprintf("[%s] %s", specName, f.Name)
 	if f.Secret {
 		return prompt.Secret(label, f.EnvVar, nonInteractive)
