@@ -87,8 +87,8 @@ func runCascade(ctx context.Context, g *Globals, w io.Writer, phaseNum int) erro
 		bootstrap.NewArgocdInstallPhase(kc, helm.ExecRunner{}, valuesPath),
 		bootstrap.NewRootApplyPhase(kc, dc, g.Branch, "bootstrap/root-app.yaml"),
 		bootstrap.NewVaultInitPhase(kc, resolver, ".secrets"),
-		bootstrap.NewVaultSeedPhase(resolver, g.NonInteractive, "secret", tenantNames, nil),
-		bootstrap.NewBackupsInitPhase(resolver, g.NonInteractive, "secret"),
+		bootstrap.NewVaultSeedPhase(resolver, g.NonInteractive, "kv", tenantNames, nil),
+		bootstrap.NewBackupsInitPhase(resolver, g.NonInteractive, "kv"),
 	}
 
 	phases := allPhases
