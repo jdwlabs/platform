@@ -54,7 +54,7 @@ func mockVaultKV(t *testing.T) (*httptest.Server, *vault.Client) {
 func TestVaultSeedPhase_PorkbunFromEnv(t *testing.T) {
 	srv, c := mockVaultKV(t)
 	t.Setenv("PLATFORMCTL_PORKBUN_API_KEY", "pk-api")
-	t.Setenv("PLATFORMCTL_PORKBUN_API_SECRET_KEY", "pk-secret")
+	t.Setenv("PLATFORMCTL_PORKBUN_SECRET_KEY", "pk-secret")
 
 	p := NewVaultSeedPhase(NewVaultAddrResolver(srv.URL, nil, nil), true, "secret", nil, []string{"porkbun"})
 	if err := p.Apply(context.Background()); err != nil {
@@ -64,8 +64,8 @@ func TestVaultSeedPhase_PorkbunFromEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got["api_key"] != "pk-api" {
-		t.Fatalf("api_key: %v", got)
+	if got["api-key"] != "pk-api" {
+		t.Fatalf("api-key: %v", got)
 	}
 }
 
