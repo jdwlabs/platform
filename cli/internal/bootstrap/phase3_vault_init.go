@@ -23,8 +23,9 @@ type VaultInitPhase struct {
 	kube      kubernetes.Interface
 	dc        dynamic.Interface // nil in tests; skips ClusterSecretStore apply
 	resolver  *VaultAddrResolver
-	backupDir string // directory for vault-init.json backup; defaults to .secrets/
-	lastMsg   string // set by vaultPodReady; read by ProgressMessage
+	backupDir string                  // directory for vault-init.json backup; defaults to .secrets/
+	lastMsg   string                  // set by vaultPodReady; read by ProgressMessage
+	onEvent   func(status, msg string) // wired by bootstrap.go so non-fatal warns appear in the event stream
 }
 
 func NewVaultInitPhase(kube kubernetes.Interface, dc dynamic.Interface, resolver *VaultAddrResolver, backupDir string) *VaultInitPhase {
@@ -32,6 +33,19 @@ func NewVaultInitPhase(kube kubernetes.Interface, dc dynamic.Interface, resolver
 		backupDir = ".secrets"
 	}
 	return &VaultInitPhase{kube: kube, dc: dc, resolver: resolver, backupDir: backupDir}
+}
+
+// SetOnEvent wires a callback so Apply() can emit non-fatal warnings into the
+// caller's event stream rather than falling back to fmt.Printf.
+func (p *VaultInitPhase) SetOnEvent(f func(status, msg string)) { p.onEvent = f }
+
+// warn emits a non-fatal warning via onEvent when wired, otherwise stderr.
+func (p *VaultInitPhase) warn(msg string) {
+	if p.onEvent != nil {
+		p.onEvent("progressing", "warn: "+msg)
+	} else {
+		fmt.Println("warn:", msg)
+	}
 }
 
 func (p *VaultInitPhase) Name() string { return "vault-init" }
@@ -152,7 +166,10 @@ func (p *VaultInitPhase) Apply(ctx context.Context) error {
 		return fmt.Errorf("enable kv: %w", err)
 	}
 
-	initJSON, _ := json.Marshal(res)
+	initJSON, err := json.Marshal(res)
+	if err != nil {
+		return fmt.Errorf("marshal vault init result: %w", err)
+	}
 	if err := upsertSecret(ctx, p.kube, "vault", "vault-init", map[string][]byte{
 		"vault-init.json": initJSON,
 	}); err != nil {
@@ -165,14 +182,14 @@ func (p *VaultInitPhase) Apply(ctx context.Context) error {
 	}
 	if err := p.backupInitJSON(initJSON); err != nil {
 		// Non-fatal: cluster secret is the authoritative copy.
-		fmt.Printf("warn: could not write local backup: %v\n", err)
+		p.warn(fmt.Sprintf("could not write local backup: %v", err))
 	}
 	// Apply the ESO ClusterSecretStore immediately so cert-manager can resolve
 	// DNS-01 challenges without waiting for the ArgoCD vault app to sync.
 	// (ArgoCD vault sync fails until the wildcard cert exists, which requires
 	// the ClusterSecretStore to exist — circular dependency broken here.)
 	if err := p.applyVaultClusterSecretStore(ctx); err != nil {
-		fmt.Printf("warn: could not apply ClusterSecretStore/vault: %v\n", err)
+		p.warn(fmt.Sprintf("ClusterSecretStore/vault not applied (ESO CRD may not be ready yet — will self-heal once ArgoCD syncs vault app): %v", err))
 	}
 	return nil
 }

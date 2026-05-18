@@ -12,6 +12,7 @@ import (
 
 	"github.com/jdwlabs/platform/internal/bootstrap"
 	"github.com/jdwlabs/platform/internal/bootstrap/heal"
+	"github.com/jdwlabs/platform/internal/cluster"
 	"github.com/jdwlabs/platform/internal/helm"
 	"github.com/jdwlabs/platform/internal/k8s"
 	"github.com/jdwlabs/platform/internal/tenants"
@@ -34,12 +35,12 @@ func newBootstrapCmd(g *Globals) *cobra.Command {
 func newBootstrapPhaseCmd(g *Globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "phase <number>",
-		Short: "Run a single bootstrap phase by number (1-5)",
+		Short: "Run a single bootstrap phase by number",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			num, err := strconv.Atoi(args[0])
-			if err != nil || num < 1 || num > 5 {
-				return fmt.Errorf("phase must be 1..5")
+			if err != nil || num < 1 {
+				return fmt.Errorf("phase must be a positive number")
 			}
 			return runCascade(cmd.Context(), g, cmd.OutOrStdout(), num)
 		},
@@ -82,23 +83,32 @@ func runCascade(ctx context.Context, g *Globals, w io.Writer, phaseNum int) erro
 		return fmt.Errorf("collect tenants: %w", err)
 	}
 
+	em := NewEmitter(w, g.JSON)
+	if g.Session != nil {
+		em.SetSession(g.Session)
+	}
+
+	vaultInit := bootstrap.NewVaultInitPhase(kc, dc, resolver, ".secrets")
+	vaultInit.SetOnEvent(func(status, msg string) {
+		em.Emit(Event{Phase: "bootstrap", Name: "vault-init", Status: status, Message: msg})
+	})
+
 	valuesPath := "tenants/platform/services/argo-cd/values.yaml"
 	allPhases := []bootstrap.Phase{
 		bootstrap.NewArgocdInstallPhase(kc, helm.ExecRunner{}, valuesPath),
 		bootstrap.NewRootApplyPhase(kc, dc, g.Branch, "bootstrap/root-app.yaml"),
-		bootstrap.NewVaultInitPhase(kc, dc, resolver, ".secrets"),
+		vaultInit,
 		bootstrap.NewVaultSeedPhase(resolver, g.NonInteractive, "kv", tenantNames, nil),
 		bootstrap.NewBackupsInitPhase(resolver, g.NonInteractive, "kv"),
+	}
+
+	if phaseNum > len(allPhases) {
+		return fmt.Errorf("phase must be 1..%d", len(allPhases))
 	}
 
 	phases := allPhases
 	if phaseNum > 0 {
 		phases = []bootstrap.Phase{allPhases[phaseNum-1]}
-	}
-
-	em := NewEmitter(w, g.JSON)
-	if g.Session != nil {
-		em.SetSession(g.Session)
 	}
 
 	// Pre-flight: ensure Longhorn SA+RBAC exist before ArgoCD fires the PreSync hook.
@@ -123,11 +133,48 @@ func runCascade(ctx context.Context, g *Globals, w io.Writer, phaseNum int) erro
 			}
 		},
 	}
-	return bootstrap.RunCascade(ctx, phases, opts)
+
+	if err := bootstrap.RunCascade(ctx, phases, opts); err != nil {
+		return err
+	}
+
+	// Post-bootstrap health snapshot — only for full bootstrap runs.
+	// Cert issuance, ESO sync, and gateway programming happen asynchronously;
+	// this surfaces what's still converging so SUCCESS isn't a lie-of-omission.
+	if phaseNum == 0 {
+		em.Emit(Event{Phase: "bootstrap", Name: "post-check", Status: "progressing",
+			Message: "running post-bootstrap cluster health check"})
+		checks := cluster.AllChecks(kc, dc)
+		layers := cluster.RunChecks(ctx, checks)
+
+		if g.JSON {
+			_ = cluster.PrintJSON(w, layers)
+		} else {
+			fmt.Fprintln(w)
+			cluster.PrintResults(w, layers, g.NoColor)
+			if cluster.OverallStatus(layers) != cluster.StatusPass {
+				fmt.Fprintln(w, "Note: DNS-01 cert issuance and ESO sync take 5–15 min after bootstrap.")
+				fmt.Fprintln(w, "Run 'platformctl cluster status --watch' to monitor convergence.")
+				fmt.Fprintln(w)
+			}
+		}
+
+		msg := "all checks passing"
+		status := "ok"
+		if cluster.OverallStatus(layers) != cluster.StatusPass {
+			status = "progressing"
+			msg = "cluster converging — some checks pending (normal post-bootstrap)"
+		}
+		em.Emit(Event{Phase: "bootstrap", Name: "post-check", Status: status, Message: msg})
+	}
+	return nil
 }
 
 func collectTenantNames(root string) ([]string, error) {
-	matches, _ := filepath.Glob(filepath.Join(root, "*", "tenant.yaml"))
+	matches, err := filepath.Glob(filepath.Join(root, "*", "tenant.yaml"))
+	if err != nil {
+		return nil, fmt.Errorf("glob tenant files: %w", err)
+	}
 	var names []string
 	for _, m := range matches {
 		t, err := tenants.LoadFile(m)
