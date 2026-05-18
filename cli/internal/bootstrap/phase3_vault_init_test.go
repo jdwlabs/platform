@@ -54,7 +54,7 @@ func TestVaultInitPhase_Apply_PersistsSecrets(t *testing.T) {
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "vault"}},
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "external-secrets"}},
 	)
-	p := NewVaultInitPhase(kube, NewVaultAddrResolver(srv.URL, nil, nil), true)
+	p := NewVaultInitPhase(kube, NewVaultAddrResolver(srv.URL, nil, nil), t.TempDir())
 	if err := p.Apply(context.Background()); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestVaultInitPhase_Detect_NotStarted(t *testing.T) {
 			},
 		},
 	)
-	p := NewVaultInitPhase(kube, NewVaultAddrResolver(srv.URL, nil, nil), true)
+	p := NewVaultInitPhase(kube, NewVaultAddrResolver(srv.URL, nil, nil), t.TempDir())
 	st, err := p.Detect(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestVaultInitPhase_Detect_InProgress_PodNotReady(t *testing.T) {
 	srv := mockVaultServer(t)
 	// No vault pods → pod not ready → StateInProgress
 	kube := k8s.NewFake()
-	p := NewVaultInitPhase(kube, NewVaultAddrResolver(srv.URL, nil, nil), true)
+	p := NewVaultInitPhase(kube, NewVaultAddrResolver(srv.URL, nil, nil), t.TempDir())
 	st, err := p.Detect(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +115,7 @@ func TestVaultInitPhase_Detect_InProgress_NamespaceMissing(t *testing.T) {
 	srv := mockVaultServer(t)
 	// No vault namespace → InProgress with descriptive message
 	kube := k8s.NewFake()
-	p := NewVaultInitPhase(kube, NewVaultAddrResolver(srv.URL, nil, nil), true)
+	p := NewVaultInitPhase(kube, NewVaultAddrResolver(srv.URL, nil, nil), t.TempDir())
 	st, err := p.Detect(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +134,7 @@ func TestVaultInitPhase_Detect_InProgress_NamespaceExistsNoPods(t *testing.T) {
 	kube := k8s.NewFake(
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "vault"}},
 	)
-	p := NewVaultInitPhase(kube, NewVaultAddrResolver(srv.URL, nil, nil), true)
+	p := NewVaultInitPhase(kube, NewVaultAddrResolver(srv.URL, nil, nil), t.TempDir())
 	st, err := p.Detect(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -169,7 +169,7 @@ func TestVaultInitPhase_Detect_Unknown_CrashLoop(t *testing.T) {
 			},
 		},
 	)
-	p := NewVaultInitPhase(kube, NewVaultAddrResolver(srv.URL, nil, nil), true)
+	p := NewVaultInitPhase(kube, NewVaultAddrResolver(srv.URL, nil, nil), t.TempDir())
 	st, err := p.Detect(context.Background())
 	if err == nil {
 		t.Fatal("expected error for CrashLoopBackOff vault pod")
