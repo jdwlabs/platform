@@ -31,6 +31,10 @@ func NewDynamic() (dynamic.Interface, error) {
 	return dynamic.NewForConfig(cfg)
 }
 
+// NewRestConfig returns the REST config used to build k8s clients.
+// Useful for operations that need raw REST access (e.g., port-forwarding).
+func NewRestConfig() (*rest.Config, error) { return buildConfig() }
+
 func buildConfig() (*rest.Config, error) {
 	path := os.Getenv("KUBECONFIG")
 	if path == "" {
