@@ -52,11 +52,11 @@ func mockVaultKV(t *testing.T) (*httptest.Server, *vault.Client) {
 }
 
 func TestVaultSeedPhase_PorkbunFromEnv(t *testing.T) {
-	_, c := mockVaultKV(t)
+	srv, c := mockVaultKV(t)
 	t.Setenv("PLATFORMCTL_PORKBUN_API_KEY", "pk-api")
 	t.Setenv("PLATFORMCTL_PORKBUN_API_SECRET_KEY", "pk-secret")
 
-	p := NewVaultSeedPhase(c, true, "secret", nil, []string{"porkbun"})
+	p := NewVaultSeedPhase(NewVaultAddrResolver(srv.URL, nil, nil), true, "secret", nil, []string{"porkbun"})
 	if err := p.Apply(context.Background()); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -70,12 +70,12 @@ func TestVaultSeedPhase_PorkbunFromEnv(t *testing.T) {
 }
 
 func TestVaultSeedPhase_TenantSpec(t *testing.T) {
-	_, c := mockVaultKV(t)
+	srv, _ := mockVaultKV(t)
 	t.Setenv("PLATFORMCTL_DEMO_GITHUB_APP_ID", "12345")
 	t.Setenv("PLATFORMCTL_DEMO_GITHUB_INSTALLATION_ID", "67890")
 	t.Setenv("PLATFORMCTL_DEMO_GITHUB_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----")
 
-	p := NewVaultSeedPhase(c, true, "secret", []string{"demo"}, []string{"demo-github-app"})
+	p := NewVaultSeedPhase(NewVaultAddrResolver(srv.URL, nil, nil), true, "secret", []string{"demo"}, []string{"demo-github-app"})
 	if err := p.Apply(context.Background()); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
