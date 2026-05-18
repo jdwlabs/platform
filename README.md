@@ -2,6 +2,7 @@
 
 [![Validate](https://github.com/jdwlabs/platform/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/jdwlabs/platform/actions/workflows/validate.yml)
 [![Release Charts](https://github.com/jdwlabs/platform/actions/workflows/release.yaml/badge.svg?branch=main)](https://github.com/jdwlabs/platform/actions/workflows/release.yaml)
+[![Release platformctl](https://github.com/jdwlabs/platform/actions/workflows/release-platformctl.yml/badge.svg)](https://github.com/jdwlabs/platform/actions/workflows/release-platformctl.yml)
 
 Tenant-centric Kubernetes GitOps platform managed by ArgoCD.
 
