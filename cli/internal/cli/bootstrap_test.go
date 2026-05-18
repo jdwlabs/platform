@@ -46,22 +46,41 @@ func staticObjects() []runtime.Object {
 func TestBootstrapVerify_AllGatesPass(t *testing.T) {
 	kc := k8s.NewFake(staticObjects()...)
 
-	appset := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "argoproj.io/v1alpha1",
-			"kind":       "ApplicationSet",
-			"metadata": map[string]interface{}{
-				"name":      "platform-services",
-				"namespace": "argocd",
+	appset := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "argoproj.io/v1alpha1",
+		"kind":       "ApplicationSet",
+		"metadata":   map[string]interface{}{"name": "platform-services", "namespace": "argocd"},
+	}}
+	porkbunES := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "external-secrets.io/v1",
+		"kind":       "ExternalSecret",
+		"metadata":   map[string]interface{}{"name": "porkbun", "namespace": "cert-manager"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Ready", "status": "True", "message": "SecretSynced"},
 			},
 		},
-	}
+	}}
+	wildcardCert := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "cert-manager.io/v1",
+		"kind":       "Certificate",
+		"metadata":   map[string]interface{}{"name": "wildcard-jdwlabs", "namespace": "nginx-gateway"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Ready", "status": "True", "message": "Certificate is up to date"},
+			},
+		},
+	}}
+
 	scheme := runtime.NewScheme()
 	dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 		map[schema.GroupVersionResource]string{
-			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applicationsets"}: "ApplicationSetList",
+			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applicationsets"}:  "ApplicationSetList",
+			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}:     "ApplicationList",
+			{Group: "external-secrets.io", Version: "v1", Resource: "externalsecrets"}: "ExternalSecretList",
+			{Group: "cert-manager.io", Version: "v1", Resource: "certificates"}:        "CertificateList",
 		},
-		appset,
+		appset, porkbunES, wildcardCert,
 	)
 
 	root := NewRootForTest(kc, dc)
@@ -77,14 +96,18 @@ func TestBootstrapVerify_AllGatesPass(t *testing.T) {
 func TestBootstrapVerify_EmptyDynamic_Errors(t *testing.T) {
 	kc := k8s.NewFake(staticObjects()...)
 
-	// Empty fake: dynamic client that can't find any resources.
-	// Verifies that missing ArgoCD resources cause gate failures.
+	// No objects in the fake client — gate 2 fails because applicationset
+	// platform-services is not found.  All CRD GVRs must still be registered
+	// (even when empty) so that LIST calls don't panic.
 	scheme := runtime.NewScheme()
 	dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 		map[schema.GroupVersionResource]string{
-			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applicationsets"}: "ApplicationSetList",
+			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applicationsets"}:   "ApplicationSetList",
+			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}:      "ApplicationList",
+			{Group: "external-secrets.io", Version: "v1", Resource: "externalsecrets"}: "ExternalSecretList",
+			{Group: "cert-manager.io", Version: "v1", Resource: "certificates"}:         "CertificateList",
 		},
-		// no objects → ApplicationSet not found → gate 2 fails
+		// no objects → gate 2 (applicationset/platform-services not found) fails
 	)
 
 	root := NewRootForTest(kc, dc)

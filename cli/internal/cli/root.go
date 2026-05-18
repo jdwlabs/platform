@@ -71,6 +71,7 @@ func NewRoot(version string) (*cobra.Command, func(error)) {
 
 	cmd.AddCommand(newTenantsCmd(g))
 	cmd.AddCommand(newBootstrapCmd(g))
+	cmd.AddCommand(newClusterCmd(g))
 	return cmd, cleanup
 }
 
