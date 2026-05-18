@@ -10,23 +10,28 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 )
 
-// VaultInitPhase runs vault operator init, persists keys to k8s secrets, and
-// enables the kv-v2 secrets engine.
+// VaultInitPhase runs vault operator init, persists keys to k8s secrets,
+// enables the kv-v2 secrets engine, and applies the ESO ClusterSecretStore
+// so cert-manager can resolve DNS-01 challenges without waiting for ArgoCD.
 type VaultInitPhase struct {
-	kube        kubernetes.Interface
-	resolver    *VaultAddrResolver
-	backupDir   string // directory for vault-init.json backup; defaults to .secrets/
-	lastMsg     string // set by vaultPodReady; read by ProgressMessage
+	kube      kubernetes.Interface
+	dc        dynamic.Interface // nil in tests; skips ClusterSecretStore apply
+	resolver  *VaultAddrResolver
+	backupDir string // directory for vault-init.json backup; defaults to .secrets/
+	lastMsg   string // set by vaultPodReady; read by ProgressMessage
 }
 
-func NewVaultInitPhase(kube kubernetes.Interface, resolver *VaultAddrResolver, backupDir string) *VaultInitPhase {
+func NewVaultInitPhase(kube kubernetes.Interface, dc dynamic.Interface, resolver *VaultAddrResolver, backupDir string) *VaultInitPhase {
 	if backupDir == "" {
 		backupDir = ".secrets"
 	}
-	return &VaultInitPhase{kube: kube, resolver: resolver, backupDir: backupDir}
+	return &VaultInitPhase{kube: kube, dc: dc, resolver: resolver, backupDir: backupDir}
 }
 
 func (p *VaultInitPhase) Name() string { return "vault-init" }
@@ -162,7 +167,50 @@ func (p *VaultInitPhase) Apply(ctx context.Context) error {
 		// Non-fatal: cluster secret is the authoritative copy.
 		fmt.Printf("warn: could not write local backup: %v\n", err)
 	}
+	// Apply the ESO ClusterSecretStore immediately so cert-manager can resolve
+	// DNS-01 challenges without waiting for the ArgoCD vault app to sync.
+	// (ArgoCD vault sync fails until the wildcard cert exists, which requires
+	// the ClusterSecretStore to exist — circular dependency broken here.)
+	if err := p.applyVaultClusterSecretStore(ctx); err != nil {
+		fmt.Printf("warn: could not apply ClusterSecretStore/vault: %v\n", err)
+	}
 	return nil
+}
+
+// applyVaultClusterSecretStore applies the ESO ClusterSecretStore that points
+// at Vault. This must happen before ArgoCD can successfully sync the vault app
+// (which fails until the wildcard TLS cert exists, which requires this CSS to
+// exist so ESO can sync the porkbun webhook secret to cert-manager).
+func (p *VaultInitPhase) applyVaultClusterSecretStore(ctx context.Context) error {
+	if p.dc == nil {
+		return nil // test environment
+	}
+	css := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "external-secrets.io/v1",
+			"kind":       "ClusterSecretStore",
+			"metadata":   map[string]any{"name": "vault"},
+			"spec": map[string]any{
+				"provider": map[string]any{
+					"vault": map[string]any{
+						"server":  "http://platform-vault.vault.svc.cluster.local:8200",
+						"path":    "kv",
+						"version": "v2",
+						"auth": map[string]any{
+							"tokenSecretRef": map[string]any{
+								"name":      "vault-token",
+								"namespace": "external-secrets",
+								"key":       "token",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	gvr := schema.GroupVersionResource{Group: "external-secrets.io", Version: "v1", Resource: "clustersecretstores"}
+	_, err := p.dc.Resource(gvr).Apply(ctx, "vault", css, metav1.ApplyOptions{FieldManager: "platformctl", Force: true})
+	return err
 }
 
 // backupInitJSON writes vault-init.json to p.backupDir so the operator has an
