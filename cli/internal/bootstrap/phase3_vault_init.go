@@ -4,26 +4,29 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-
-	"github.com/jdwlabs/platform/internal/prompt"
 )
 
 // VaultInitPhase runs vault operator init, persists keys to k8s secrets, and
 // enables the kv-v2 secrets engine.
 type VaultInitPhase struct {
-	kube           kubernetes.Interface
-	resolver       *VaultAddrResolver
-	nonInteractive bool
-	lastMsg        string // set by vaultPodReady; read by ProgressMessage
+	kube        kubernetes.Interface
+	resolver    *VaultAddrResolver
+	backupDir   string // directory for vault-init.json backup; defaults to .secrets/
+	lastMsg     string // set by vaultPodReady; read by ProgressMessage
 }
 
-func NewVaultInitPhase(kube kubernetes.Interface, resolver *VaultAddrResolver, nonInteractive bool) *VaultInitPhase {
-	return &VaultInitPhase{kube: kube, resolver: resolver, nonInteractive: nonInteractive}
+func NewVaultInitPhase(kube kubernetes.Interface, resolver *VaultAddrResolver, backupDir string) *VaultInitPhase {
+	if backupDir == "" {
+		backupDir = ".secrets"
+	}
+	return &VaultInitPhase{kube: kube, resolver: resolver, backupDir: backupDir}
 }
 
 func (p *VaultInitPhase) Name() string { return "vault-init" }
@@ -155,10 +158,21 @@ func (p *VaultInitPhase) Apply(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	if !p.nonInteractive {
-		_, _ = prompt.Confirm("Vault keys + root token written to cluster. Have you copied vault-init.json offline?", false, false)
+	if err := p.backupInitJSON(initJSON); err != nil {
+		// Non-fatal: cluster secret is the authoritative copy.
+		fmt.Printf("warn: could not write local backup: %v\n", err)
 	}
 	return nil
+}
+
+// backupInitJSON writes vault-init.json to p.backupDir so the operator has an
+// offline copy of unseal keys and root token. The directory is gitignored.
+func (p *VaultInitPhase) backupInitJSON(data []byte) error {
+	if err := os.MkdirAll(p.backupDir, 0700); err != nil {
+		return err
+	}
+	dest := filepath.Join(p.backupDir, "vault-init.json")
+	return os.WriteFile(dest, data, 0600)
 }
 
 func (p *VaultInitPhase) Verify(ctx context.Context) error {
