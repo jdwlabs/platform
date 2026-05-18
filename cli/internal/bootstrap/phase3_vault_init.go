@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -12,21 +11,19 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/jdwlabs/platform/internal/prompt"
-	"github.com/jdwlabs/platform/internal/vault"
 )
 
 // VaultInitPhase runs vault operator init, persists keys to k8s secrets, and
 // enables the kv-v2 secrets engine.
 type VaultInitPhase struct {
 	kube           kubernetes.Interface
-	builder        vault.Builder
-	vaultAddr      string
+	resolver       *VaultAddrResolver
 	nonInteractive bool
 	lastMsg        string // set by vaultPodReady; read by ProgressMessage
 }
 
-func NewVaultInitPhase(kube kubernetes.Interface, b vault.Builder, vaultAddr string, nonInteractive bool) *VaultInitPhase {
-	return &VaultInitPhase{kube: kube, builder: b, vaultAddr: vaultAddr, nonInteractive: nonInteractive}
+func NewVaultInitPhase(kube kubernetes.Interface, resolver *VaultAddrResolver, nonInteractive bool) *VaultInitPhase {
+	return &VaultInitPhase{kube: kube, resolver: resolver, nonInteractive: nonInteractive}
 }
 
 func (p *VaultInitPhase) Name() string { return "vault-init" }
@@ -47,9 +44,9 @@ func (p *VaultInitPhase) Detect(ctx context.Context) (State, error) {
 		return StateInProgress, nil
 	}
 
-	c, err := p.builder.New(ctx, "")
+	c, err := p.resolver.NewClient(ctx, "")
 	if err != nil {
-		return StateUnknown, p.vaultConnectError(err)
+		return StateUnknown, err
 	}
 	initialized, err := c.IsInitialized(ctx)
 	if err != nil {
@@ -131,7 +128,7 @@ func (p *VaultInitPhase) namespaceExists(ctx context.Context, name string) (bool
 }
 
 func (p *VaultInitPhase) Apply(ctx context.Context) error {
-	c, err := p.builder.New(ctx, "")
+	c, err := p.resolver.NewClient(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -173,23 +170,6 @@ func (p *VaultInitPhase) Verify(ctx context.Context) error {
 		return fmt.Errorf("vault-init verify: state %s", st)
 	}
 	return nil
-}
-
-// vaultConnectError wraps vault connection errors with actionable guidance when
-// the address is an in-cluster DNS name that won't resolve from outside the cluster.
-func (p *VaultInitPhase) vaultConnectError(err error) error {
-	msg := err.Error()
-	if strings.Contains(p.vaultAddr, ".svc") &&
-		(strings.Contains(msg, "no such host") || strings.Contains(msg, "connection refused")) {
-		return fmt.Errorf(
-			"vault not reachable at %s (in-cluster DNS — running outside the cluster?)\n"+
-				"  Fix: kubectl port-forward svc/platform-vault 8200:8200 -n vault\n"+
-				"  Then: export PLATFORMCTL_VAULT_ADDR=http://localhost:8200\n"+
-				"  original: %w",
-			p.vaultAddr, err,
-		)
-	}
-	return fmt.Errorf("vault connect: %w", err)
 }
 
 // upsertSecret creates or updates a k8s Secret.

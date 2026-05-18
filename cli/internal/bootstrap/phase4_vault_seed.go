@@ -10,6 +10,19 @@ import (
 	"github.com/jdwlabs/platform/internal/vault"
 )
 
+// client returns a lazily-built vault client, auto-forwarded and auto-tokened
+// by the resolver on first use.
+func (p *VaultSeedPhase) client(ctx context.Context) (*vault.Client, error) {
+	if p.c == nil {
+		var err error
+		p.c, err = p.resolver.NewClient(ctx, "")
+		if err != nil {
+			return nil, err
+		}
+	}
+	return p.c, nil
+}
+
 type seedField struct {
 	Name   string
 	EnvVar string
@@ -45,28 +58,37 @@ var staticSeedSpecs = map[string]seedSpec{
 
 // VaultSeedPhase writes kv secrets for all platform and tenant paths.
 type VaultSeedPhase struct {
-	c              *vault.Client
+	resolver       *VaultAddrResolver
+	c              *vault.Client // lazily built by client()
 	nonInteractive bool
 	mount          string
 	tenants        []string
 	selected       []string // if non-empty, run only these spec keys
 }
 
-func NewVaultSeedPhase(c *vault.Client, nonInteractive bool, mount string, tenants, selected []string) *VaultSeedPhase {
-	return &VaultSeedPhase{c: c, nonInteractive: nonInteractive, mount: mount, tenants: tenants, selected: selected}
+func NewVaultSeedPhase(resolver *VaultAddrResolver, nonInteractive bool, mount string, tenants, selected []string) *VaultSeedPhase {
+	return &VaultSeedPhase{resolver: resolver, nonInteractive: nonInteractive, mount: mount, tenants: tenants, selected: selected}
 }
 
 func (p *VaultSeedPhase) Name() string { return "vault-seed" }
 func (p *VaultSeedPhase) Number() int  { return 4 }
 
 func (p *VaultSeedPhase) Detect(ctx context.Context) (State, error) {
-	if _, err := p.c.GetKV(ctx, p.mount, "porkbun"); err == nil {
+	c, err := p.client(ctx)
+	if err != nil {
+		return StateUnknown, err
+	}
+	if _, err := c.GetKV(ctx, p.mount, "porkbun"); err == nil {
 		return StateAlreadyDone, nil
 	}
 	return StateNotStarted, nil
 }
 
 func (p *VaultSeedPhase) Apply(ctx context.Context) error {
+	c, err := p.client(ctx)
+	if err != nil {
+		return err
+	}
 	specs := p.buildSpecs()
 	keys := p.keysToRun(specs)
 	sort.Strings(keys)
@@ -80,7 +102,7 @@ func (p *VaultSeedPhase) Apply(ctx context.Context) error {
 			}
 			values[f.Name] = v
 		}
-		if err := p.c.PutKV(ctx, p.mount, spec.Path, values); err != nil {
+		if err := c.PutKV(ctx, p.mount, spec.Path, values); err != nil {
 			return fmt.Errorf("put kv %s: %w", spec.Path, err)
 		}
 	}

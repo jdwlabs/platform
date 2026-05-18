@@ -15,7 +15,6 @@ import (
 	"github.com/jdwlabs/platform/internal/helm"
 	"github.com/jdwlabs/platform/internal/k8s"
 	"github.com/jdwlabs/platform/internal/tenants"
-	"github.com/jdwlabs/platform/internal/vault"
 )
 
 func newBootstrapCmd(g *Globals) *cobra.Command {
@@ -69,12 +68,14 @@ func runCascade(ctx context.Context, g *Globals, w io.Writer, phaseNum int) erro
 
 	vaultAddr := os.Getenv("PLATFORMCTL_VAULT_ADDR")
 	if vaultAddr == "" {
-		vaultAddr = "http://vault.vault.svc:8200"
+		vaultAddr = "http://vault.vault.svc:8200" // auto port-forward when in-cluster DNS
 	}
-	vc, err := vault.NewClient(vaultAddr, os.Getenv("PLATFORMCTL_VAULT_TOKEN"))
+	restCfg, err := k8s.NewRestConfig()
 	if err != nil {
-		return fmt.Errorf("vault client: %w", err)
+		return fmt.Errorf("rest config: %w", err)
 	}
+	resolver := bootstrap.NewVaultAddrResolver(vaultAddr, restCfg, kc)
+	defer resolver.Stop()
 
 	tenantNames, err := collectTenantNames("tenants")
 	if err != nil {
@@ -85,9 +86,9 @@ func runCascade(ctx context.Context, g *Globals, w io.Writer, phaseNum int) erro
 	allPhases := []bootstrap.Phase{
 		bootstrap.NewArgocdInstallPhase(kc, helm.ExecRunner{}, valuesPath),
 		bootstrap.NewRootApplyPhase(kc, dc, g.Branch, "bootstrap/root-app.yaml"),
-		bootstrap.NewVaultInitPhase(kc, vault.NewBuilder(vaultAddr), vaultAddr, g.NonInteractive),
-		bootstrap.NewVaultSeedPhase(vc, g.NonInteractive, "secret", tenantNames, nil),
-		bootstrap.NewBackupsInitPhase(vc, g.NonInteractive, "secret"),
+		bootstrap.NewVaultInitPhase(kc, resolver, g.NonInteractive),
+		bootstrap.NewVaultSeedPhase(resolver, g.NonInteractive, "secret", tenantNames, nil),
+		bootstrap.NewBackupsInitPhase(resolver, g.NonInteractive, "secret"),
 	}
 
 	phases := allPhases

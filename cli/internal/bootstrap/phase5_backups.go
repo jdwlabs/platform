@@ -16,26 +16,46 @@ var rcloneTokenRE = regexp.MustCompile(`(?m)^token\s*=\s*(.+)$`)
 // BackupsInitPhase captures the rclone gdrive OAuth token from the operator
 // and writes it to Vault so the postgres-backup CronJob can use it.
 type BackupsInitPhase struct {
-	c              *vault.Client
+	resolver       *VaultAddrResolver
+	c              *vault.Client // lazily built
 	nonInteractive bool
 	mount          string
 }
 
-func NewBackupsInitPhase(c *vault.Client, nonInteractive bool, mount string) *BackupsInitPhase {
-	return &BackupsInitPhase{c: c, nonInteractive: nonInteractive, mount: mount}
+func NewBackupsInitPhase(resolver *VaultAddrResolver, nonInteractive bool, mount string) *BackupsInitPhase {
+	return &BackupsInitPhase{resolver: resolver, nonInteractive: nonInteractive, mount: mount}
+}
+
+func (p *BackupsInitPhase) client(ctx context.Context) (*vault.Client, error) {
+	if p.c == nil {
+		var err error
+		p.c, err = p.resolver.NewClient(ctx, "")
+		if err != nil {
+			return nil, err
+		}
+	}
+	return p.c, nil
 }
 
 func (p *BackupsInitPhase) Name() string { return "backups-init" }
 func (p *BackupsInitPhase) Number() int  { return 5 }
 
 func (p *BackupsInitPhase) Detect(ctx context.Context) (State, error) {
-	if _, err := p.c.GetKV(ctx, p.mount, "rclone-gdrive"); err == nil {
+	c, err := p.client(ctx)
+	if err != nil {
+		return StateUnknown, err
+	}
+	if _, err := c.GetKV(ctx, p.mount, "rclone-gdrive"); err == nil {
 		return StateAlreadyDone, nil
 	}
 	return StateNotStarted, nil
 }
 
 func (p *BackupsInitPhase) Apply(ctx context.Context) error {
+	c, err := p.client(ctx)
+	if err != nil {
+		return err
+	}
 	block, err := prompt.Secret(
 		"Paste the rclone config block for [gdrive] (obtain via: rclone authorize \"drive\")",
 		"PLATFORMCTL_RCLONE_GDRIVE_BLOCK", p.nonInteractive,
@@ -46,11 +66,15 @@ func (p *BackupsInitPhase) Apply(ctx context.Context) error {
 	if err := validateRcloneBlock(block); err != nil {
 		return fmt.Errorf("rclone block invalid: %w", err)
 	}
-	return p.c.PutKV(ctx, p.mount, "rclone-gdrive", map[string]any{"rclone.conf": block})
+	return c.PutKV(ctx, p.mount, "rclone-gdrive", map[string]any{"rclone.conf": block})
 }
 
 func (p *BackupsInitPhase) Verify(ctx context.Context) error {
-	got, err := p.c.GetKV(ctx, p.mount, "rclone-gdrive")
+	c, err := p.client(ctx)
+	if err != nil {
+		return err
+	}
+	got, err := c.GetKV(ctx, p.mount, "rclone-gdrive")
 	if err != nil {
 		return err
 	}
