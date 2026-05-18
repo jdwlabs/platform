@@ -16,6 +16,51 @@ Day-2 operations, troubleshooting, and CI-mode reference. See
 > `platformctl` does not currently expose URL/credential lookup commands.
 > Adding `platformctl access <service>` is a tracked v2 feature.
 
+### 1.1 ArgoCD initial login (fresh cluster)
+
+On a fresh bootstrap the HTTPS HTTPRoute may not be fully up yet (wildcard
+cert still issuing). Use a port-forward to reach ArgoCD before the ingress is
+ready:
+
+```bash
+kubectl -n argocd port-forward svc/argocd-server 8080:80
+# then open http://localhost:8080 in a browser
+```
+
+Get the auto-generated admin password:
+
+```bash
+# Linux / macOS
+kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath='{.data.password}' | base64 -d && echo
+
+# Windows PowerShell
+kubectl -n argocd get secret argocd-initial-admin-secret `
+  -o jsonpath='{.data.password}' | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($_)) }
+```
+
+Log in with username `admin` and the password above. Change the password in
+**User Info → Update Password** immediately; ArgoCD automatically deletes the
+`argocd-initial-admin-secret` Secret once you do.
+
+> **Secret gone already?** If the initial-admin-secret was deleted (password
+> already changed or manually removed), reset the password via the `argocd`
+> CLI:
+> ```bash
+> argocd account update-password --account admin --new-password <new-password>
+> ```
+> or patch the bcrypt hash directly:
+> ```bash
+> # generate bcrypt hash
+> htpasswd -nbBC 10 "" <new-password> | tr -d ':\n' | sed 's/$2y/$2a/'
+> # patch the argocd-cm ConfigMap
+> kubectl -n argocd patch cm argocd-cm \
+>   -p '{"data":{"accounts.admin":"apiKey,login"}}'
+> kubectl -n argocd patch secret argocd-secret \
+>   -p "{\"stringData\":{\"admin.password\":\"<bcrypt-hash>\",\"admin.passwordMtime\":\"$(date +%FT%T%Z)\"}}"
+> kubectl -n argocd rollout restart deploy/argocd-server
+> ```
+
 ## 2. Vault lifecycle
 
 **Unseal after pod restart:**
@@ -100,23 +145,25 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 When `--non-interactive` is set, `platformctl` reads every prompt value
 from environment variables. The contract:
 
-| Phase / prompt                             | Env var                                          |
-|--------------------------------------------|--------------------------------------------------|
-| Vault addr override                        | `PLATFORMCTL_VAULT_ADDR`                         |
-| Vault token (post-init)                    | `PLATFORMCTL_VAULT_TOKEN`                        |
-| `kv/porkbun` `api_key`                     | `PLATFORMCTL_PORKBUN_API_KEY`                    |
-| `kv/porkbun` `api_secret_key`              | `PLATFORMCTL_PORKBUN_API_SECRET_KEY`             |
-| `kv/grafana` `admin_password`              | `PLATFORMCTL_GRAFANA_ADMIN_PASSWORD`             |
-| `kv/longhorn` `auth`                       | `PLATFORMCTL_LONGHORN_AUTH`                      |
-| `kv/alertmanager` `slack_webhook`          | `PLATFORMCTL_ALERTMANAGER_SLACK_WEBHOOK`         |
-| `kv/<tenant>-github-app` `app_id`          | `PLATFORMCTL_<TENANT>_GITHUB_APP_ID`             |
-| `kv/<tenant>-github-app` `installation_id` | `PLATFORMCTL_<TENANT>_GITHUB_INSTALLATION_ID`    |
-| `kv/<tenant>-github-app` `private_key`     | `PLATFORMCTL_<TENANT>_GITHUB_PRIVATE_KEY`        |
-| `kv/<tenant>-ai-keys` `openai`             | `PLATFORMCTL_<TENANT>_OPENAI_API_KEY`            |
-| `kv/<tenant>-ai-keys` `anthropic`          | `PLATFORMCTL_<TENANT>_ANTHROPIC_API_KEY`         |
-| `kv/<tenant>-discord-bot-token` `token`    | `PLATFORMCTL_<TENANT>_DISCORD_BOT_TOKEN`         |
-| `kv/usersrole` `jwt_secret`                | `PLATFORMCTL_USERSROLE_JWT_SECRET`               |
-| `kv/rclone-gdrive` `rclone.conf` (Phase 5) | `PLATFORMCTL_RCLONE_GDRIVE_BLOCK`                |
+| Phase / prompt                                    | Env var                                          |
+|---------------------------------------------------|--------------------------------------------------|
+| Vault addr override                               | `PLATFORMCTL_VAULT_ADDR`                         |
+| Vault token (post-init)                           | `PLATFORMCTL_VAULT_TOKEN`                        |
+| `kv/porkbun` `api-key`                            | `PLATFORMCTL_PORKBUN_API_KEY`                    |
+| `kv/porkbun` `secret-key`                         | `PLATFORMCTL_PORKBUN_SECRET_KEY`                 |
+| `kv/grafana` `admin-user`                         | `PLATFORMCTL_GRAFANA_ADMIN_USER`                 |
+| `kv/grafana` `admin-password`                     | `PLATFORMCTL_GRAFANA_ADMIN_PASSWORD`             |
+| `kv/longhorn` `htpasswd_string`                   | `PLATFORMCTL_LONGHORN_HTPASSWD`                  |
+| `kv/alertmanager` `discord_webhook_url`           | `PLATFORMCTL_ALERTMANAGER_DISCORD_WEBHOOK`       |
+| `kv/usersrole` `jwt_secret`                       | `PLATFORMCTL_USERSROLE_JWT_SECRET`               |
+| `kv/<tenant>-github-app` `github_app_id`          | `PLATFORMCTL_<TENANT>_GITHUB_APP_ID`             |
+| `kv/<tenant>-github-app` `github_app_installation_id` | `PLATFORMCTL_<TENANT>_GITHUB_INSTALLATION_ID` |
+| `kv/<tenant>-github-app` `github_app_private_key` | `PLATFORMCTL_<TENANT>_GITHUB_PRIVATE_KEY`        |
+| `kv/<tenant>-ai-keys` `openai_api_key` (optional) | `PLATFORMCTL_<TENANT>_OPENAI_API_KEY`            |
+| `kv/<tenant>-ai-keys` `anthropic_api_key` (optional) | `PLATFORMCTL_<TENANT>_ANTHROPIC_API_KEY`      |
+| `kv/<tenant>-ai-keys` `openrouter_api_key` (optional) | `PLATFORMCTL_<TENANT>_OPENROUTER_API_KEY`   |
+| `kv/<tenant>-discord-bot-token` `token` (optional) | `PLATFORMCTL_<TENANT>_DISCORD_BOT_TOKEN`       |
+| `kv/rclone-gdrive` `rclone_conf` (Phase 5)        | `PLATFORMCTL_RCLONE_CONF`                        |
 
 Tenant name in env-var keys is uppercased, with `-` → `_`. So tenant
 `dotablaze-tech` maps to `PLATFORMCTL_DOTABLAZE_TECH_GITHUB_APP_ID`.
