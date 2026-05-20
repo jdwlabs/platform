@@ -139,6 +139,8 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | Orphan tenant namespaces after removing a tenant from `tenants/` | `platformctl bootstrap heal --orphan-namespaces`                                                           |
 | `vault-admin-initializer` Job failed                             | Check `vault-token` secret exists in vault ns; check job logs                                              |
 | CNPG clusters not healthy                                        | Check Longhorn pods in `longhorn-system`; check PVC binding                                                |
+| `platform-nginx-gateway-fabric` stuck `OutOfSync` / `Running`   | Helm cert-generator Job TTL race; run `platformctl bootstrap heal --stuck-sync --sync-app platform-nginx-gateway-fabric` |
+| Gateway HTTPS listener `InvalidListener` / all HTTPS routes failing | `wildcard-jdwlabs-tls` secret missing; `kubectl apply -f tenants/platform/services/nginx-gateway-fabric/postInstall/certificate.yaml` then wait 5–15 min for DNS-01 |
 
 ## 6. Non-interactive / CI mode
 
