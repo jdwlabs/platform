@@ -14,6 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/jdwlabs/platform/internal/vault"
 )
 
 // VaultInitPhase runs vault operator init, persists keys to k8s secrets,
@@ -165,6 +167,9 @@ func (p *VaultInitPhase) Apply(ctx context.Context) error {
 	if err := c.EnableKVv2(ctx, "kv"); err != nil {
 		return fmt.Errorf("enable kv: %w", err)
 	}
+	if err := p.applyVaultAdminBootstrap(ctx, c); err != nil {
+		return fmt.Errorf("admin bootstrap: %w", err)
+	}
 
 	initJSON, err := json.Marshal(res)
 	if err != nil {
@@ -190,6 +195,49 @@ func (p *VaultInitPhase) Apply(ctx context.Context) error {
 	// the ClusterSecretStore to exist — circular dependency broken here.)
 	if err := p.applyVaultClusterSecretStore(ctx); err != nil {
 		p.warn(fmt.Sprintf("ClusterSecretStore/vault not applied (ESO CRD may not be ready yet — will self-heal once ArgoCD syncs vault app): %v", err))
+	}
+	return nil
+}
+
+// vaultAdminPolicyHCL grants full access to Vault. Bound to the
+// auth/kubernetes/role/vault-admin role used by in-cluster operators (mainly
+// db-ui and ARC runners) that need to seed or rotate tenant secrets.
+const vaultAdminPolicyHCL = `path "/*" {
+  capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+}
+`
+
+// applyVaultAdminBootstrap configures Vault's kubernetes auth backend, writes
+// the vault-admin policy + role, and enables the database secrets engine. This
+// runs from platformctl with the root token (held in memory from Init), so we
+// avoid the cross-namespace secret coupling and sync-wave fragility of the
+// old postInstall vault-admin-initializer Job.
+//
+// Vault auto-discovers its in-cluster k8s CA + reviewer JWT from its own pod's
+// SA mount when token_reviewer_jwt and kubernetes_ca_cert are omitted (Vault
+// 1.9+ default behavior), so we only need kubernetes_host.
+func (p *VaultInitPhase) applyVaultAdminBootstrap(ctx context.Context, c *vault.Client) error {
+	if err := c.EnableAuthMethod(ctx, "kubernetes", "kubernetes"); err != nil {
+		return fmt.Errorf("enable kubernetes auth: %w", err)
+	}
+	if err := c.Write(ctx, "auth/kubernetes/config", map[string]any{
+		"kubernetes_host": "https://kubernetes.default.svc:443",
+	}); err != nil {
+		return fmt.Errorf("write auth/kubernetes/config: %w", err)
+	}
+	if err := c.PutPolicy(ctx, "vault-admin", vaultAdminPolicyHCL); err != nil {
+		return fmt.Errorf("put policy vault-admin: %w", err)
+	}
+	if err := c.Write(ctx, "auth/kubernetes/role/vault-admin", map[string]any{
+		"bound_service_account_names":      "default",
+		"bound_service_account_namespaces": "default",
+		"policies":                         "vault-admin",
+		"ttl":                              "1h",
+	}); err != nil {
+		return fmt.Errorf("write auth/kubernetes/role/vault-admin: %w", err)
+	}
+	if err := c.EnableSecretsEngine(ctx, "database", "database"); err != nil {
+		return fmt.Errorf("enable database secrets engine: %w", err)
 	}
 	return nil
 }

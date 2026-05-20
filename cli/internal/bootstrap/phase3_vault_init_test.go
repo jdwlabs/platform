@@ -3,14 +3,18 @@ package bootstrap
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/jdwlabs/platform/internal/k8s"
+	"github.com/jdwlabs/platform/internal/vault"
 )
 
 // mockVaultServer returns a mock Vault HTTP server that handles init/unseal/mounts.
@@ -39,6 +43,21 @@ func mockVaultServer(t *testing.T) *httptest.Server {
 		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{}})
 	})
 	mux.HandleFunc("/v1/sys/mounts/", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/v1/sys/auth", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{}})
+	})
+	mux.HandleFunc("/v1/sys/auth/", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/v1/sys/policies/acl/", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/v1/auth/kubernetes/config", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/v1/auth/kubernetes/role/", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
@@ -145,6 +164,63 @@ func TestVaultInitPhase_Detect_InProgress_NamespaceExistsNoPods(t *testing.T) {
 	msg := p.ProgressMessage(context.Background())
 	if msg == "" {
 		t.Fatal("expected a progress message when vault namespace exists but no pods")
+	}
+}
+
+// TestApplyVaultAdminBootstrap asserts Phase 3 configures the kubernetes auth
+// backend, vault-admin policy + role, and database secrets engine — the work
+// previously done by the postInstall vault-admin-initializer Job (which had a
+// cross-namespace secretKeyRef bug that left platform-vault Missing in Argo).
+func TestApplyVaultAdminBootstrap(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		seen = map[string]string{} // path -> body
+	)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/sys/auth", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{}})
+	})
+	record := func(path string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			b, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			seen[path] = string(b)
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}
+	mux.HandleFunc("/v1/sys/auth/kubernetes", record("enable-k8s-auth"))
+	mux.HandleFunc("/v1/auth/kubernetes/config", record("k8s-auth-config"))
+	mux.HandleFunc("/v1/sys/policies/acl/vault-admin", record("policy"))
+	mux.HandleFunc("/v1/auth/kubernetes/role/vault-admin", record("role"))
+	mux.HandleFunc("/v1/sys/mounts", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{}})
+	})
+	mux.HandleFunc("/v1/sys/mounts/database", record("mount-database"))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c, err := vault.NewClient(srv.URL, "root-tok")
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	p := &VaultInitPhase{}
+	if err := p.applyVaultAdminBootstrap(context.Background(), c); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, k := range []string{"enable-k8s-auth", "k8s-auth-config", "policy", "role", "mount-database"} {
+		if _, ok := seen[k]; !ok {
+			t.Errorf("expected %s endpoint to be called", k)
+		}
+	}
+	if !strings.Contains(seen["k8s-auth-config"], "kubernetes.default.svc") {
+		t.Errorf("k8s-auth-config body should contain kubernetes_host: %s", seen["k8s-auth-config"])
+	}
+	if !strings.Contains(seen["role"], "vault-admin") {
+		t.Errorf("role body should reference vault-admin policy: %s", seen["role"])
 	}
 }
 
