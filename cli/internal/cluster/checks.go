@@ -40,13 +40,13 @@ func AllChecks(kube kubernetes.Interface, dyn dynamic.Interface) []Check {
 func operatorChecks(kube kubernetes.Interface, dyn dynamic.Interface) []Check {
 	return []Check{
 		{Layer: 1, Group: "Operators", Name: "argocd-server", Run: func(ctx context.Context) Result {
-			return checkDeploymentAvailable(ctx, kube, "argocd", "argocd-server")
+			return checkDeploymentByWorkloadName(ctx, kube, "argocd", "argocd-server")
 		}},
 		{Layer: 1, Group: "Operators", Name: "external-secrets", Run: func(ctx context.Context) Result {
-			return checkDeploymentAvailable(ctx, kube, "external-secrets", "external-secrets")
+			return checkDeploymentByWorkloadName(ctx, kube, "external-secrets", "external-secrets")
 		}},
 		{Layer: 1, Group: "Operators", Name: "cert-manager", Run: func(ctx context.Context) Result {
-			return checkDeploymentAvailable(ctx, kube, "cert-manager", "cert-manager")
+			return checkDeploymentByWorkloadName(ctx, kube, "cert-manager", "cert-manager")
 		}},
 		{Layer: 1, Group: "Operators", Name: "nginx-gateway-fabric", Run: func(ctx context.Context) Result {
 			return checkGatewayClassAccepted(ctx, dyn, "nginx")
@@ -136,14 +136,25 @@ func argocdChecks(kube kubernetes.Interface, dyn dynamic.Interface) []Check {
 
 // --- Check implementations ---
 
-func checkDeploymentAvailable(ctx context.Context, kube kubernetes.Interface, ns, name string) Result {
-	d, err := kube.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
+// checkDeploymentByWorkloadName finds the Deployment in ns with the
+// app.kubernetes.io/name=<workloadName> label and reports its Available
+// condition. This decouples the probe from Helm release naming, so charts
+// installed with arbitrary release prefixes (e.g. "platform-cert-manager")
+// still match.
+func checkDeploymentByWorkloadName(ctx context.Context, kube kubernetes.Interface, ns, workloadName string) Result {
+	list, err := kube.AppsV1().Deployments(ns).List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=" + workloadName,
+	})
 	if k8serrors.IsNotFound(err) {
-		return Fail("deployment not found")
+		return Failf("namespace %s not found", ns)
 	}
 	if err != nil {
-		return Failf("get error: %v", err)
+		return Failf("list error: %v", err)
 	}
+	if len(list.Items) == 0 {
+		return Failf("no Deployment with app.kubernetes.io/name=%s in ns %s", workloadName, ns)
+	}
+	d := list.Items[0]
 	for _, cond := range d.Status.Conditions {
 		if cond.Type == appsv1.DeploymentAvailable && cond.Status == corev1.ConditionTrue {
 			return Passf("Available (%d/%d ready)", d.Status.ReadyReplicas, d.Status.Replicas)
