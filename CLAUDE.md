@@ -124,6 +124,7 @@ state transition emits one newline-delimited JSON object:
 | `bootstrap heal --tls-reissue`                                   | Delete cert-manager-managed TLS secrets      |
 | `bootstrap heal --orphan-namespaces`                             | Delete tenant-labeled ns with no tenant.yaml |
 | `bootstrap heal --longhorn-fresh-install`                        | Create Longhorn SA + RBAC for pre-upgrade hook on fresh cluster |
+| `bootstrap heal --stuck-sync --sync-app <name>`                  | Terminate stuck ArgoCD sync (Helm hook Job TTL race)           |
 | `bootstrap heal --all`                                           | Run every healer in safe order               |
 
 ### Spec workflow

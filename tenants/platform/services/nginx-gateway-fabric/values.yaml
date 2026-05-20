@@ -28,6 +28,10 @@ nginx:
       - port: 30543
         listenerPort: 443
 
+certGenerator:
+  # ArgoCD polls ~30s; default TTL=30 causes race. 300s gives ArgoCD time to observe Succeeded.
+  ttlSecondsAfterFinished: 300
+
 gateways:
   - name: platform-gateway
     namespace: nginx-gateway

@@ -275,6 +275,8 @@ func newBootstrapHealCmd(g *Globals) *cobra.Command {
 		orphanNamespaces     bool
 		tenantsDir           string
 		longhornFreshInstall bool
+		stuckSync            bool
+		stuckSyncApp         string
 		all                  bool
 	)
 
@@ -373,6 +375,18 @@ func newBootstrapHealCmd(g *Globals) *cobra.Command {
 					Message: "created longhorn-service-account + pre-upgrade CRB; triggered ArgoCD refresh"})
 			}
 
+			if stuckSync {
+				if stuckSyncApp == "" {
+					return fmt.Errorf("--stuck-sync requires --sync-app <name>")
+				}
+				if err := heal.TerminateStuckSync(ctx, dc, stuckSyncApp); err != nil {
+					em.Emit(Event{Phase: "heal", Name: "stuck-sync", Status: "fail", Message: err.Error()})
+					return err
+				}
+				em.Emit(Event{Phase: "heal", Name: "stuck-sync", Status: "ok",
+					Message: fmt.Sprintf("terminated stuck sync operation on application/%s", stuckSyncApp)})
+			}
+
 			return nil
 		},
 	}
@@ -389,7 +403,9 @@ func newBootstrapHealCmd(g *Globals) *cobra.Command {
 	cmd.Flags().BoolVar(&orphanNamespaces, "orphan-namespaces", false, "delete tenant-labeled namespaces not found in any tenant.yaml")
 	cmd.Flags().StringVar(&tenantsDir, "tenants-dir", "tenants", "directory containing per-tenant subdirectories")
 	cmd.Flags().BoolVar(&longhornFreshInstall, "longhorn-fresh-install", false, "create longhorn SA + RBAC so the pre-upgrade hook can run on a fresh cluster")
-	cmd.Flags().BoolVar(&all, "all", false, "run all heal operations (except --stuck-finalizer which requires a target)")
+	cmd.Flags().BoolVar(&stuckSync, "stuck-sync", false, "terminate a stuck ArgoCD sync operation (e.g. Helm hook Job deleted before ArgoCD observed completion)")
+	cmd.Flags().StringVar(&stuckSyncApp, "sync-app", "", "ArgoCD application name for --stuck-sync")
+	cmd.Flags().BoolVar(&all, "all", false, "run all heal operations (except --stuck-finalizer/--stuck-sync which require a target)")
 	return cmd
 }
 
