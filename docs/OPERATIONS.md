@@ -130,7 +130,7 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | Symptom                                                           | Fix                                                                                                        |
 |-------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
 | `applicationset/platform-services` stuck terminating             | `platformctl bootstrap heal --stuck-finalizer --kind ApplicationSet --name platform-services`              |
-| Pods CrashLoop with `Error: secret "<name>" not found`           | Check `ExternalSecret`: `kubectl describe externalsecret <name> -n <ns>`; verify `ClusterSecretStore` is `Valid` |
+| Pods CrashLoop with `Error: secret "<name>" not found`           | `platformctl tenants verify-secrets` — reports every ExternalSecret ref that fails to resolve against live Vault (missing kv path or missing field) |
 | ArgoCD App stuck `OutOfSync` after manual edit                   | `kubectl annotate app <name> -n argocd argocd.argoproj.io/refresh=hard`                                    |
 | Cert is `Pending` for >10 minutes                                | `kubectl describe certificate <name> -n <ns>` → look at events; usually DNS-01 propagation                 |
 | ARC runners offline in GitHub                                    | Check `kv/<tenant>-github-app` field `installation_id`; check ARC controller logs in `arc-systems`         |
