@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Validation
 - Validate all YAML files: `yamllint tenants/ bootstrap/`
 - Validate tenant.yaml files: `platformctl tenants validate`
+- Verify ExternalSecret references resolve in Vault: `platformctl tenants verify-secrets`
 - Validate Kubernetes manifests: `kubeconform` (used in CI)
 - Build/test the binary: `cd cli && go build ./... && go test ./...`
 
