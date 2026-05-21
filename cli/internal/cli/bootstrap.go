@@ -94,10 +94,15 @@ func runCascade(ctx context.Context, g *Globals, w io.Writer, phaseNum int) erro
 		em.Emit(Event{Phase: "bootstrap", Name: "vault-init", Status: status, Message: msg})
 	})
 
+	rootApply := bootstrap.NewRootApplyPhase(kc, dc, g.Branch, "bootstrap/root-app.yaml")
+	rootApply.SetOnEvent(func(status, msg string) {
+		em.Emit(Event{Phase: "bootstrap", Name: "root-apply", Status: status, Message: msg})
+	})
+
 	valuesPath := "tenants/platform/services/argo-cd/values.yaml"
 	allPhases := []bootstrap.Phase{
 		bootstrap.NewArgocdInstallPhase(kc, helm.ExecRunner{}, valuesPath),
-		bootstrap.NewRootApplyPhase(kc, dc, g.Branch, "bootstrap/root-app.yaml"),
+		rootApply,
 		vaultInit,
 		bootstrap.NewVaultSeedPhase(resolver, g.NonInteractive, "kv", tenantNames, nil),
 		bootstrap.NewBackupsInitPhase(resolver, g.NonInteractive, "kv"),
