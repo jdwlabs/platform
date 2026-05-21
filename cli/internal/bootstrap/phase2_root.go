@@ -29,12 +29,15 @@ type RootApplyPhase struct {
 	dyn      dynamic.Interface
 	branch   string
 	manifest string
-	lastMsg  string // set by Detect; read by ProgressMessage
+	lastMsg  string                  // set by Detect; read by ProgressMessage
+	onEvent  func(status, msg string) // optional; emits progress during Verify
 }
 
 func NewRootApplyPhase(kube kubernetes.Interface, dyn dynamic.Interface, branch, manifestPath string) *RootApplyPhase {
 	return &RootApplyPhase{kube: kube, dyn: dyn, branch: branch, manifest: manifestPath}
 }
+
+func (p *RootApplyPhase) SetOnEvent(f func(status, msg string)) { p.onEvent = f }
 
 func (p *RootApplyPhase) Name() string { return "root-apply" }
 func (p *RootApplyPhase) Number() int  { return 2 }
@@ -96,9 +99,12 @@ func (p *RootApplyPhase) Apply(ctx context.Context) error {
 func (p *RootApplyPhase) Verify(ctx context.Context) error {
 	deadline, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	// Wait for bootstrap App to be Synced+Healthy.
+	// Wait for bootstrap App to be Synced+Healthy, emitting progress each tick.
 	if err := k8s.WaitFor(deadline, 10*time.Second, func(ctx context.Context) (bool, error) {
 		st, _ := p.Detect(ctx)
+		if p.onEvent != nil && st != StateAlreadyDone {
+			p.onEvent("progressing", p.lastMsg)
+		}
 		return st == StateAlreadyDone, nil
 	}); err != nil {
 		return err
