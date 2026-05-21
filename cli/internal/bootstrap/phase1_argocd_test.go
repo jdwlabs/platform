@@ -66,7 +66,7 @@ func TestArgocdInstallPhase_Apply_CallsHelm(t *testing.T) {
 	if err := p.Apply(context.Background()); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
-	if len(fake.Calls) != 1 || fake.Calls[0] != "platform-argo-cd/argo/argo-cd" {
+	if len(fake.Calls) != 2 || fake.Calls[0] != "repo/argo" || fake.Calls[1] != "platform-argo-cd/argo/argo-cd" {
 		t.Fatalf("unexpected calls: %v", fake.Calls)
 	}
 }

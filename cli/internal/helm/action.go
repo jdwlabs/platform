@@ -17,14 +17,27 @@ type InstallOpts struct {
 	Namespace   string
 }
 
-// Runner abstracts helm upgrade --install. Production code uses ExecRunner;
+// Runner abstracts helm operations. Production code uses ExecRunner;
 // tests inject FakeRunner to avoid requiring a real helm binary or cluster.
 type Runner interface {
+	EnsureRepo(ctx context.Context, name, url string) error
 	UpgradeInstall(ctx context.Context, release, chartRef string, opts InstallOpts) error
 }
 
 // ExecRunner calls the helm binary found on $PATH.
 type ExecRunner struct{}
+
+func (ExecRunner) EnsureRepo(ctx context.Context, name, url string) error {
+	out, err := exec.CommandContext(ctx, "helm", "repo", "add", name, url, "--force-update").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("helm repo add %s: %w\n%s", name, err, out)
+	}
+	out, err = exec.CommandContext(ctx, "helm", "repo", "update", name).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("helm repo update %s: %w\n%s", name, err, out)
+	}
+	return nil
+}
 
 func (ExecRunner) UpgradeInstall(ctx context.Context, release, chartRef string, opts InstallOpts) error {
 	args := []string{"upgrade", "--install", release, chartRef, "-n", opts.Namespace, "--create-namespace"}
@@ -45,6 +58,11 @@ func (ExecRunner) UpgradeInstall(ctx context.Context, release, chartRef string, 
 type FakeRunner struct {
 	Calls []string
 	Err   error
+}
+
+func (f *FakeRunner) EnsureRepo(_ context.Context, name, _ string) error {
+	f.Calls = append(f.Calls, "repo/"+name)
+	return f.Err
 }
 
 func (f *FakeRunner) UpgradeInstall(_ context.Context, release, chartRef string, _ InstallOpts) error {
