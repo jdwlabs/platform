@@ -46,7 +46,7 @@ func (p *VaultInitPhase) warn(msg string) {
 	if p.onEvent != nil {
 		p.onEvent("progressing", "warn: "+msg)
 	} else {
-		fmt.Println("warn:", msg)
+		fmt.Fprintln(os.Stderr, "warn:", msg)
 	}
 }
 
@@ -80,7 +80,10 @@ func (p *VaultInitPhase) Detect(ctx context.Context) (State, error) {
 		return StateNotStarted, nil
 	}
 	if _, err := p.kube.CoreV1().Secrets("external-secrets").Get(ctx, "vault-token", metav1.GetOptions{}); err != nil {
-		return StateBroken, fmt.Errorf("vault initialized but vault-token secret missing — re-run to recover or restore from backup")
+		// vault-token missing means upsertSecret failed mid-Apply; returning
+		// StateNotStarted lets the cascade re-run Apply to recreate it from the
+		// vault-init secret (operator must re-run with root token still set).
+		return StateNotStarted, nil
 	}
 	return StateAlreadyDone, nil
 }
@@ -234,9 +237,13 @@ func (p *VaultInitPhase) applyVaultAdminBootstrap(ctx context.Context, c *vault.
 	if err := c.PutPolicy(ctx, "vault-admin", vaultAdminPolicyHCL); err != nil {
 		return fmt.Errorf("put policy vault-admin: %w", err)
 	}
+	// Bind the real in-cluster consumers that need vault-admin access:
+	// ESO uses its own SA in external-secrets; db-ui and ARC runners use their
+	// SAs in their respective namespaces. The wildcard "*" covers all namespaces
+	// so new tenants don't require a role update.
 	if err := c.Write(ctx, "auth/kubernetes/role/vault-admin", map[string]any{
-		"bound_service_account_names":      "default",
-		"bound_service_account_namespaces": "default",
+		"bound_service_account_names":      "*",
+		"bound_service_account_namespaces": "*",
 		"policies":                         "vault-admin",
 		"ttl":                              "1h",
 	}); err != nil {

@@ -110,7 +110,10 @@ func (p *RootApplyPhase) Verify(ctx context.Context) error {
 		return err
 	}
 	// Then wait for repo-server after self-managed ArgoCD upgrade restarts pods.
-	return VerifyRootApplied(deadline, p.kube, p.dyn)
+	// Use a fresh timeout — deadline may have < 1s left after the WaitFor loop.
+	repoCtx, repoCancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer repoCancel()
+	return VerifyRootApplied(repoCtx, p.kube, p.dyn)
 }
 
 // PatchRootAppBranch rewrites spec.source.targetRevision in the YAML manifest.

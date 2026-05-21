@@ -104,12 +104,17 @@ func runCascade(ctx context.Context, g *Globals, w io.Writer, phaseNum int) erro
 		em.Emit(Event{Phase: "bootstrap", Name: "converge", Status: status, Message: msg})
 	})
 
+	vaultSeed := bootstrap.NewVaultSeedPhase(resolver, g.NonInteractive, "kv", tenantNames, nil)
+	vaultSeed.SetOnEvent(func(status, msg string) {
+		em.Emit(Event{Phase: "bootstrap", Name: "vault-seed", Status: status, Message: msg})
+	})
+
 	valuesPath := "tenants/platform/services/argo-cd/values.yaml"
 	allPhases := []bootstrap.Phase{
 		bootstrap.NewArgocdInstallPhase(kc, helm.ExecRunner{}, valuesPath),
 		rootApply,
 		vaultInit,
-		bootstrap.NewVaultSeedPhase(resolver, g.NonInteractive, "kv", tenantNames, nil),
+		vaultSeed,
 		bootstrap.NewBackupsInitPhase(resolver, g.NonInteractive, "kv"),
 		converge,
 	}
@@ -447,6 +452,9 @@ paths: porkbun, grafana, longhorn, alertmanager, usersrole, <tenant>-github-app,
 			}
 
 			phase := bootstrap.NewVaultSeedPhase(resolver, g.NonInteractive, "kv", tenantNames, args)
+			phase.SetOnEvent(func(status, msg string) {
+				em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: status, Message: msg})
+			})
 			em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: "progressing", Message: "seeding vault kv paths"})
 			if err := phase.Apply(ctx); err != nil {
 				em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: "failed", Message: err.Error()})
