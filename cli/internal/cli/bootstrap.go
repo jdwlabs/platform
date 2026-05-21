@@ -29,6 +29,7 @@ func newBootstrapCmd(g *Globals) *cobra.Command {
 	cmd.AddCommand(newBootstrapVerifyCmd(g))
 	cmd.AddCommand(newBootstrapHealCmd(g))
 	cmd.AddCommand(newBootstrapPhaseCmd(g))
+	cmd.AddCommand(newBootstrapSeedCmd(g))
 	return cmd
 }
 
@@ -407,6 +408,58 @@ func newBootstrapHealCmd(g *Globals) *cobra.Command {
 	cmd.Flags().StringVar(&stuckSyncApp, "sync-app", "", "ArgoCD application name for --stuck-sync")
 	cmd.Flags().BoolVar(&all, "all", false, "run all heal operations (except --stuck-finalizer/--stuck-sync which require a target)")
 	return cmd
+}
+
+func newBootstrapSeedCmd(g *Globals) *cobra.Command {
+	return &cobra.Command{
+		Use:   "seed [spec-key...]",
+		Short: "Seed Vault kv paths, bypassing phase detection",
+		Long: `Seed one or more Vault kv paths directly. Useful for seeding optional paths
+that were skipped during bootstrap, or re-seeding after field name corrections.
+With no arguments, all specs are seeded. Spec keys match tenant names and static
+paths: porkbun, grafana, longhorn, alertmanager, usersrole, <tenant>-github-app,
+<tenant>-ai-keys, <tenant>-discord-bot-token.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			em := NewEmitter(os.Stdout, g.JSON)
+			if g.Session != nil {
+				em.SetSession(g.Session)
+			}
+
+			vaultAddr := os.Getenv("PLATFORMCTL_VAULT_ADDR")
+			if vaultAddr == "" {
+				vaultAddr = "http://vault.vault.svc:8200"
+			}
+			kc := testKubeClient
+			if kc == nil {
+				var err error
+				kc, err = k8s.NewClient()
+				if err != nil {
+					return fmt.Errorf("kube client: %w", err)
+				}
+			}
+			restCfg, err := k8s.NewRestConfig()
+			if err != nil {
+				return fmt.Errorf("rest config: %w", err)
+			}
+			resolver := bootstrap.NewVaultAddrResolver(vaultAddr, restCfg, kc)
+			defer resolver.Stop()
+
+			tenantNames, err := collectTenantNames("tenants")
+			if err != nil {
+				return fmt.Errorf("collect tenants: %w", err)
+			}
+
+			phase := bootstrap.NewVaultSeedPhase(resolver, g.NonInteractive, "kv", tenantNames, args)
+			em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: "progressing", Message: "seeding vault kv paths"})
+			if err := phase.Apply(ctx); err != nil {
+				em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: "failed", Message: err.Error()})
+				return err
+			}
+			em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: "ok", Message: "seeded"})
+			return nil
+		},
+	}
 }
 
 // buildAllowedNamespaces reads all tenant.yaml files under dir and returns

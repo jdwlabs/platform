@@ -55,7 +55,8 @@ var staticSeedSpecs = map[string]seedSpec{
 		{"discord_webhook_url", "PLATFORMCTL_ALERTMANAGER_DISCORD_WEBHOOK", true, false},
 	}},
 	"usersrole": {Path: "usersrole", Fields: []seedField{
-		{"jwt_secret", "PLATFORMCTL_USERSROLE_JWT_SECRET", true, false},
+		{"jwt_key_non", "PLATFORMCTL_USERSROLE_JWT_KEY_NON", true, false},
+		{"jwt_key_prd", "PLATFORMCTL_USERSROLE_JWT_KEY_PRD", true, false},
 	}},
 }
 
