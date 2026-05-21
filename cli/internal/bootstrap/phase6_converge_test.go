@@ -2,9 +2,6 @@ package bootstrap
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -132,14 +129,7 @@ func TestConvergePhase_Detect_PlatformAppDegraded(t *testing.T) {
 	}
 }
 
-// TestConvergePhase_Apply_EmitsEvents verifies Apply emits progressing then ok
-// events as gates pass. Uses a real HTTP mock so port-forward / k8s deps are
-// avoided; the fake dynamic client provides the resource state.
 func TestConvergePhase_Apply_EmitsEvents(t *testing.T) {
-	_ = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{})
-	}))
-
 	dc := fakeConvergeDynamic(t,
 		makeExternalSecret("cert-manager", "porkbun", true),
 		makeExternalSecret("longhorn-system", "longhorn", true),
