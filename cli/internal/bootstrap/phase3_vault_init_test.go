@@ -83,6 +83,13 @@ func TestVaultInitPhase_Apply_PersistsSecrets(t *testing.T) {
 	if _, err := kube.CoreV1().Secrets("external-secrets").Get(context.Background(), "vault-token", metav1.GetOptions{}); err != nil {
 		t.Fatalf("external-secrets/vault-token missing: %v", err)
 	}
+	s, err := kube.CoreV1().Secrets("vault").Get(context.Background(), "vault-unseal-keys", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("vault/vault-unseal-keys missing: %v", err)
+	}
+	if string(s.Data["unseal_key_1"]) != "key1" {
+		t.Fatalf("unseal_key_1: got %q", s.Data["unseal_key_1"])
+	}
 }
 
 func TestVaultInitPhase_Detect_NotStarted(t *testing.T) {

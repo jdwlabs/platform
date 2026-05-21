@@ -7,7 +7,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "1"
     platform.jdwlabs.io/note: >-
       Requires vault init with -key-shares=1 -key-threshold=1.
-      The vault-unseal-keys secret must be created manually after init.
+      The vault-unseal-keys secret is created by platformctl bootstrap phase 3.
 spec:
   schedule: "*/2 * * * *"
   jobTemplate:

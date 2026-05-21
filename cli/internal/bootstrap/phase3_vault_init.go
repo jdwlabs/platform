@@ -156,7 +156,7 @@ func (p *VaultInitPhase) Apply(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	res, err := c.Init(ctx, 5, 3)
+	res, err := c.Init(ctx, 1, 1)
 	if err != nil {
 		return fmt.Errorf("init: %w", err)
 	}
@@ -177,6 +177,12 @@ func (p *VaultInitPhase) Apply(ctx context.Context) error {
 	}
 	if err := upsertSecret(ctx, p.kube, "vault", "vault-init", map[string][]byte{
 		"vault-init.json": initJSON,
+	}); err != nil {
+		return err
+	}
+	// vault-auto-unseal CronJob reads this secret to re-unseal Vault after restarts.
+	if err := upsertSecret(ctx, p.kube, "vault", "vault-unseal-keys", map[string][]byte{
+		"unseal_key_1": []byte(res.Keys[0]),
 	}); err != nil {
 		return err
 	}
