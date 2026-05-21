@@ -44,6 +44,9 @@ func (p *ArgocdInstallPhase) Detect(ctx context.Context) (State, error) {
 }
 
 func (p *ArgocdInstallPhase) Apply(ctx context.Context) error {
+	if err := p.runner.EnsureRepo(ctx, "argo", "https://argoproj.github.io/argo-helm"); err != nil {
+		return fmt.Errorf("argocd helm repo: %w", err)
+	}
 	opts := helm.InstallOpts{
 		Namespace: "argocd",
 		SetValues: map[string]string{"global.trackingMethod": "annotation"},
