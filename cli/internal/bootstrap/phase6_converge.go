@@ -189,7 +189,9 @@ func (p *ConvergePhase) degradedPlatformApps(ctx context.Context) []string {
 			continue
 		}
 		health, _, _ := unstructured.NestedString(item.Object, "status", "health", "status")
-		if health == "Degraded" || health == "Missing" || health == "" {
+		// Only gate on known-bad states; empty means status not yet populated
+		// (app still booting) which is not a failure condition for this gate.
+		if health == "Degraded" || health == "Missing" {
 			degraded = append(degraded, name)
 		}
 	}

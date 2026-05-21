@@ -68,10 +68,21 @@ type VaultSeedPhase struct {
 	mount          string
 	tenants        []string
 	selected       []string // if non-empty, run only these spec keys
+	onEvent        func(status, msg string)
 }
 
 func NewVaultSeedPhase(resolver *VaultAddrResolver, nonInteractive bool, mount string, tenants, selected []string) *VaultSeedPhase {
 	return &VaultSeedPhase{resolver: resolver, nonInteractive: nonInteractive, mount: mount, tenants: tenants, selected: selected}
+}
+
+func (p *VaultSeedPhase) SetOnEvent(f func(status, msg string)) { p.onEvent = f }
+
+func (p *VaultSeedPhase) warn(msg string) {
+	if p.onEvent != nil {
+		p.onEvent("progressing", "warn: "+msg)
+	} else {
+		fmt.Fprintln(os.Stderr, "warn:", msg)
+	}
 }
 
 func (p *VaultSeedPhase) Name() string { return "vault-seed" }
@@ -82,10 +93,18 @@ func (p *VaultSeedPhase) Detect(ctx context.Context) (State, error) {
 	if err != nil {
 		return StateUnknown, err
 	}
-	if _, err := c.GetKV(ctx, p.mount, "porkbun"); err == nil {
-		return StateAlreadyDone, nil
+	if _, err := c.GetKV(ctx, p.mount, "porkbun"); err != nil {
+		return StateNotStarted, nil
 	}
-	return StateNotStarted, nil
+	// Platform paths seeded. Warn about any tenant paths that are missing so
+	// the operator knows to run `bootstrap seed <tenant>-github-app` etc.
+	for _, t := range p.tenants {
+		path := t + "-github-app"
+		if _, err := c.GetKV(ctx, p.mount, path); err != nil {
+			p.warn(fmt.Sprintf("kv/%s/%s missing — run: platformctl bootstrap seed %s", p.mount, path, path))
+		}
+	}
+	return StateAlreadyDone, nil
 }
 
 func (p *VaultSeedPhase) Apply(ctx context.Context) error {
