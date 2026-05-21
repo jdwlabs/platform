@@ -99,6 +99,11 @@ func runCascade(ctx context.Context, g *Globals, w io.Writer, phaseNum int) erro
 		em.Emit(Event{Phase: "bootstrap", Name: "root-apply", Status: status, Message: msg})
 	})
 
+	converge := bootstrap.NewConvergePhase(kc, dc)
+	converge.SetOnEvent(func(status, msg string) {
+		em.Emit(Event{Phase: "bootstrap", Name: "converge", Status: status, Message: msg})
+	})
+
 	valuesPath := "tenants/platform/services/argo-cd/values.yaml"
 	allPhases := []bootstrap.Phase{
 		bootstrap.NewArgocdInstallPhase(kc, helm.ExecRunner{}, valuesPath),
@@ -106,6 +111,7 @@ func runCascade(ctx context.Context, g *Globals, w io.Writer, phaseNum int) erro
 		vaultInit,
 		bootstrap.NewVaultSeedPhase(resolver, g.NonInteractive, "kv", tenantNames, nil),
 		bootstrap.NewBackupsInitPhase(resolver, g.NonInteractive, "kv"),
+		converge,
 	}
 
 	if phaseNum > len(allPhases) {
@@ -144,34 +150,19 @@ func runCascade(ctx context.Context, g *Globals, w io.Writer, phaseNum int) erro
 		return err
 	}
 
-	// Post-bootstrap health snapshot — only for full bootstrap runs.
-	// Cert issuance, ESO sync, and gateway programming happen asynchronously;
-	// this surfaces what's still converging so SUCCESS isn't a lie-of-omission.
+	// Final health snapshot — only for full bootstrap runs.
+	// Phase 6 (converge) already waited for the cluster to be healthy;
+	// this prints the full layer view so the operator can confirm state.
 	if phaseNum == 0 {
-		em.Emit(Event{Phase: "bootstrap", Name: "post-check", Status: "progressing",
-			Message: "running post-bootstrap cluster health check"})
 		checks := cluster.AllChecks(kc, dc)
 		layers := cluster.RunChecks(ctx, checks)
-
 		if g.JSON {
 			_ = cluster.PrintJSON(w, layers)
 		} else {
 			fmt.Fprintln(w)
 			cluster.PrintResults(w, layers, g.NoColor)
-			if cluster.OverallStatus(layers) != cluster.StatusPass {
-				fmt.Fprintln(w, "Note: DNS-01 cert issuance and ESO sync take 5–15 min after bootstrap.")
-				fmt.Fprintln(w, "Run 'platformctl cluster status --watch' to monitor convergence.")
-				fmt.Fprintln(w)
-			}
+			fmt.Fprintln(w)
 		}
-
-		msg := "all checks passing"
-		status := "ok"
-		if cluster.OverallStatus(layers) != cluster.StatusPass {
-			status = "progressing"
-			msg = "cluster converging — some checks pending (normal post-bootstrap)"
-		}
-		em.Emit(Event{Phase: "bootstrap", Name: "post-check", Status: status, Message: msg})
 	}
 	return nil
 }
