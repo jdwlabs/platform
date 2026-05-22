@@ -1,2 +1,5 @@
-# No tenant-side overrides; chart defaults apply.
-{}
+# Namespace is created by governance-platform (tenant envelope from tenants/platform/tenant.yaml).
+# Disabling chart-side namespace creation prevents a SharedResourceWarning
+# between platform-kubelet-serving-cert-approver and governance-platform.
+namespace:
+  create: false
