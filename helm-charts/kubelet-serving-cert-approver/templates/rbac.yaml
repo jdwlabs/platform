@@ -61,7 +61,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: events:{{ include "kubelet-serving-cert-approver.fullname" . }}
-  namespace: default
+  namespace: {{ .Values.namespace.name }}
   labels:
     {{- include "kubelet-serving-cert-approver.labels" . | nindent 4 }}
 roleRef:
