@@ -61,23 +61,30 @@ spec:
         # The prometheus-operator monitoring CRDs (ServiceMonitor, PodMonitor, PrometheusRule)
         # are owned by platform-crds (bootstrap/crds/foundation-crds.yaml) so they exist at
         # wave -1, in time for wave-1/2 services that ship ServiceMonitor manifests in
-        # their postInstall directory. The kube-prometheus-stack chart also bundles these
-        # CRDs as helm hooks; without this ignore, the two managers drift each reconcile.
+        # their postInstall directory. The kube-prometheus-stack chart also bundles the
+        # same CRDs as helm hooks at older schema versions; without ignoring metadata +
+        # spec, the two managers fight via SSA each reconcile.
         - group: apiextensions.k8s.io
           kind: CustomResourceDefinition
           name: servicemonitors.monitoring.coreos.com
-          jqPathExpressions:
-            - .
+          jsonPointers:
+            - /metadata/annotations
+            - /metadata/labels
+            - /spec
         - group: apiextensions.k8s.io
           kind: CustomResourceDefinition
           name: podmonitors.monitoring.coreos.com
-          jqPathExpressions:
-            - .
+          jsonPointers:
+            - /metadata/annotations
+            - /metadata/labels
+            - /spec
         - group: apiextensions.k8s.io
           kind: CustomResourceDefinition
           name: prometheusrules.monitoring.coreos.com
-          jqPathExpressions:
-            - .
+          jsonPointers:
+            - /metadata/annotations
+            - /metadata/labels
+            - /spec
       syncPolicy:
         automated:
           prune: true
