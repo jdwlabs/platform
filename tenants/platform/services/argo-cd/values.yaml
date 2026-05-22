@@ -50,6 +50,8 @@ repoServer:
     enabled: true
     serviceMonitor:
       enabled: true
+  livenessProbe:
+    timeoutSeconds: 5
   resources:
     requests:
       cpu: 100m
