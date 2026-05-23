@@ -86,11 +86,16 @@ does not orchestrate these yet.
 kubectl -n database create job --from=cronjob/postgres-backup postgres-backup-manual-$(date +%s)
 ```
 
-**Restore from latest backup:**
+**Restore from SQL dump (`.sql.gz`):**
 
-CNPG handles restore declaratively. Edit the `Cluster` CR's
-`spec.bootstrap.recovery.backup.name` to the target snapshot and re-sync
-the Application. The Atlas migration job will replay on top.
+See **[RESTORE.md](RESTORE.md)** for the full step-by-step guide, including
+Windows-specific `kubectl cp` quirks, ownership fixes, and the mandatory
+`app` role password reset after every restore.
+
+**Restore from CNPG snapshot (WAL/declarative):**
+
+Edit the `Cluster` CR's `spec.bootstrap.recovery.backup.name` to the target
+snapshot and re-sync the Application. The Atlas migration job will replay on top.
 
 **Failover:** CNPG promotes a healthy replica automatically when the
 primary fails. Force a manual switchover with:
