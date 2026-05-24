@@ -14,12 +14,6 @@ nginx:
   kind: daemonSet
   config:
     ipFamily: ipv4
-    rewriteClientIP:
-      mode: ProxyProtocol
-      setIPRecursively: true
-      trustedAddresses:
-        - type: CIDR
-          value: 0.0.0.0/0
   service:
     type: NodePort
     nodePorts:
