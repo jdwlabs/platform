@@ -3,7 +3,7 @@ name: kubelet-serving-cert-approver
 description: GitOps-managed wrapper around alex1989hu/kubelet-serving-cert-approver with platform-specific security and probe overrides baked in.
 type: application
 version: 0.1.0
-appVersion: "0.10.3"
+appVersion: "0.11.0"
 sources:
   - https://github.com/alex1989hu/kubelet-serving-cert-approver
 maintainers:
