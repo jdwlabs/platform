@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/alex1989hu/kubelet-serving-cert-approver
-  tag: "0.10.3"
+  tag: "0.11.0"
   pullPolicy: IfNotPresent
 
 replicas: 1
