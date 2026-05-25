@@ -166,6 +166,7 @@ func (p *VaultSeedPhase) buildSpecs() map[string]seedSpec {
 			{"anthropic_api_key", "PLATFORMCTL_" + u + "_ANTHROPIC_API_KEY", true, true},
 			{"openrouter_api_key", "PLATFORMCTL_" + u + "_OPENROUTER_API_KEY", true, true},
 			{"htpasswd_string", "PLATFORMCTL_" + u + "_OPENCLAW_HTPASSWD", true, true},
+			{"gateway_password", "PLATFORMCTL_" + u + "_OPENCLAW_GATEWAY_PASSWORD", true, true},
 		}}
 		out[t+"-discord-bot-token"] = seedSpec{Path: t + "-discord-bot-token", Fields: []seedField{
 			{"token", "PLATFORMCTL_" + u + "_DISCORD_BOT_TOKEN", true, true},

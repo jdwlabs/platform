@@ -38,6 +38,9 @@ config:
     cdpUrl: "http://localhost:9222"
   gateway:
     mode: "local"
+    auth:
+      mode: "password"
+      password: "${OPENCLAW_GATEWAY_PASSWORD}"
     trustedProxies:
       - "10.244.0.0/16"
       - "192.168.1.0/24"
