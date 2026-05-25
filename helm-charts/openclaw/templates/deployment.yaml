@@ -16,6 +16,10 @@ spec:
     metadata:
       labels:
         {{- include "openclaw.selectorLabels" . | nindent 8 }}
+      {{- if .Values.config }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
