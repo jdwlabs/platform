@@ -51,7 +51,7 @@ _quotaTiers:
     requests.cpu: "4"
     requests.memory: 8Gi
     limits.cpu: "8"
-    limits.memory: 16Gi
+    limits.memory: 20Gi
     persistentvolumeclaims: "10"
     services.loadbalancers: "0"
 
