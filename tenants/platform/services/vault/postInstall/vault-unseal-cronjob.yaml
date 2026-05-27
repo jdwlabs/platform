@@ -10,6 +10,8 @@ metadata:
       The vault-unseal-keys secret is created by platformctl bootstrap phase 3.
 spec:
   schedule: "*/2 * * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       template:

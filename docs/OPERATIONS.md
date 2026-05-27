@@ -144,6 +144,9 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | Orphan tenant namespaces after removing a tenant from `tenants/` | `platformctl bootstrap heal --orphan-namespaces`                                                           |
 | Vault kubernetes auth backend / `vault-admin` policy missing     | Re-run `platformctl bootstrap phase 3` on a fresh cluster (admin bootstrap is now part of phase 3, not a postInstall Job) |
 | CNPG clusters not healthy                                        | Check Longhorn pods in `longhorn-system`; check PVC binding                                                |
+| Pod stuck in `CrashLoopBackOff` 100+ restarts, no logs          | Liveness restarts reuse same overlay fs; stale state survives. Full pod delete breaks the cycle: `kubectl delete pod <name> -n <ns>`. If pod is a CNPG standby with I/O errors, also delete its PVC — CNPG will pg_basebackup from primary. |
+| CNPG standby `input/output error` on pgdata chmod               | Longhorn remount stuck. Delete pod + PVC: `kubectl delete pod <name> -n database && kubectl delete pvc <name> -n database`. CNPG creates replacement via pg_basebackup automatically. |
+| `platformctl bootstrap heal --cert-approver` fails "not found"  | ArgoCD app is named `platform-kubelet-serving-cert-approver`, not `kubelet-serving-cert-approver`. Refresh directly: `kubectl annotate application platform-kubelet-serving-cert-approver -n argocd argocd.argoproj.io/refresh=normal --overwrite` |
 | `platform-nginx-gateway-fabric` stuck `OutOfSync` / `Running`   | Helm cert-generator Job TTL race; run `platformctl bootstrap heal --stuck-sync --sync-app platform-nginx-gateway-fabric` |
 | Gateway HTTPS listener `InvalidListener` / all HTTPS routes failing | `wildcard-jdwlabs-tls` secret missing; `kubectl apply -f tenants/platform/services/nginx-gateway-fabric/postInstall/certificate.yaml` then wait 5–15 min for DNS-01 |
 

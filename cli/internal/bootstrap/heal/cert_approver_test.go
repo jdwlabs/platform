@@ -16,7 +16,7 @@ func TestRefreshCertApprover(t *testing.T) {
 			"apiVersion": "argoproj.io/v1alpha1",
 			"kind":       "Application",
 			"metadata": map[string]interface{}{
-				"name":      "kubelet-serving-cert-approver",
+				"name":      appName,
 				"namespace": "argocd",
 			},
 		},
