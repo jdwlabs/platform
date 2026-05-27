@@ -340,7 +340,7 @@ func newBootstrapHealCmd(g *Globals) *cobra.Command {
 					return err
 				}
 				em.Emit(Event{Phase: "heal", Name: "cert-approver", Status: "ok",
-					Message: "triggered hard refresh on application/kubelet-serving-cert-approver"})
+					Message: "triggered hard refresh on application/platform-kubelet-serving-cert-approver"})
 			}
 
 			if runTLSReissue {

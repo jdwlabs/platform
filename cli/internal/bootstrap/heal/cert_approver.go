@@ -13,6 +13,10 @@ import (
 
 var appGVR = schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
 
+// appName is the ArgoCD Application name for kubelet-serving-cert-approver.
+// The platform ApplicationSet prefixes all platform apps with "platform-".
+const appName = "platform-kubelet-serving-cert-approver"
+
 // RefreshCertApprover patches the argocd Application for
 // kubelet-serving-cert-approver with a hard-refresh annotation, causing ArgoCD
 // to re-sync from the live cluster state rather than its cache.
@@ -28,10 +32,10 @@ func RefreshCertApprover(ctx context.Context, dyn dynamic.Interface) error {
 		return fmt.Errorf("marshal refresh patch: %w", err)
 	}
 	_, err = dyn.Resource(appGVR).Namespace("argocd").Patch(
-		ctx, "kubelet-serving-cert-approver", types.MergePatchType, patch, metav1.PatchOptions{},
+		ctx, appName, types.MergePatchType, patch, metav1.PatchOptions{},
 	)
 	if err != nil {
-		return fmt.Errorf("patch application/kubelet-serving-cert-approver: %w", err)
+		return fmt.Errorf("patch application/%s: %w", appName, err)
 	}
 	return nil
 }

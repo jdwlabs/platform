@@ -11,6 +11,14 @@ cluster:
     podMonitor:
       enabled: true
 
+  affinity:
+    # required ensures replicas land on distinct nodes; 4 worker nodes > 3 replicas so
+    # there is always a free node for replacement scheduling when one node fails.
+    # topologyKey: kubernetes.io/hostname is required because this homelab has no zone labels
+    # (topology.kubernetes.io/zone is unset on all nodes, making zone anti-affinity a no-op).
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
+
   initdb:
     postInitSQL:
       - ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON TABLES TO app;
