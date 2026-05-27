@@ -1,0 +1,22 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-ephemeral
+  annotations:
+    # Use for ephemeral workloads (ARC runner work volumes) where the underlying
+    # data has no recovery value. Delete policy auto-removes the Longhorn volume
+    # when the PVC is deleted, preventing orphaned PVs from consuming Longhorn
+    # scheduled storage budget.
+    #
+    # Do NOT use for stateful workloads (CNPG, Vault, Longhorn backups) —
+    # those should remain on the default `longhorn` StorageClass (Retain).
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "3"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  fsType: "ext4"

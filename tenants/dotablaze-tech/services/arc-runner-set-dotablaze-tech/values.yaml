@@ -96,8 +96,11 @@ containerMode:
   #   ## the following is required when containerMode.type=kubernetes
   kubernetesModeWorkVolumeClaim:
     accessModes: ["ReadWriteOnce"]
-    #     # For local testing, use https://github.com/openebs/dynamic-localpv-provisioner/blob/develop/docs/quickstart.md to provide dynamic provision volume with storageClassName: openebs-hostpath
-    storageClassName: "longhorn"
+    # longhorn-ephemeral uses reclaimPolicy: Delete so runner work PVs are
+    # automatically removed when the PVC is deleted after job completion.
+    # The default `longhorn` SC uses Retain, which orphans PVs and exhausts
+    # Longhorn scheduled storage budget across all nodes.
+    storageClassName: "longhorn-ephemeral"
     resources:
       requests:
         storage: 4Gi
