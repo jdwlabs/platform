@@ -9,6 +9,7 @@ Day-2 operations, troubleshooting, and CI-mode reference. See
 | Service   | URL                            | Get credentials                                                                                                       |
 |-----------|--------------------------------|-----------------------------------------------------------------------------------------------------------------------|
 | ArgoCD UI | `https://argocd.jdwlabs.com`  | `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' \| base64 -d`               |
+| Headlamp  | `https://dashboard.jdwlabs.com` | Log in via Dex: credentials stored in `kv/argocd-dex` (see §1.2 for password rotation)                             |
 | Grafana   | `https://grafana.jdwlabs.com` | `admin` / value at `kv/grafana` field `admin_password`                                                                |
 | db-ui     | `https://db.jdwlabs.com`      | Cluster-side OAuth via gitops-managed config                                                                          |
 | Vault     | `https://vault.jdwlabs.com`   | Root token in `secret/vault/vault-init` (offline copy required for break-glass)                                       |
@@ -61,6 +62,34 @@ Log in with username `admin` and the password above. Change the password in
 > kubectl -n argocd rollout restart deploy/argocd-server
 > ```
 
+
+### 1.2 Headlamp mobile login (OIDC via Dex)
+
+Open `https://dashboard.jdwlabs.com` on any device. You are redirected to the
+Dex login form at `https://argocd.jdwlabs.com/api/dex/auth`. Enter the
+credentials you seeded in `kv/argocd-dex`. 1Password autofill works on mobile.
+
+**Rotate the Dex admin password:**
+
+1. Generate a new bcrypt hash (cost 10):
+   ```bash
+   # Linux / macOS
+   htpasswd -bnBC 10 "" <new-password> | tr -d ':n'
+   ```
+2. Update Vault:
+   ```bash
+   platformctl bootstrap seed argocd-dex
+   # PLATFORMCTL_ARGOCD_DEX_ADMIN_PASSWORD_HASH=<new-hash>
+   # PLATFORMCTL_ARGOCD_DEX_HEADLAMP_CLIENT_SECRET=<keep-existing-or-rotate>
+   ```
+3. Wait ~1 min for the `dex-secrets` ExternalSecret to refresh, then restart Dex:
+   ```bash
+   kubectl rollout restart deploy/argocd-dex-server -n argocd
+   ```
+
+> Note: all authenticated Dex users have full cluster-admin access in Headlamp
+> (proxied via the `platform-headlamp` service account). This is intentional for
+> a single-operator homelab.
 ## 2. Vault lifecycle
 
 **Unseal after pod restart:**
@@ -166,6 +195,8 @@ from environment variables. The contract:
 | `kv/longhorn` `htpasswd_string`                   | `PLATFORMCTL_LONGHORN_HTPASSWD`                  |
 | `kv/alertmanager` `discord_webhook_url`           | `PLATFORMCTL_ALERTMANAGER_DISCORD_WEBHOOK`       |
 | `kv/usersrole` `jwt_secret`                       | `PLATFORMCTL_USERSROLE_JWT_SECRET`               |
+| `kv/argocd-dex` `admin-password-hash`             | `PLATFORMCTL_ARGOCD_DEX_ADMIN_PASSWORD_HASH`     |
+| `kv/argocd-dex` `headlamp-client-secret`          | `PLATFORMCTL_ARGOCD_DEX_HEADLAMP_CLIENT_SECRET`  |
 | `kv/<tenant>-github-app` `github_app_id`          | `PLATFORMCTL_<TENANT>_GITHUB_APP_ID`             |
 | `kv/<tenant>-github-app` `github_app_installation_id` | `PLATFORMCTL_<TENANT>_GITHUB_INSTALLATION_ID` |
 | `kv/<tenant>-github-app` `github_app_private_key` | `PLATFORMCTL_<TENANT>_GITHUB_PRIVATE_KEY`        |
