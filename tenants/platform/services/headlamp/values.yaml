@@ -5,13 +5,8 @@ clusterRoleBinding:
 config:
   oidc:
     clientID: headlamp
-    clientSecret: "$(HEADLAMP_OIDC_CLIENT_SECRET)"
     issuerURL: https://argocd.jdwlabs.com/api/dex
     scopes: "profile email"
-
-extraEnv:
-  - name: HEADLAMP_OIDC_CLIENT_SECRET
-    valueFrom:
-      secretKeyRef:
-        name: headlamp-oidc-secret
-        key: client-secret
+    secret:
+      create: false
+      name: headlamp-oidc-secret
