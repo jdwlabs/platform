@@ -4,8 +4,22 @@ configs:
   params:
     server.insecure: true
   cm:
-    # Local account for MCP/API integration (apiKey only, no UI login)
     accounts.claude-mcp: apiKey
+    dex.config: |
+      enablePasswordDB: true
+      oauth2:
+        skipApprovalScreen: true
+      staticPasswords:
+        - email: admin@jdwlabs.com
+          hash: $dex-secrets:admin-password-hash
+          username: admin
+          userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+      staticClients:
+        - id: headlamp
+          redirectURIs:
+            - https://dashboard.jdwlabs.com/oidc-callback
+          name: Headlamp
+          secret: $dex-secrets:headlamp-client-secret
   rbac:
     policy.csv: |
       p, role:readonly, applications, get, */*, allow
