@@ -40,6 +40,45 @@ docs: update BOOTSTRAP.md with phase 4 secret seeding steps
 chore: upgrade cert-manager chart to 1.17.0
 ```
 
+### Footers
+
+Footers appear after an optional body, separated by a blank line. Common footers:
+
+| Footer | When to use |
+|--------|-------------|
+| `Refs: JDWLABS-XX` | Links commit to a Jira issue (does not close it) |
+| `Closes: JDWLABS-XX` | Closes the Jira issue on merge |
+| `Closes: #N` | Closes a GitHub issue by number |
+| `BREAKING CHANGE: <desc>` | Required when a commit introduces a breaking platformctl interface change |
+| `Co-Authored-By: Name <email>` | Credit a co-author (human or AI) |
+
+**AI contributor footer** — include when commits were written with AI assistance:
+
+```
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+```
+
+**Full examples with footers:**
+
+```
+feat(platformctl): add heal --stuck-sync subcommand
+
+Terminates an ArgoCD sync that has hung due to a Helm hook Job
+TTL race. Idempotent — safe to re-run.
+
+Refs: JDWLABS-55
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+```
+
+```
+fix!(platformctl): rename --dry-run to --plan across all subcommands
+
+BREAKING CHANGE: --dry-run flag removed; use --plan instead.
+Scripts calling platformctl with --dry-run must be updated.
+
+Closes: JDWLABS-61
+```
+
 ### Rules
 
 - Subject line ≤72 characters, lowercase, no trailing period
