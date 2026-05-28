@@ -74,7 +74,7 @@ credentials you seeded in `kv/argocd-dex`. 1Password autofill works on mobile.
 1. Generate a new bcrypt hash (cost 10):
    ```bash
    # Linux / macOS
-   htpasswd -bnBC 10 "" <new-password> | tr -d ':n'
+   htpasswd -bnBC 10 "" <new-password> | tr -d ':\n'
    ```
 2. Update Vault:
    ```bash
