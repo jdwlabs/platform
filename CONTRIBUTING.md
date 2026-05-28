@@ -10,13 +10,15 @@ This repository follows [Conventional Commits](https://www.conventionalcommits.o
 |------|-------------|
 | `feat` | New feature or capability (new platformctl command, new platform service) |
 | `fix` | Bug fix |
-| `chore` | Maintenance: dependency upgrades, config, tooling |
-| `docs` | Documentation only (no code changes) |
+| `build` | Build system or dependency change (Go modules, chart deps) |
+| `chore` | Maintenance: config, tooling (no production code change) |
 | `ci` | CI/CD pipeline changes |
-| `refactor` | Code restructure with no behavior change |
-| `test` | Adding or updating tests |
+| `docs` | Documentation only (no code changes) |
 | `perf` | Performance improvement |
+| `refactor` | Code restructure with no behavior change |
 | `revert` | Reverting a previous commit |
+| `style` | Formatting or whitespace only (no logic change) |
+| `test` | Adding or updating tests |
 
 ### Format
 
