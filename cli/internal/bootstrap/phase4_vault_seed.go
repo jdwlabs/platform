@@ -58,6 +58,10 @@ var staticSeedSpecs = map[string]seedSpec{
 		{"jwt_key_non", "PLATFORMCTL_USERSROLE_JWT_KEY_NON", true, false},
 		{"jwt_key_prd", "PLATFORMCTL_USERSROLE_JWT_KEY_PRD", true, false},
 	}},
+	"argocd-dex": {Path: "argocd-dex", Fields: []seedField{
+		{"admin-password-hash", "PLATFORMCTL_ARGOCD_DEX_ADMIN_PASSWORD_HASH", true, false},
+		{"headlamp-client-secret", "PLATFORMCTL_ARGOCD_DEX_HEADLAMP_CLIENT_SECRET", true, false},
+	}},
 }
 
 // VaultSeedPhase writes kv secrets for all platform and tenant paths.

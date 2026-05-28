@@ -80,3 +80,24 @@ func TestVaultSeedPhase_TenantSpec(t *testing.T) {
 		t.Fatalf("apply: %v", err)
 	}
 }
+
+func TestVaultSeedPhase_ArgoCDDexFromEnv(t *testing.T) {
+	srv, c := mockVaultKV(t)
+	t.Setenv("PLATFORMCTL_ARGOCD_DEX_ADMIN_PASSWORD_HASH", "$2a$10$testhash")
+	t.Setenv("PLATFORMCTL_ARGOCD_DEX_HEADLAMP_CLIENT_SECRET", "super-secret-value")
+
+	p := NewVaultSeedPhase(NewVaultAddrResolver(srv.URL, nil, nil), true, "secret", nil, []string{"argocd-dex"})
+	if err := p.Apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	got, err := c.GetKV(context.Background(), "secret", "argocd-dex")
+	if err != nil {
+		t.Fatalf("get kv: %v", err)
+	}
+	if got["admin-password-hash"] != "$2a$10$testhash" {
+		t.Fatalf("admin-password-hash: got %v", got["admin-password-hash"])
+	}
+	if got["headlamp-client-secret"] != "super-secret-value" {
+		t.Fatalf("headlamp-client-secret: got %v", got["headlamp-client-secret"])
+	}
+}
