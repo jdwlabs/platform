@@ -9,7 +9,7 @@ metadata:
     # single replica on the same node as the workload (dataLocality: strict-local).
     # CI builds do heavy small-file I/O (node_modules); 3-way synchronous network
     # replication both slows builds and makes CI a casualty of any Longhorn
-    # instance-manager disruption (see JDWLABS-22). A strict-local single replica
+    # instance-manager disruption. A strict-local single replica
     # removes the replication load and shrinks blast radius to the runner's own
     # node — a CI build can only fault its own throwaway volume, never shared
     # stateful volumes (Vault, CNPG).

@@ -21,12 +21,12 @@ longhornManager:
   resources:
     requests:
       cpu: "100m"
-      # Raised 512Mi -> 1Gi (JDWLABS-22): longhorn-manager was OOM-killed
-      # (exitCode 137) under volume churn, disrupting instance-managers.
+      # Raised from 512Mi: longhorn-manager was OOM-killed (exitCode 137)
+      # under volume churn, disrupting instance-managers.
       memory: "1Gi"
     limits:
       cpu: "1000m"
-      # Raised 1Gi -> 2Gi (JDWLABS-22) to stop OOM-kills.
+      # Raised from 1Gi to stop OOM-kills under volume churn.
       memory: "2Gi"
 
 longhornDriver:
