@@ -96,11 +96,13 @@ containerMode:
   #   ## the following is required when containerMode.type=kubernetes
   kubernetesModeWorkVolumeClaim:
     accessModes: ["ReadWriteOnce"]
-    # longhorn-ephemeral uses reclaimPolicy: Delete so runner work PVs are
-    # automatically removed when the PVC is deleted after job completion.
-    # The default `longhorn` SC uses Retain, which orphans PVs and exhausts
-    # Longhorn scheduled storage budget across all nodes.
-    storageClassName: "longhorn-ephemeral"
+    # longhorn-ephemeral-local: single-replica, strict-local (node-local) storage
+    # for throwaway CI work volumes. Avoids the 3x network replication of
+    # `longhorn-ephemeral`, which slowed builds and made CI a casualty of any
+    # Longhorn instance-manager disruption (JDWLABS-22). reclaimPolicy: Delete
+    # auto-removes the volume after job completion. The default `longhorn` SC uses
+    # Retain, which orphans PVs and exhausts Longhorn scheduled storage budget.
+    storageClassName: "longhorn-ephemeral-local"
     resources:
       requests:
         storage: 4Gi
