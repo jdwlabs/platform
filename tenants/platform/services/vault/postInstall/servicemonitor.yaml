@@ -7,7 +7,7 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: vault
-      component: server
+      app.kubernetes.io/instance: platform-vault
   namespaceSelector:
     matchNames:
       - vault
