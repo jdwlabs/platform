@@ -8,8 +8,6 @@ metadata:
     platform.jdwlabs.io/note: >-
       Requires vault init with -key-shares=1 -key-threshold=1.
       The vault-unseal-keys secret is created by platformctl bootstrap phase 3.
-      Unseals every raft pod by name: the service VIP only reaches one of the
-      three, which would leave followers sealed.
 spec:
   schedule: "*/2 * * * *"
   successfulJobsHistoryLimit: 3
@@ -20,20 +18,10 @@ spec:
         spec:
           containers:
             - name: vault-unseal
-              image: hashicorp/vault:1.18
-              command:
-                - /bin/sh
-                - -c
-                - |
-                  set -u
-                  for i in 0 1 2; do
-                    addr="http://platform-vault-${i}.platform-vault-internal:8200"
-                    # operator unseal is a no-op when the node is already
-                    # unsealed, so this is safe to run every cycle.
-                    VAULT_ADDR="$addr" vault operator unseal "$VAULT_UNSEAL_KEY_1" \
-                      || echo "unseal skipped/failed for pod ${i} (may be down)"
-                  done
+              image: blockloop/vault-unseal
               env:
+                - name: VAULT_ADDR
+                  value: "http://platform-vault.vault.svc:8200"
                 - name: VAULT_SKIP_VERIFY
                   value: "1"
                 - name: VAULT_UNSEAL_KEY_1
