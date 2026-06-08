@@ -3,62 +3,41 @@ ui:
 
 server:
   dataStorage:
-    # Single-replica node-local storage: raft replicates Vault data across the
-    # three pods at the application layer, so the underlying volume needs only
-    # one replica. This keeps one Longhorn instance-manager fault from sealing
-    # Vault — it can take down at most one node, and raft quorum (2/3) survives.
-    storageClass: longhorn-single
+    storageClass: null
   auditStorage:
     storageClass: null
-
+  standalone:
+    config: |
+      listener "tcp" {
+        address = "[::]:8200"
+        cluster_address = "[::]:8201"
+        tls_disable = "true"
+      }
+      storage "file" {
+        path = "/vault/data"
+      }
+      telemetry {
+        unauthenticated_metrics_access = true
+        prometheus_retention_time = "30s"
+        disable_hostname = true
+      }
   ha:
-    enabled: true
-    replicas: 3
+    enabled: false
     raft:
-      enabled: true
+      enabled: false
       setNodeId: true
       config: |
         cluster_name = "vault-integrated-storage"
-
         storage "raft" {
-          path = "/vault/data/"
-          retry_join {
-            leader_api_addr = "http://platform-vault-0.platform-vault-internal:8200"
-          }
-          retry_join {
-            leader_api_addr = "http://platform-vault-1.platform-vault-internal:8200"
-          }
-          retry_join {
-            leader_api_addr = "http://platform-vault-2.platform-vault-internal:8200"
-          }
+           path    = "/vault/data/"
         }
 
         listener "tcp" {
-          address = "[::]:8200"
-          cluster_address = "[::]:8201"
-          tls_disable = "true"
+           address = "[::]:8200"
+           cluster_address = "[::]:8201"
+           tls_disable = "true"
         }
-
         service_registration "kubernetes" {}
-
-        telemetry {
-          unauthenticated_metrics_access = true
-          prometheus_retention_time = "30s"
-          disable_hostname = true
-        }
-
-  # Hard anti-affinity across hosts so no node ever runs two Vault pods; a single
-  # node loss can then never break raft quorum.
-  affinity: |
-    podAntiAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-            matchLabels:
-              app.kubernetes.io/name: {{ template "vault.name" . }}
-              app.kubernetes.io/instance: "{{ .Release.Name }}"
-              component: server
-          topologyKey: kubernetes.io/hostname
-
   resources:
     requests:
       cpu: 100m
