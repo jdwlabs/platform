@@ -1,0 +1,56 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: platform-stability-rules
+  namespace: monitoring
+spec:
+  groups:
+    # Surfaces the Longhorn instance-manager cascade: an instance-manager being
+    # recreated faults every replica it served at once (observed taking down
+    # Vault and CI work volumes together). LonghornVolumeFaulted already exists
+    # in longhorn-rules; these alerts catch the upstream causes earlier.
+    - name: longhorn-stability
+      rules:
+        - alert: LonghornInstanceManagerRecreated
+          # Instance-managers are replaced (new pod) rather than restarted in
+          # place, so a pod younger than 10m means a recent recreation event.
+          expr: time() - kube_pod_created{namespace="longhorn-system", pod=~"instance-manager.*"} < 600
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn instance-manager {{ $labels.pod }} was recreated"
+            description: "Instance-manager {{ $labels.pod }} on node {{ $labels.node }} was recreated in the last 10m; replicas it served may have faulted."
+        - alert: LonghornManagerOOMKilled
+          expr: kube_pod_container_status_last_terminated_reason{namespace="longhorn-system", container="longhorn-manager", reason="OOMKilled"} == 1
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "longhorn-manager {{ $labels.pod }} was OOM-killed"
+            description: "longhorn-manager {{ $labels.pod }} hit its memory limit and was OOM-killed; raise its memory or reduce node memory pressure."
+    # Vault is the cluster secret source (ClusterSecretStore -> ExternalSecrets).
+    # A seal or pod loss breaks secret provisioning fleet-wide. Detection here is
+    # kube-state-based: Vault's own telemetry (vault_core_unsealed) is not
+    # currently scraped, so a true seal-while-running state can't yet be alerted
+    # on. Fixing Vault metrics scraping to add a VaultSealed alert is a follow-up.
+    - name: vault-availability
+      rules:
+        - alert: VaultNotReady
+          expr: kube_statefulset_status_replicas_ready{namespace="vault", statefulset="platform-vault"} < 1
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Vault has no ready replicas"
+            description: "platform-vault StatefulSet has 0 ready replicas; secret provisioning is down."
+    - name: node-capacity
+      rules:
+        - alert: NodeMemoryHigh
+          expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node {{ $labels.instance }} memory above 85%"
+            description: "Node {{ $labels.instance }} memory is {{ $value | humanizePercentage }}; tight memory amplifies storage/manager OOM cascades."
