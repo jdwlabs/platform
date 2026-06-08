@@ -30,10 +30,12 @@ spec:
             summary: "longhorn-manager {{ $labels.pod }} was OOM-killed"
             description: "longhorn-manager {{ $labels.pod }} hit its memory limit and was OOM-killed; raise its memory or reduce node memory pressure."
     # Vault is the cluster secret source (ClusterSecretStore -> ExternalSecrets).
-    # A seal or pod loss breaks secret provisioning fleet-wide. Detection here is
-    # kube-state-based: Vault's own telemetry (vault_core_unsealed) is not
-    # currently scraped, so a true seal-while-running state can't yet be alerted
-    # on. Fixing Vault metrics scraping to add a VaultSealed alert is a follow-up.
+    # A seal or pod loss breaks secret provisioning fleet-wide. Detection is
+    # layered so it works regardless of whether Vault's own metrics are scrapable:
+    # VaultNotReady catches a full outage and VaultDegraded a partial one from
+    # kube-state (no Vault metrics needed); VaultSealed reads Vault's telemetry
+    # for a precise unsealed-but-running seal event, now that the vault-metrics
+    # ServiceMonitor scrapes and Vault sets unauthenticated_metrics_access.
     - name: vault-availability
       rules:
         - alert: VaultNotReady
@@ -44,6 +46,28 @@ spec:
           annotations:
             summary: "Vault has no ready replicas"
             description: "platform-vault StatefulSet has 0 ready replicas; secret provisioning is down."
+        - alert: VaultDegraded
+          # Fewer ready replicas than desired: a sealed/crashing pod or a stalled
+          # rollout. Works without Vault's own metrics, so it surfaces a sealed
+          # node even while the metrics endpoint is unreachable.
+          expr: kube_statefulset_status_replicas_ready{namespace="vault", statefulset="platform-vault"} < kube_statefulset_status_replicas{namespace="vault", statefulset="platform-vault"}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Vault has fewer ready replicas than desired"
+            description: "platform-vault has {{ $value }} ready of its desired replicas for over 10m; a pod may be sealed, crashing, or a rollout is stalled."
+        - alert: VaultSealed
+          # vault_core_unsealed == 0 is Vault reporting itself sealed while still
+          # serving metrics — the precise seal signal the kube-state alerts above
+          # cannot see. Requires the metrics endpoint to be scraped.
+          expr: vault_core_unsealed == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Vault instance {{ $labels.pod }} is sealed"
+            description: "Vault {{ $labels.pod }} reports sealed (vault_core_unsealed=0); unseal it to restore secret provisioning via ExternalSecrets."
     - name: node-capacity
       rules:
         - alert: NodeMemoryHigh
