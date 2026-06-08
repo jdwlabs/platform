@@ -1,3 +1,12 @@
 clusterRoleBinding:
   create: true
   clusterRoleName: cluster-admin
+
+config:
+  oidc:
+    clientID: headlamp
+    issuerURL: https://argocd.jdwlabs.com/api/dex
+    scopes: "profile email"
+    secret:
+      create: false
+      name: headlamp-oidc-secret
