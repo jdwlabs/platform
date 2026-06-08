@@ -1,0 +1,29 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-ephemeral-local
+  annotations:
+    # Node-local, single-replica ephemeral storage for CI runner work volumes.
+    #
+    # Unlike `longhorn-ephemeral` (numberOfReplicas: 3), this class keeps the
+    # single replica on the same node as the workload (dataLocality: strict-local).
+    # CI builds do heavy small-file I/O (node_modules); 3-way synchronous network
+    # replication both slows builds and makes CI a casualty of any Longhorn
+    # instance-manager disruption. A strict-local single replica
+    # removes the replication load and shrinks blast radius to the runner's own
+    # node — a CI build can only fault its own throwaway volume, never shared
+    # stateful volumes (Vault, CNPG).
+    #
+    # Delete policy auto-removes the volume when the PVC is deleted after job
+    # completion. Do NOT use for stateful workloads — those stay on `longhorn`.
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "1"
+  dataLocality: "strict-local"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  fsType: "ext4"
