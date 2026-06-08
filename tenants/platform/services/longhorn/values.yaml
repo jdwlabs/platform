@@ -21,10 +21,13 @@ longhornManager:
   resources:
     requests:
       cpu: "100m"
-      memory: "512Mi"
+      # Raised from 512Mi: longhorn-manager was OOM-killed (exitCode 137)
+      # under volume churn, disrupting instance-managers.
+      memory: "1Gi"
     limits:
       cpu: "1000m"
-      memory: "1Gi"
+      # Raised from 1Gi to stop OOM-kills under volume churn.
+      memory: "2Gi"
 
 longhornDriver:
   priorityClassName: platform-critical
