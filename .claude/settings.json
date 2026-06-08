@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(platformctl *)",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(go vet *)",
+      "Bash(yamllint *)",
+      "Bash(kubeconform *)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git status*)",
+      "Bash(git add *)",
+      "Bash(git commit*)"
+    ],
+    "deny": [
+      "Bash(kubectl *)",
+      "Bash(vault *)",
+      "Bash(helm *)",
+      "Bash(git push*)"
+    ]
+  }
+}
