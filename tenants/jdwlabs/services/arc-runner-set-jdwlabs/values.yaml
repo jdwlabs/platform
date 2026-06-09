@@ -360,6 +360,23 @@ template:
     serviceAccountName: jdwlabs-runner
     securityContext:
       fsGroup: 123
+    # Runners are pinned to the dedicated CI node pool to prevent noisy-neighbour
+    # interference with stateful workloads (Vault, Prometheus, Longhorn instance-managers)
+    # that are sensitive to CPU/IO spikes from concurrent builds.
+    tolerations:
+      - key: workload
+        operator: Equal
+        value: ci
+        effect: NoSchedule
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: workload
+                  operator: In
+                  values:
+                    - ci
     containers:
       - name: runner
         image: docker.io/jdwlabs/agents:1.0.0
