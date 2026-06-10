@@ -87,9 +87,15 @@ credentials you seeded in `kv/argocd-dex`. 1Password autofill works on mobile.
    kubectl rollout restart deploy/argocd-dex-server -n argocd
    ```
 
-> Note: all authenticated Dex users have full cluster-admin access in Headlamp
-> (proxied via the `platform-headlamp` service account). This is intentional for
-> a single-operator homelab.
+> Note: Headlamp forwards your Dex id_token as the bearer token on every
+> Kubernetes API call — it does NOT proxy through a service account. The
+> kube-apiserver must therefore trust the Dex issuer (Talos
+> `cluster.apiServer.extraArgs` `oidc-*` flags, managed in the
+> infrastructure repo), and access is granted by the `headlamp-oidc-admin`
+> ClusterRoleBinding mapping `oidc:admin@jdwlabs.com` to cluster-admin.
+> Full cluster-admin for the single Dex user is intentional for a
+> single-operator homelab.
+
 ## 2. Vault lifecycle
 
 **Unseal after pod restart:**
