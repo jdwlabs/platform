@@ -4,9 +4,14 @@ clusterRoleBinding:
 
 config:
   oidc:
-    clientID: headlamp
-    issuerURL: https://argocd.jdwlabs.com/api/dex
-    scopes: "profile email"
+    # externalSecret mode is the only chart path that wires the client
+    # secret from a pre-existing Secret: with secret.create=false the chart
+    # gates every env var on the corresponding *value* being non-empty, so
+    # clientSecret (which must not live in git) was never passed to the pod.
+    # The secret must carry OIDC_CLIENT_ID/SECRET/ISSUER_URL/SCOPES keys —
+    # see postInstall/oidc-externalsecret.yaml.
     secret:
       create: false
+    externalSecret:
+      enabled: true
       name: headlamp-oidc-secret

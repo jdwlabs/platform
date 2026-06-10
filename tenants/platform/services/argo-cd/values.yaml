@@ -1,5 +1,11 @@
 fullnameOverride: argocd
 
+# Drives configs.cm `url`, which in turn is the Dex OIDC issuer
+# (<url>/api/dex). Left at the chart default (argocd.example.com) the
+# issuer claim in Dex tokens never matches what Headlamp validates against.
+global:
+  domain: argocd.jdwlabs.com
+
 configs:
   params:
     server.insecure: true
