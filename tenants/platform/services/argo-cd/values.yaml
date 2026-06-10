@@ -6,6 +6,10 @@ configs:
   cm:
     accounts.claude-mcp: apiKey
     dex.config: |
+      # ArgoCD's dex config generator hard-requires `connectors` to be a
+      # list — even empty — or dex-server and argocd-server exit fatal with
+      # "malformed Dex configuration found". staticPasswords alone fails.
+      connectors: []
       enablePasswordDB: true
       oauth2:
         skipApprovalScreen: true
