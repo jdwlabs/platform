@@ -10,17 +10,26 @@ metadata:
       The vault-unseal-keys secret is created by platformctl bootstrap phase 3.
 spec:
   schedule: "*/2 * * * *"
+  # Forbid + activeDeadline: a job that can never start (bad image, no node
+  # capacity) stays Active forever and is invisible to the history limits.
+  # Without these, one broken pull accumulated 650+ jobs and exhausted the
+  # 110-pod kubelet cap on every worker node.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 60
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
+      # Must finish inside one schedule interval (120s).
+      activeDeadlineSeconds: 90
+      backoffLimit: 2
       template:
         spec:
           containers:
             - name: vault-unseal
               # Upstream publishes no semver tags; pin by digest so the pull is
               # reproducible and immune to a moving :latest re-tag.
-              image: blockloop/vault-unseal@sha256:c62894062c936463d9875d19a9a3d680f1137e206972136f1085af9037e26a32
+              image: blockloop/vault-unseal@sha256:41bcab66bb0759f8b3887b7b2f22a282d5ff3c6e2fc7829eeb2d1c98e3870c62
               env:
                 - name: VAULT_ADDR
                   value: "http://platform-vault.vault.svc:8200"
