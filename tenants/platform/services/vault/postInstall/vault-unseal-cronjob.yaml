@@ -20,7 +20,7 @@ spec:
             - name: vault-unseal
               # Upstream publishes no semver tags; pin by digest so the pull is
               # reproducible and immune to a moving :latest re-tag.
-              image: blockloop/vault-unseal@sha256:c62894062c936463d9875d19a9a3d680f1137e206972136f1085af9037e26a32
+              image: blockloop/vault-unseal@sha256:41bcab66bb0759f8b3887b7b2f22a282d5ff3c6e2fc7829eeb2d1c98e3870c62
               env:
                 - name: VAULT_ADDR
                   value: "http://platform-vault.vault.svc:8200"
