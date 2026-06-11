@@ -68,6 +68,9 @@ Log in with username `admin` and the password above. Change the password in
 Open `https://dashboard.jdwlabs.com` on any device. You are redirected to the
 Dex login form at `https://argocd.jdwlabs.com/api/dex/auth`. Enter the
 credentials you seeded in `kv/argocd-dex`. 1Password autofill works on mobile.
+For the full phone workflow — home-screen setup, session/refresh-token
+lifetimes, and the auth options evaluated — see
+[MOBILE-ACCESS.md](MOBILE-ACCESS.md).
 
 **Rotate the Dex admin password:**
 
