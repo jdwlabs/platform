@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.3
       - name: Lint YAML
-        uses: ibiqlik/action-yamllint@v3
+        uses: ibiqlik/action-yamllint@v3.1.1
         with:
           file_or_dir: |
             tenants/
