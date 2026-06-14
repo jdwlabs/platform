@@ -12,79 +12,10 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.3
-        with:
-          fetch-depth: 0
-
-      - name: Parse tag
-        id: tag
-        run: |
-          TAG="${{ github.ref_name }}"
-          COMPONENT=$(echo "$TAG" | sed 's/-v[0-9].*//')
-          VERSION=$(echo "$TAG" | sed "s/${COMPONENT}-v//")
-          echo "component=$COMPONENT" >> $GITHUB_OUTPUT
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - uses: azure/setup-helm@v5.0.0
-
-      - name: Package chart
-        run: |
-          helm package helm-charts/${{ steps.tag.outputs.component }} \
-            --version ${{ steps.tag.outputs.version }} \
-            --destination .cr-release-packages/
-
-      - name: Find previous tag for this chart
-        id: prev_tag
-        run: |
-          COMPONENT="${{ steps.tag.outputs.component }}"
-          CURRENT="${{ github.ref_name }}"
-          PREV=$(git tag --list "${COMPONENT}-v*" --sort=-version:refname | grep -v "^${CURRENT}$" | head -1 || true)
-          echo "tag=${PREV}" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          CHART="${{ steps.tag.outputs.component }}"
-          VERSION="${{ steps.tag.outputs.version }}"
-          TAG="${{ github.ref_name }}"
-          PREV="${{ steps.prev_tag.outputs.tag }}"
-          TITLE="${CHART} v${VERSION}"
-          TGZ=$(ls .cr-release-packages/*.tgz)
-
-          if [ -n "$PREV" ]; then
-            gh release create "$TAG" \
-              --title "$TITLE" \
-              --generate-notes \
-              --notes-start-tag "$PREV" \
-              "$TGZ"
-          else
-            gh release create "$TAG" \
-              --title "$TITLE" \
-              --generate-notes \
-              "$TGZ"
-          fi
-
-      - name: Checkout gh-pages
-        uses: actions/checkout@v6.0.3
-        with:
-          ref: gh-pages
-          path: gh-pages
-
-      - name: Update Helm repo index
-        run: |
-          cp .cr-release-packages/*.tgz gh-pages/
-          helm repo index gh-pages/ \
-            --url https://jdwlabs.github.io/platform \
-            --merge gh-pages/index.yaml
-
-      - name: Push gh-pages
-        run: |
-          cd gh-pages
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .
-          git diff --cached --quiet || git commit -m "chore: update Helm repo index for ${{ github.ref_name }}"
-          git push
+    uses: jdwlabs/.github/.github/workflows/release-helm.yml@main
+    permissions:
+      contents: write
+      pages: write
+    with:
+      charts-dir: helm-charts
+      pages-url: https://jdwlabs.github.io/platform
