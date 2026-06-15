@@ -9,6 +9,14 @@ roleRef:
 subjects:
   # Username shape is <oidc-username-prefix><email claim> as configured on
   # the kube-apiserver (oidc-username-prefix=oidc:, oidc-username-claim=email).
+  # Static-password login (Dex staticPasswords) resolves to admin@jdwlabs.com.
   - apiGroup: rbac.authorization.k8s.io
     kind: User
     name: oidc:admin@jdwlabs.com
+  # GitHub-connector login resolves to the GitHub account's primary *verified*
+  # email. CONFIRM this matches your GitHub primary email before merge — a
+  # mismatch fails closed (login succeeds, no cluster-admin), it is not a
+  # security hole, but you won't get access until it matches.
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: oidc:jdwillmsen@gmail.com
