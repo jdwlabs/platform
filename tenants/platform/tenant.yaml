@@ -87,17 +87,6 @@ services:
     postInstall: true
     syncWave: 0
 
-  # Host networking fix applied before all workloads: see the DaemonSet for the
-  # flannel/virtio_net VXLAN checksum-offload cause it works around.
-  - name: vxlan-offload-fix
-    chart: ""
-    repo: ""
-    revision: ""
-    namespace: kube-system
-    rawManifests: true
-    postInstall: false
-    syncWave: 0
-
   # Wave 1: Core infrastructure (Networking, TLS, Storage)
   - name: cert-manager
     chart: cert-manager
