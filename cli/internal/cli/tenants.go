@@ -39,6 +39,19 @@ func newTenantsValidateCmd(g *Globals) *cobra.Command {
 				out.Emit(Event{Phase: "tenants", Name: "validate", Status: "failed", Message: err.Error()})
 				return err
 			}
+			esIssues, err := tenants.LintExternalSecrets(path)
+			if err != nil {
+				out.Emit(Event{Phase: "tenants", Name: "validate", Status: "failed", Message: err.Error()})
+				return err
+			}
+			for _, iss := range esIssues {
+				out.Emit(Event{Phase: "tenants", Name: "externalsecret-lint", Status: "broken", Message: iss.Error()})
+			}
+			if len(esIssues) > 0 {
+				err := fmt.Errorf("%d ExternalSecret data entr(ies) omit required remoteRef fields", len(esIssues))
+				out.Emit(Event{Phase: "tenants", Name: "validate", Status: "failed", Message: err.Error()})
+				return err
+			}
 			out.Emit(Event{Phase: "tenants", Name: "validate", Status: "ok", Message: "all tenant.yaml files valid"})
 			return nil
 		},

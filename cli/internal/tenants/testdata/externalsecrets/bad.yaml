@@ -1,0 +1,32 @@
+# A non-ExternalSecret doc must be ignored by the lint.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ignore-me
+  namespace: demo
+data:
+  hello: world
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: bad-secret
+  namespace: demo
+spec:
+  secretStoreRef:
+    name: vault
+    kind: ClusterSecretStore
+  target:
+    name: bad-secret
+  data:
+    - secretKey: full
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: None
+        metadataPolicy: None
+        key: demo
+        property: full
+    - secretKey: bare
+      remoteRef:
+        key: demo
+        property: bare
