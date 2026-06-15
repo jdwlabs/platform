@@ -12,10 +12,25 @@ configs:
   cm:
     accounts.claude-mcp: apiKey
     dex.config: |
-      # ArgoCD's dex config generator hard-requires `connectors` to be a
-      # list — even empty — or dex-server and argocd-server exit fatal with
-      # "malformed Dex configuration found". staticPasswords alone fails.
-      connectors: []
+      # GitHub connector gives Headlamp/ArgoCD social login (mobile passkey)
+      # alongside the staticPasswords fallback below. Login is gated to jdwlabs
+      # org members; cluster-admin is then granted per-email by the
+      # headlamp-oidc-admin ClusterRoleBinding (org members without a binding
+      # authenticate but get no RBAC — fail closed). clientID/secret come from
+      # the GitHub OAuth App via Vault (key argocd-dex). The redirectURI must
+      # be registered as the OAuth App's Authorization callback URL.
+      connectors:
+        - type: github
+          id: github
+          name: GitHub
+          config:
+            clientID: $dex-secrets:github-client-id
+            clientSecret: $dex-secrets:github-client-secret
+            redirectURI: https://argocd.jdwlabs.com/api/dex/callback
+            orgs:
+              - name: jdwlabs
+            loadAllGroups: false
+            useLoginAsID: false
       enablePasswordDB: true
       oauth2:
         skipApprovalScreen: true
