@@ -96,13 +96,13 @@ containerMode:
   #   ## the following is required when containerMode.type=kubernetes
   kubernetesModeWorkVolumeClaim:
     accessModes: ["ReadWriteOnce"]
-    # longhorn-ephemeral-local: single-replica, strict-local (node-local) storage
-    # for throwaway CI work volumes. Avoids the 3x network replication of
-    # `longhorn-ephemeral`, which slowed builds and made CI a casualty of any
-    # Longhorn instance-manager disruption. reclaimPolicy: Delete
-    # auto-removes the volume after job completion. The default `longhorn` SC uses
-    # Retain, which orphans PVs and exhausts Longhorn scheduled storage budget.
-    storageClassName: "longhorn-ephemeral-local"
+    # local-path: node-local storage (rancher.io/local-path) for throwaway CI
+    # work volumes. Fully decoupled from Longhorn's iSCSI/instance-manager data
+    # plane — an OOM or instance-manager restart on a node no longer resets the
+    # runner's filesystem (the JDWLABS-37 EXT4-abort/ERR_PNPM_EIO failure mode).
+    # 6-17x faster than Longhorn for this workload; reclaimPolicy Delete +
+    # WaitForFirstConsumer keep volumes ephemeral and node-affine. See JDWLABS-55.
+    storageClassName: "local-path"
     resources:
       requests:
         storage: 4Gi

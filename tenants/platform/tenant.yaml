@@ -141,6 +141,17 @@ services:
     postInstall: true
     syncWave: 1
 
+  # Node-local storage for throwaway/ephemeral workloads (CI runner _work),
+  # decoupling them from Longhorn's iSCSI data plane. See JDWLABS-55.
+  - name: local-path-provisioner
+    chart: ""
+    repo: ""
+    revision: ""
+    namespace: kube-system
+    rawManifests: true
+    postInstall: false
+    syncWave: 1
+
   # Wave 2: Platform services
   - name: external-secrets
     chart: external-secrets
