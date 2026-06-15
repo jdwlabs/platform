@@ -61,6 +61,8 @@ var staticSeedSpecs = map[string]seedSpec{
 	"argocd-dex": {Path: "argocd-dex", Fields: []seedField{
 		{"admin-password-hash", "PLATFORMCTL_ARGOCD_DEX_ADMIN_PASSWORD_HASH", true, false},
 		{"headlamp-client-secret", "PLATFORMCTL_ARGOCD_DEX_HEADLAMP_CLIENT_SECRET", true, false},
+		{"github-client-id", "PLATFORMCTL_ARGOCD_DEX_GITHUB_CLIENT_ID", false, false},
+		{"github-client-secret", "PLATFORMCTL_ARGOCD_DEX_GITHUB_CLIENT_SECRET", true, false},
 	}},
 }
 

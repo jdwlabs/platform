@@ -85,6 +85,8 @@ func TestVaultSeedPhase_ArgoCDDexFromEnv(t *testing.T) {
 	srv, c := mockVaultKV(t)
 	t.Setenv("PLATFORMCTL_ARGOCD_DEX_ADMIN_PASSWORD_HASH", "$2a$10$testhash")
 	t.Setenv("PLATFORMCTL_ARGOCD_DEX_HEADLAMP_CLIENT_SECRET", "super-secret-value")
+	t.Setenv("PLATFORMCTL_ARGOCD_DEX_GITHUB_CLIENT_ID", "Ov23litestclientid")
+	t.Setenv("PLATFORMCTL_ARGOCD_DEX_GITHUB_CLIENT_SECRET", "gh-client-secret-value")
 
 	p := NewVaultSeedPhase(NewVaultAddrResolver(srv.URL, nil, nil), true, "secret", nil, []string{"argocd-dex"})
 	if err := p.Apply(context.Background()); err != nil {
@@ -99,5 +101,11 @@ func TestVaultSeedPhase_ArgoCDDexFromEnv(t *testing.T) {
 	}
 	if got["headlamp-client-secret"] != "super-secret-value" {
 		t.Fatalf("headlamp-client-secret: got %v", got["headlamp-client-secret"])
+	}
+	if got["github-client-id"] != "Ov23litestclientid" {
+		t.Fatalf("github-client-id: got %v", got["github-client-id"])
+	}
+	if got["github-client-secret"] != "gh-client-secret-value" {
+		t.Fatalf("github-client-secret: got %v", got["github-client-secret"])
 	}
 }
