@@ -55,6 +55,9 @@ configs:
       p, role:readonly, logs, get, */*, allow
       p, role:readonly, exec, create, */*, deny
       g, claude-mcp, role:readonly
+      # SSO login via the Dex staticPasswords admin (admin@jdwlabs.com);
+      # separate identity from the built-in local `admin` account.
+      g, admin@jdwlabs.com, role:admin
 
 controller:
   metrics:
