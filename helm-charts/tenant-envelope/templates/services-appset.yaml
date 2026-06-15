@@ -50,12 +50,15 @@ spec:
             - .spec.rules[]?.backendRefs[]?.kind
             - .spec.rules[]?.backendRefs[]?.weight
             - .spec.rules[]?.matches
+        # Only scalar paths here. Ignoring fields *inside* .spec.data[] items
+        # breaks under RespectIgnoreDifferences=true + ServerSideApply: ArgoCD
+        # strips the ignored subfields from each atomic-list item before the
+        # apply, and the resulting list-merge silently drops added/changed
+        # entries (the diff never converges). ESO-defaulted remoteRef strategy
+        # fields are instead declared explicitly in each ExternalSecret.
         - group: external-secrets.io
           kind: ExternalSecret
           jqPathExpressions:
-            - .spec.data[]?.remoteRef.conversionStrategy
-            - .spec.data[]?.remoteRef.decodingStrategy
-            - .spec.data[]?.remoteRef.metadataPolicy
             - .spec.target.deletionPolicy
             - .spec.target.template.mergePolicy
         # The prometheus-operator monitoring CRDs (ServiceMonitor, PodMonitor, PrometheusRule)
