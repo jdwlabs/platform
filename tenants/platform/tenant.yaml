@@ -131,7 +131,7 @@ services:
     syncWave: 1
 
   # Node-local storage for throwaway/ephemeral workloads (CI runner _work),
-  # decoupling them from Longhorn's iSCSI data plane. See JDWLABS-55.
+  # decoupling them from Longhorn's iSCSI data plane.
   - name: local-path-provisioner
     chart: ""
     repo: ""
