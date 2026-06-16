@@ -366,11 +366,11 @@ template:
         command: ["/home/runner/run.sh"]
         resources:
           limits:
-            cpu: "4"
-            memory: 16Gi
+            cpu: "3"
+            memory: 6Gi
           requests:
-            cpu: "500m"
-            memory: 1Gi
+            cpu: "1"
+            memory: 2Gi
         env:
           - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
             value: "false"
