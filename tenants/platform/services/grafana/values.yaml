@@ -1,8 +1,8 @@
 revisionHistoryLimit: 0
 
 # Without requests Grafana is BestEffort and was evicted under node memory
-# pressure alongside Prometheus (JDWLABS-26). Footprint is bounded, so a limit
-# is safe here (unlike Prometheus).
+# pressure alongside Prometheus. Footprint is bounded, so a limit is safe here
+# (unlike Prometheus).
 resources:
   requests:
     cpu: 100m
