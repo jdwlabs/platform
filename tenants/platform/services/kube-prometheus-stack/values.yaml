@@ -12,6 +12,16 @@ prometheus:
     enableRemoteWriteReceiver: true
     retention: 15d
     retentionSize: "20GB"
+    # Without requests Prometheus is BestEffort and the kubelet reaps it under
+    # node memory pressure mid-WAL-replay on the 6 GB workers (JDWLABS-26 / -37).
+    # A 3Gi request makes it Burstable and large enough that the scheduler only
+    # fits it on the 16 GB worker today (a 32 GB pve5 node post-rebalance). No
+    # memory limit: replay transiently exceeds steady-state RSS and a hard limit
+    # would cgroup-OOM it; retention/retentionSize bound long-run growth instead.
+    resources:
+      requests:
+        cpu: 500m
+        memory: 3Gi
     storageSpec:
       volumeClaimTemplate:
         spec:
