@@ -2,7 +2,7 @@
 # local-path-provisioner (rancher/local-path-provisioner v0.0.31)
 # Node-local dynamic storage for throwaway/ephemeral workloads (CI runner
 # _work). Talos note: the data path is /var/local-path-provisioner because
-# Talos root is immutable and only /var is writable. See JDWLABS-55.
+# Talos root is immutable and only /var is writable.
 apiVersion: v1
 kind: ServiceAccount
 metadata:

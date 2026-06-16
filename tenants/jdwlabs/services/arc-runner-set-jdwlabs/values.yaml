@@ -99,9 +99,9 @@ containerMode:
     # local-path: node-local storage (rancher.io/local-path) for throwaway CI
     # work volumes. Fully decoupled from Longhorn's iSCSI/instance-manager data
     # plane — an OOM or instance-manager restart on a node no longer resets the
-    # runner's filesystem (the JDWLABS-37 EXT4-abort/ERR_PNPM_EIO failure mode).
+    # runner's filesystem (the EXT4-abort/ERR_PNPM_EIO failure mode).
     # 6-17x faster than Longhorn for this workload; reclaimPolicy Delete +
-    # WaitForFirstConsumer keep volumes ephemeral and node-affine. See JDWLABS-55.
+    # WaitForFirstConsumer keep volumes ephemeral and node-affine.
     storageClassName: "local-path"
     resources:
       requests:
