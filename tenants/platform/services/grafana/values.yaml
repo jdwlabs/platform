@@ -1,5 +1,11 @@
 revisionHistoryLimit: 0
 
+# Single replica on a ReadWriteOnce PVC: RollingUpdate deadlocks because the
+# new pod can't attach the volume until the old one is deleted. Recreate stops
+# the old pod first.
+deploymentStrategy:
+  type: Recreate
+
 # Without requests Grafana is BestEffort and was evicted under node memory
 # pressure alongside Prometheus. Footprint is bounded, so a limit is safe here
 # (unlike Prometheus).
