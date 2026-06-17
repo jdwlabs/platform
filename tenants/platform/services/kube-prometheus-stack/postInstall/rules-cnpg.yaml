@@ -15,6 +15,7 @@ spec:
           annotations:
             summary: "CNPG instance {{ $labels.pod }} in cluster {{ $labels.cluster }} is down"
             description: "The PostgreSQL instance has been unreachable for more than 1 minute."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#3-postgresql-operations"
         - alert: CNPGReplicationLag
           expr: cnpg_pg_replication_lag > 30
           for: 5m
@@ -23,6 +24,7 @@ spec:
           annotations:
             summary: "CNPG replication lag > 30s on {{ $labels.pod }}"
             description: "Replication lag is {{ $value }}s on instance {{ $labels.pod }}."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#3-postgresql-operations"
         - alert: CNPGLongRunningTransaction
           expr: cnpg_pg_long_running_transactions > 300
           for: 5m
@@ -31,3 +33,4 @@ spec:
           annotations:
             summary: "Long-running transaction on {{ $labels.pod }}"
             description: "A transaction has been running for over 5 minutes on {{ $labels.pod }}."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#3-postgresql-operations"

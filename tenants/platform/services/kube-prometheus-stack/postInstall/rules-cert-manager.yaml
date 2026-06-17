@@ -15,6 +15,7 @@ spec:
           annotations:
             summary: "Certificate {{ $labels.name }} in {{ $labels.namespace }} expires in less than 21 days"
             description: "Certificate {{ $labels.name }} will expire in {{ $value | humanizeDuration }}."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#4-tls-certs"
         - alert: CertificateExpired
           expr: time() - certmanager_certificate_expiration_timestamp_seconds > 0
           for: 5m
@@ -23,6 +24,7 @@ spec:
           annotations:
             summary: "Certificate {{ $labels.name }} in {{ $labels.namespace }} has expired"
             description: "Certificate {{ $labels.name }} expired {{ $value | humanizeDuration }} ago."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#4-tls-certs"
         - alert: CertManagerNotReady
           expr: certmanager_certificate_ready_status{condition="False"} == 1
           for: 15m
@@ -31,3 +33,4 @@ spec:
           annotations:
             summary: "Certificate {{ $labels.name }} in {{ $labels.namespace }} is not ready"
             description: "Certificate has been in a not-ready state for more than 15 minutes."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#4-tls-certs"

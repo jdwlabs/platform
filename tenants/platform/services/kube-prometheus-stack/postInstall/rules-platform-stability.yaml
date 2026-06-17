@@ -21,6 +21,7 @@ spec:
           annotations:
             summary: "Longhorn instance-manager {{ $labels.pod }} was recreated"
             description: "Instance-manager {{ $labels.pod }} on node {{ $labels.node }} was recreated in the last 10m; replicas it served may have faulted."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
         - alert: LonghornManagerOOMKilled
           expr: kube_pod_container_status_last_terminated_reason{namespace="longhorn-system", container="longhorn-manager", reason="OOMKilled"} == 1
           for: 1m
@@ -29,6 +30,7 @@ spec:
           annotations:
             summary: "longhorn-manager {{ $labels.pod }} was OOM-killed"
             description: "longhorn-manager {{ $labels.pod }} hit its memory limit and was OOM-killed; raise its memory or reduce node memory pressure."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
     # Vault is the cluster secret source (ClusterSecretStore -> ExternalSecrets).
     # A seal or pod loss breaks secret provisioning fleet-wide. Detection is
     # layered so it works regardless of whether Vault's own metrics are scrapable:
@@ -46,6 +48,7 @@ spec:
           annotations:
             summary: "Vault has no ready replicas"
             description: "platform-vault StatefulSet has 0 ready replicas; secret provisioning is down."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#2-vault-lifecycle"
         - alert: VaultDegraded
           # Fewer ready replicas than desired: a sealed/crashing pod or a stalled
           # rollout. Works without Vault's own metrics, so it surfaces a sealed
@@ -57,6 +60,7 @@ spec:
           annotations:
             summary: "Vault has fewer ready replicas than desired"
             description: "platform-vault has {{ $value }} ready of its desired replicas for over 10m; a pod may be sealed, crashing, or a rollout is stalled."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#2-vault-lifecycle"
         - alert: VaultSealed
           # vault_core_unsealed == 0 is Vault reporting itself sealed while still
           # serving metrics — the precise seal signal the kube-state alerts above
@@ -68,6 +72,7 @@ spec:
           annotations:
             summary: "Vault instance {{ $labels.pod }} is sealed"
             description: "Vault {{ $labels.pod }} reports sealed (vault_core_unsealed=0); unseal it to restore secret provisioning via ExternalSecrets."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#2-vault-lifecycle"
     - name: node-capacity
       rules:
         - alert: NodeMemoryHigh
@@ -78,3 +83,4 @@ spec:
           annotations:
             summary: "Node {{ $labels.instance }} memory above 85%"
             description: "Node {{ $labels.instance }} memory is {{ $value | humanizePercentage }}; tight memory amplifies storage/manager OOM cascades."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
