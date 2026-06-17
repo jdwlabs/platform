@@ -37,6 +37,9 @@ spec:
           jqPathExpressions:
             - .spec.template.metadata.annotations."checksum/secret"
             - .spec.selector
+            # apiserver injects resourceFieldRef.divisor on env valueFrom; the
+            # Helm render omits it, so it never reconciles under ServerSideApply
+            - .spec.template.spec.containers[]?.env[]?.valueFrom.resourceFieldRef.divisor
         - group: gateway.networking.k8s.io
           kind: Gateway
           jqPathExpressions:
