@@ -201,7 +201,7 @@ services:
   - name: kube-prometheus-stack
     chart: kube-prometheus-stack
     repo: https://prometheus-community.github.io/helm-charts
-    revision: "69.4.0"
+    revision: "86.2.3"
     namespace: monitoring
     postInstall: true
     syncWave: 2
