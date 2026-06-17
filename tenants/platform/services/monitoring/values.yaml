@@ -23,6 +23,15 @@ nodeLogs:
 
 alloy-logs:
   enabled: true
+  # alloy-logs ran ~175Mi/node unbounded. Cap it: request covers steady state,
+  # limit gives headroom for log bursts while protecting node memory.
+  alloy:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
 
 alloy-metrics:
   enabled: true

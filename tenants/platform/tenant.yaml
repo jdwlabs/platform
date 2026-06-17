@@ -177,7 +177,7 @@ services:
   - name: monitoring
     chart: k8s-monitoring
     repo: https://grafana.github.io/helm-charts
-    revision: 3.3.2
+    revision: 3.8.10
     namespace: monitoring
     postInstall: false
     syncWave: 2
@@ -193,7 +193,7 @@ services:
   - name: loki
     chart: loki
     repo: https://grafana.github.io/helm-charts
-    revision: 6.38.0
+    revision: 6.55.0
     namespace: monitoring
     postInstall: true
     syncWave: 2
