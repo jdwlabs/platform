@@ -40,6 +40,8 @@ datasources:
         orgId: 1
       - name: Alertmanager
         orgId: 1
+      - name: Tempo
+        orgId: 1
     datasources:
       - name: Prometheus
         type: prometheus
@@ -59,6 +61,47 @@ datasources:
         url: http://platform-kube-prometheus-s-alertmanager:9093
         jsonData:
           implementation: prometheus
+      # Tracing backend (added with the tempo service). Trace-to-logs and
+      # trace-to-metrics correlation reference the Loki and Prometheus UIDs
+      # above. The Tempo service is provisioned separately; this datasource is
+      # inert until it is reachable.
+      - name: Tempo
+        type: tempo
+        uid: tempo
+        access: proxy
+        url: http://platform-tempo:3200
+        jsonData:
+          tracesToLogsV2:
+            datasourceUid: P8E90F9AEF21F6940
+            spanStartTimeShift: '-1h'
+            spanEndTimeShift: '1h'
+            tags:
+              - key: 'service.name'
+                value: 'service_name'
+              - key: 'k8s.namespace.name'
+                value: 'namespace'
+              - key: 'k8s.pod.name'
+                value: 'pod'
+            filterByTraceID: true
+            filterBySpanID: false
+          tracesToMetrics:
+            datasourceUid: PBFA97CFB590B2093
+            spanStartTimeShift: '-1h'
+            spanEndTimeShift: '1h'
+            tags:
+              - key: 'service.name'
+                value: 'service'
+            queries:
+              - name: 'Request rate'
+                query: 'sum(rate(traces_spanmetrics_calls_total{$__tags}[5m]))'
+              - name: 'Request error rate'
+                query: 'sum(rate(traces_spanmetrics_calls_total{$__tags,status_code="STATUS_CODE_ERROR"}[5m]))'
+              - name: 'Request duration p99'
+                query: 'histogram_quantile(0.99, sum(rate(traces_spanmetrics_latency_bucket{$__tags}[5m])) by (le))'
+          serviceMap:
+            datasourceUid: PBFA97CFB590B2093
+          nodeGraph:
+            enabled: true
 
 persistence:
   enabled: true
