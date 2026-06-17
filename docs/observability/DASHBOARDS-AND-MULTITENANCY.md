@@ -1,9 +1,10 @@
 # Observability: Dashboards-as-Code, Suite Design, and Multi-Tenancy
 
-Status: Draft / proposal. This document describes a target architecture and a
-migration path. It does **not** change any running provisioning today — the
-existing ConfigMap-sidecar dashboards stay in place until the migration plan
-below is executed in follow-up changes.
+Status: Proposal with core decisions confirmed (2026-06-17, see §7). This
+document describes a target architecture and a migration path. It does **not**
+change any running provisioning today — the existing ConfigMap-sidecar
+dashboards stay in place until the migration plan below is executed in follow-up
+changes.
 
 Audience: platform operators and tenant onboarders.
 
@@ -369,21 +370,48 @@ this proposal PR.
 
 ---
 
-## 7. Decisions Jake needs to weigh (headline)
+## 7. Decisions (confirmed 2026-06-17)
+
+Confirmed by Jake:
 
 1. **Dashboards-as-code = Git Sync** (not Terraform, not staying on the
-   sidecar), with Grafonnet/mixins as an optional CI generation step. Confirm.
-2. **Grafana tenancy = folders + RBAC + teams, not organizations** — driven by
-   the fact that Git Sync can't provision orgs. Confirm we accept folders as the
-   tenant boundary.
-3. **Metrics tenancy = label-based on shared Prometheus now; Mimir later.** Are
-   we comfortable with *soft* metric isolation for internal tenants, or is hard
-   isolation (Mimir) needed sooner?
+   sidecar), with Grafonnet/mixins as an optional CI generation step. ✅
+2. **Grafana tenancy = folders + folder-RBAC + teams, not organizations** —
+   folders are the tenant boundary (Git Sync cannot provision orgs). ✅
+3. **Metrics tenancy = label-based on shared Prometheus now; Mimir later.** Soft
+   metric isolation is accepted for internal tenants; revisit Mimir + hard
+   isolation when an external/untrusted tenant or noisy-neighbor pressure
+   appears. ✅
 4. **Loki + Tempo = native `X-Scope-OrgID` multi-tenancy**, tenant id derived
-   from the existing namespace tenant label. Confirm we want store-level log/
-   trace isolation (vs. UI-only).
+   from the existing namespace tenant label (store-level isolation, not UI-only).
 5. **Tenancy rides `tenant.yaml`/`tenant-envelope`** via a new `observability`
-   block, keeping tenant onboarding single-file. Confirm the schema shape.
+   block, keeping tenant onboarding single-file.
+
+### Git Sync operational defaults (confirmed)
+
+These govern how Git Sync is wired against this **monorepo** (the chosen backing
+repo — not a separate dashboards repo):
+
+- **Backing repo = this monorepo.** Dashboards live under `observability/`
+  (outside `tenants/`) so the ArgoCD ApplicationSets — which watch `tenants/` —
+  never try to apply the dashboard JSON. Git Sync, not ArgoCD, reconciles that
+  tree; the two never own the same object.
+- **Write path = PR workflow, human review, no auto-merge.** Editors save in the
+  Grafana UI → the Grafana GitHub App opens a branch + PR against `main` → a
+  human reviews/merges → Git Sync pulls merged `main` back. Branch protection on
+  `main` is unchanged; the App is just another PR author. Auto-merge for trivial
+  dashboard diffs is deferred until the round-trip is proven.
+- **Rollout scope = platform folder first.** Scaffold all three tenant folders
+  (`platform`, `jdwlabs`, `dotablaze-tech`) but only wire `platform/` to Git Sync
+  now; add the tenant folders as each onboards.
+- **Migration pace = trickle, not big-bang.** New and hand-edited dashboards go
+  to Git Sync; existing ConfigMap/sidecar dashboards stay as-is until individually
+  touched, at which point each is moved per the §2 one-owner rule (add to Git
+  Sync + delete the ConfigMap in the same change). The sidecar stays enabled
+  until the last dashboard migrates.
+- **Auth = dedicated Grafana GitHub App**, scoped to this repo (Contents +
+  Pull requests: read/write), distinct from ArgoCD's repo credentials; private
+  key staged in Vault `kv/grafana-gitsync` (see the grafana service PR).
 
 ---
 
