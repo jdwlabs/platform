@@ -15,6 +15,7 @@ spec:
           annotations:
             summary: "ArgoCD app {{ $labels.name }} is not synced"
             description: "Application {{ $labels.name }} has sync status {{ $labels.sync_status }} for more than 15 minutes."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
         - alert: ArgoCDAppUnhealthy
           expr: argocd_app_info{health_status!~"Healthy|Progressing"} == 1
           for: 10m
@@ -23,6 +24,7 @@ spec:
           annotations:
             summary: "ArgoCD app {{ $labels.name }} is {{ $labels.health_status }}"
             description: "Application {{ $labels.name }} has been unhealthy for more than 10 minutes."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
         - alert: ArgoCDSyncFailing
           expr: increase(argocd_app_sync_total{phase!="Succeeded"}[15m]) > 3
           for: 5m
@@ -31,3 +33,4 @@ spec:
           annotations:
             summary: "ArgoCD app {{ $labels.name }} sync is repeatedly failing"
             description: "Application {{ $labels.name }} has had more than 3 failed syncs in the last 15 minutes."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
