@@ -1,0 +1,68 @@
+{
+  "__comment": "EXAMPLE tenant-scoped RED dashboard (Rate/Errors/Duration). Illustrative only. Datasource is referenced via the ${datasource} variable; the tenant is scoped via the ${namespace} variable whose options are restricted to this tenant's namespaces. uid is pinned.",
+  "uid": "jdwlabs-services-red",
+  "title": "jdwlabs / Services RED",
+  "tags": ["tenant:jdwlabs", "red", "generated-example"],
+  "editable": true,
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "label": "Data source"
+      },
+      {
+        "name": "namespace",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(kube_namespace_labels{label_platform_jdwlabs_io_tenant=\"jdwlabs\"}, namespace)",
+        "includeAll": true,
+        "multi": true,
+        "label": "Namespace"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "Rate (req/s by service)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(http_requests_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "title": "Errors (5xx ratio)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(http_requests_total{namespace=~\"$namespace\",code=~\"5..\"}[5m])) / sum by (service) (rate(http_requests_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "title": "Duration (p95 latency)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (service, le) (rate(http_request_duration_seconds_bucket{namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "{{service}} p95"
+        }
+      ]
+    }
+  ]
+}
