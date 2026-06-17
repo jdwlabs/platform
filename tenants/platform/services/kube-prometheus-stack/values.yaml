@@ -11,6 +11,9 @@ prometheus:
   prometheusSpec:
     enableRemoteWriteReceiver: true
     retention: 15d
+    # Kept below the 25Gi PVC (~26.8GB) so the size-based GC trips before the
+    # volume fills; retention (time) and retentionSize (bytes) together bound
+    # long-run TSDB growth and the RSS that tracks it.
     retentionSize: "20GB"
     # Without requests Prometheus is BestEffort and the kubelet reaps it under
     # node memory pressure mid-WAL-replay on the smaller workers. A 3Gi request
@@ -55,6 +58,23 @@ alertmanager:
 # kube-prometheus-stack owns these going forward
 kubeStateMetrics:
   enabled: true
+
+# Configuration for the kube-state-metrics subchart.
+# Cardinality control: kube-state-metrics is a top series-count contributor and
+# this Prometheus also receives remote-write from the Grafana Alloy
+# k8s-monitoring stack, so series count drives the RSS pressure seen on the
+# control plane. kube_*_annotations emits one series per object annotation key
+# (annotations routinely carry kubectl last-applied-config, Helm release
+# metadata, etc.) — high fan-out and consumed by no rule or dashboard in this
+# repo. This is the only kube-state series dropped; label/state metrics are
+# kept. Upstream default for this key is [], so this adds rather than masks.
+kube-state-metrics:
+  prometheus:
+    monitor:
+      metricRelabelings:
+        - sourceLabels: [__name__]
+          regex: "kube_.*_annotations"
+          action: drop
 
 nodeExporter:
   enabled: true
