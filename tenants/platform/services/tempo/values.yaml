@@ -34,7 +34,7 @@ tempo:
   # Grafana, and emits exemplars linking metrics back to traces.
   metricsGenerator:
     enabled: true
-    remoteWriteUrl: "http://platform-kube-prometheus-stack-prometheus:9090/api/v1/write"
+    remoteWriteUrl: "http://platform-kube-prometheus-s-prometheus:9090/api/v1/write"
     storage:
       path: /var/tempo/generator/wal
     traces_storage:
