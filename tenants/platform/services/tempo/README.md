@@ -14,10 +14,10 @@ place; this adds tracing).
 - **Metrics generator:** enabled, remote-writing RED span metrics and
   service-graph metrics to Prometheus. This powers the Grafana service graph,
   trace-to-metrics, and exemplars.
-- **Datasource:** provisioned via `postInstall/datasource.yaml` with
-  trace-to-logs (Loki) and trace-to-metrics (Prometheus) correlation. See the
-  coordination note in that file — the Grafana datasources sidecar must be
-  enabled for it to load.
+- **Datasource:** the `Tempo` datasource (with trace-to-logs / trace-to-metrics
+  correlation to the Loki and Prometheus UIDs) is provisioned inline in
+  `services/grafana/values.yaml`, matching how the other datasources are
+  declared in this repo (the Grafana datasources sidecar is not used).
 
 ## OTLP endpoints
 
