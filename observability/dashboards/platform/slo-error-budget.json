@@ -1,0 +1,55 @@
+{
+  "__comment": "EXAMPLE SLO / error-budget dashboard (Four Golden Signals view). Illustrative only. Expects multi-window burn-rate recording rules (e.g. Sloth-generated: slo:sli_error:ratio_rate5m / 30m / 1h). Datasource via ${datasource}. uid pinned.",
+  "uid": "platform-slo-error-budget",
+  "title": "Platform / SLO & Error Budget",
+  "tags": ["slo", "golden-signals", "generated-example"],
+  "editable": true,
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "time": { "from": "now-30d", "to": "now" },
+  "templating": {
+    "list": [
+      { "name": "datasource", "type": "datasource", "query": "prometheus", "current": {}, "label": "Data source" },
+      {
+        "name": "slo",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(slo:sli_error:ratio_rate5m, sloth_service)",
+        "includeAll": false,
+        "label": "SLO service"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "Availability (30d)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "targets": [
+        { "expr": "1 - (sum(slo:sli_error:ratio_rate30d{sloth_service=\"$slo\"}))", "legendFormat": "availability" }
+      ]
+    },
+    {
+      "title": "Error budget remaining",
+      "type": "gauge",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "targets": [
+        { "expr": "1 - (sum(slo:sli_error:ratio_rate30d{sloth_service=\"$slo\"}) / on() group_left() (1 - sum(slo:objective:ratio{sloth_service=\"$slo\"})))", "legendFormat": "budget left" }
+      ]
+    },
+    {
+      "title": "Burn rate (multi-window)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "targets": [
+        { "expr": "slo:sli_error:ratio_rate5m{sloth_service=\"$slo\"}", "legendFormat": "5m" },
+        { "expr": "slo:sli_error:ratio_rate1h{sloth_service=\"$slo\"}", "legendFormat": "1h" }
+      ]
+    }
+  ]
+}
