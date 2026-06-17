@@ -31,6 +31,7 @@ Tenant-centric Kubernetes GitOps platform managed by ArgoCD.
 - [Architecture](docs/ARCHITECTURE.md)
 - [Tenant Model](docs/TENANT-MODEL.md)
 - [Onboarding Guide](docs/ONBOARDING.md)
+- [Observability: Dashboards-as-Code & Multi-Tenancy](docs/observability/DASHBOARDS-AND-MULTITENANCY.md) — design proposal
 
 ## Deployment
 
