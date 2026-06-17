@@ -364,13 +364,16 @@ template:
       - name: runner
         image: docker.io/jdwlabs/agents:1.0.0
         command: ["/home/runner/run.sh"]
+        # Heavy builds (apps CI) run on GitHub-hosted runners. These in-cluster
+        # runners are kept small for light jobs only, so a runaway can never
+        # OOM a node again — the limit stays well under a worker's allocatable.
         resources:
           limits:
-            cpu: "3"
-            memory: 6Gi
-          requests:
             cpu: "1"
-            memory: 2Gi
+            memory: 1Gi
+          requests:
+            cpu: 250m
+            memory: 512Mi
         env:
           - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
             value: "false"
