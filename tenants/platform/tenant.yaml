@@ -70,6 +70,7 @@ project:
     - 'https://redhat-cop.github.io/vault-config-operator'
     - 'https://kubernetes-sigs.github.io/metrics-server/'
     - 'https://grafana.github.io/helm-charts'
+    - 'https://grafana-community.github.io/helm-charts'
     - 'https://prometheus-community.github.io/helm-charts'
     - 'https://kubernetes-sigs.github.io/headlamp/'
     - 'https://cloudnative-pg.github.io/charts'
@@ -202,6 +203,16 @@ services:
     chart: kube-prometheus-stack
     repo: https://prometheus-community.github.io/helm-charts
     revision: "69.4.0"
+    namespace: monitoring
+    postInstall: true
+    syncWave: 2
+
+  # Distributed tracing backend. Single-binary Tempo chart now lives in the
+  # grafana-community repo (grafana/helm-charts copy is deprecated).
+  - name: tempo
+    chart: tempo
+    repo: https://grafana-community.github.io/helm-charts
+    revision: 2.2.3
     namespace: monitoring
     postInstall: true
     syncWave: 2
