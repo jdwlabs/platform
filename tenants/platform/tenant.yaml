@@ -70,6 +70,7 @@ project:
     - 'https://redhat-cop.github.io/vault-config-operator'
     - 'https://kubernetes-sigs.github.io/metrics-server/'
     - 'https://grafana.github.io/helm-charts'
+    - 'https://grafana-community.github.io/helm-charts'
     - 'https://prometheus-community.github.io/helm-charts'
     - 'https://kubernetes-sigs.github.io/headlamp/'
     - 'https://cloudnative-pg.github.io/charts'
@@ -184,8 +185,8 @@ services:
 
   - name: grafana
     chart: grafana
-    repo: https://grafana.github.io/helm-charts
-    revision: 9.4.3
+    repo: https://grafana-community.github.io/helm-charts
+    revision: 12.4.7
     namespace: monitoring
     postInstall: true
     syncWave: 2
