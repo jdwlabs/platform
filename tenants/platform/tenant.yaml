@@ -207,6 +207,16 @@ services:
     postInstall: true
     syncWave: 2
 
+  # Distributed tracing backend. Single-binary Tempo chart now lives in the
+  # grafana-community repo (grafana/helm-charts copy is deprecated).
+  - name: tempo
+    chart: tempo
+    repo: https://grafana-community.github.io/helm-charts
+    revision: 2.2.3
+    namespace: monitoring
+    postInstall: true
+    syncWave: 2
+
   - name: headlamp
     chart: headlamp
     repo: https://kubernetes-sigs.github.io/headlamp/

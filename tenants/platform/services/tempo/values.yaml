@@ -1,0 +1,59 @@
+tempo:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+  # Local filesystem backend on a Longhorn PVC. Matches the single-node-ish
+  # footprint of this cluster; revisit S3/MinIO if trace volume grows.
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+
+  # 7 days of traces; tighter than logs (14d) since trace volume is heavier.
+  retention: 168h
+
+  # OTLP is the standard ingest path. Jaeger/Zipkin receivers are left off
+  # until a workload actually needs them.
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+
+  # Generate RED span metrics + service-graph metrics and remote-write them to
+  # Prometheus. This is what powers trace-to-metrics and the service graph in
+  # Grafana, and emits exemplars linking metrics back to traces.
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: "http://platform-kube-prometheus-stack-prometheus:9090/api/v1/write"
+    storage:
+      path: /var/tempo/generator/wal
+    traces_storage:
+      path: /var/tempo/generator/traces
+  overrides:
+    defaults:
+      metrics_generator:
+        processors:
+          - service-graphs
+          - span-metrics
+
+priorityClassName: platform-critical
+
+persistence:
+  enabled: true
+  storageClassName: longhorn
+  accessModes:
+    - ReadWriteOnce
+  size: 20Gi
+
+serviceMonitor:
+  enabled: true
