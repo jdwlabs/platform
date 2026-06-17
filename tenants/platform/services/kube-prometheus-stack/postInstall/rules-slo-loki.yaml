@@ -1,0 +1,100 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: slo-loki-rules
+  namespace: monitoring
+spec:
+  groups:
+    # Multi-window, multi-burn-rate availability SLO for Loki, following the
+    # Google SRE workbook ("Alerting on SLOs", table 5-8). Loki is the only
+    # platform service that exports a per-status-code HTTP request counter that
+    # Prometheus actually scrapes (loki_request_duration_seconds_count), so it is
+    # the one service with a defensible request-based SLI here. The gateway
+    # (NGINX Gateway Fabric) runs the OSS data plane, which exposes no
+    # per-status-code metric, so a gateway availability SLO is deferred until
+    # status-coded metrics exist — see the PR follow-ups.
+    #
+    # SLI: good = non-5xx Loki HTTP responses; bad = 5xx. Target: 99.9% over 30d
+    # (0.1% error budget). Recording rules pre-compute the bad-event ratio over
+    # each alert window so the burn-rate alerts stay cheap to evaluate.
+    - name: loki-slo-recording
+      rules:
+        - record: loki:request_errors:ratio_rate5m
+          expr: |
+            sum(rate(loki_request_duration_seconds_count{status_code=~"5.."}[5m]))
+            /
+            sum(rate(loki_request_duration_seconds_count[5m]))
+        - record: loki:request_errors:ratio_rate30m
+          expr: |
+            sum(rate(loki_request_duration_seconds_count{status_code=~"5.."}[30m]))
+            /
+            sum(rate(loki_request_duration_seconds_count[30m]))
+        - record: loki:request_errors:ratio_rate1h
+          expr: |
+            sum(rate(loki_request_duration_seconds_count{status_code=~"5.."}[1h]))
+            /
+            sum(rate(loki_request_duration_seconds_count[1h]))
+        - record: loki:request_errors:ratio_rate2h
+          expr: |
+            sum(rate(loki_request_duration_seconds_count{status_code=~"5.."}[2h]))
+            /
+            sum(rate(loki_request_duration_seconds_count[2h]))
+        - record: loki:request_errors:ratio_rate6h
+          expr: |
+            sum(rate(loki_request_duration_seconds_count{status_code=~"5.."}[6h]))
+            /
+            sum(rate(loki_request_duration_seconds_count[6h]))
+        - record: loki:request_errors:ratio_rate1d
+          expr: |
+            sum(rate(loki_request_duration_seconds_count{status_code=~"5.."}[1d]))
+            /
+            sum(rate(loki_request_duration_seconds_count[1d]))
+        - record: loki:request_errors:ratio_rate3d
+          expr: |
+            sum(rate(loki_request_duration_seconds_count{status_code=~"5.."}[3d]))
+            /
+            sum(rate(loki_request_duration_seconds_count[3d]))
+    - name: loki-slo-alerts
+      rules:
+        # Fast burn: 14.4x burn rate exhausts the 30d budget in ~2 days; the
+        # 1h + 5m window pair pages and is robust to brief spikes.
+        - alert: LokiErrorBudgetBurnFast
+          expr: |
+            loki:request_errors:ratio_rate1h > (14.4 * 0.001)
+            and
+            loki:request_errors:ratio_rate5m > (14.4 * 0.001)
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Loki burning error budget fast (14.4x)"
+            description: "Loki 5xx ratio over 1h and 5m both exceed 14.4x the 99.9% SLO budget; at this rate the 30-day budget is gone in ~2 days."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+        # Medium burn: 6x burn rate, 6h + 30m windows. Pages but with a slower
+        # trigger; catches sustained degradation the fast-burn window misses.
+        - alert: LokiErrorBudgetBurnMedium
+          expr: |
+            loki:request_errors:ratio_rate6h > (6 * 0.001)
+            and
+            loki:request_errors:ratio_rate30m > (6 * 0.001)
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Loki burning error budget (6x)"
+            description: "Loki 5xx ratio over 6h and 30m both exceed 6x the 99.9% SLO budget; sustained degradation is consuming the budget."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+        # Slow burn: 1x burn rate, 3d + 6h windows. Ticket-grade, not a page;
+        # surfaces a chronic low-level error rate eating the budget over weeks.
+        - alert: LokiErrorBudgetBurnSlow
+          expr: |
+            loki:request_errors:ratio_rate3d > (1 * 0.001)
+            and
+            loki:request_errors:ratio_rate6h > (1 * 0.001)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Loki slowly burning error budget (1x)"
+            description: "Loki 5xx ratio over 3d and 6h both exceed the 99.9% SLO budget; a chronic error rate will exhaust the monthly budget. Investigate via ticket."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
