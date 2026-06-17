@@ -15,6 +15,7 @@ spec:
           annotations:
             summary: "Longhorn volume {{ $labels.volume }} usage above 85%"
             description: "Volume {{ $labels.volume }} is {{ $value | humanizePercentage }} full."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
         - alert: LonghornVolumeFaulted
           expr: longhorn_volume_robustness == 3
           for: 1m
@@ -23,6 +24,7 @@ spec:
           annotations:
             summary: "Longhorn volume {{ $labels.volume }} is Faulted"
             description: "Volume {{ $labels.volume }} has lost all replicas and is in a faulted state."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
         - alert: LonghornNodeStorageLow
           expr: (longhorn_node_storage_usage_bytes / longhorn_node_storage_capacity_bytes) > 0.80
           for: 5m
@@ -31,3 +33,4 @@ spec:
           annotations:
             summary: "Longhorn node {{ $labels.node }} storage above 80%"
             description: "Node {{ $labels.node }} storage is at {{ $value | humanizePercentage }}."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"

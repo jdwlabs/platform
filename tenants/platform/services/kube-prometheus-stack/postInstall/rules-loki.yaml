@@ -18,6 +18,7 @@ spec:
           annotations:
             summary: "Loki error rate above 10% on route {{ $labels.route }}"
             description: "Loki is returning 5xx errors at {{ $value }}% on route {{ $labels.route }}."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
         - alert: LokiIngestionRateDropped
           expr: |
             sum(rate(loki_distributor_bytes_received_total[5m])) == 0
@@ -28,3 +29,4 @@ spec:
           annotations:
             summary: "Loki ingestion has stopped"
             description: "Loki has received zero bytes for the last 10 minutes."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
