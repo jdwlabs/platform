@@ -109,27 +109,3 @@ persistence:
   accessModes:
     - ReadWriteOnce
   size: 2Gi
-
-# Git Sync (dashboards-as-code). The `provisioning` feature toggle is on by
-# default in Grafana v13 OSS; repository_types must be set explicitly so the
-# GitHub repository type is selectable. The repository connection (GitHub App
-# appID/installationID/privateKey) is created at runtime via Administration >
-# General > Provisioning and persisted as a Grafana resource — the GitHub App
-# private key is staged in Vault and surfaced by the grafana-gitsync-github-app
-# ExternalSecret. See README.md for the edit -> commit -> PR -> sync workflow
-# and how it coexists with the existing ConfigMap/sidecar dashboards.
-grafana.ini:
-  provisioning:
-    repository_types: "git|github|bitbucket|gitlab|local"
-  # Required so Git Sync can build PR/commit deep links back to the instance.
-  server:
-    root_url: https://grafana.jdwlabs.com
-
-# Mounts the GitHub App private key (synced from Vault by the ExternalSecret
-# below) so the runtime Git Sync connection can reference it. The connection
-# itself is created in-app; this only stages the credential.
-extraSecretMounts:
-  - name: grafana-gitsync-github-app
-    secretName: grafana-gitsync-github-app
-    mountPath: /etc/secrets/gitsync
-    readOnly: true
