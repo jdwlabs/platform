@@ -64,6 +64,11 @@ var staticSeedSpecs = map[string]seedSpec{
 		{"github-client-id", "PLATFORMCTL_ARGOCD_DEX_GITHUB_CLIENT_ID", false, false},
 		{"github-client-secret", "PLATFORMCTL_ARGOCD_DEX_GITHUB_CLIENT_SECRET", true, false},
 	}},
+	"grafana-gitsync": {Path: "grafana-gitsync", Fields: []seedField{
+		{"app-id", "PLATFORMCTL_GRAFANA_GITSYNC_APP_ID", false, false},
+		{"installation-id", "PLATFORMCTL_GRAFANA_GITSYNC_INSTALLATION_ID", false, false},
+		{"private-key", "PLATFORMCTL_GRAFANA_GITSYNC_PRIVATE_KEY", true, false},
+	}},
 }
 
 // VaultSeedPhase writes kv secrets for all platform and tenant paths.
