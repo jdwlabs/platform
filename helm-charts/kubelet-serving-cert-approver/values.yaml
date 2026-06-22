@@ -31,10 +31,10 @@ containerSecurityContext:
 resources:
   requests:
     cpu: 10m
-    memory: 16Mi
+    memory: 64Mi
   limits:
     cpu: 250m
-    memory: 32Mi
+    memory: 128Mi
 
 probes:
   # initialDelaySeconds raised from upstream defaults to prevent CrashLoop during
