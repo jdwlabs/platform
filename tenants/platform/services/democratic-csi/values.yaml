@@ -7,10 +7,3 @@ driver:
   existingConfigSecret: democratic-csi-driver-config
 
 storageClasses: []   # StorageClass managed declaratively in postInstall
-
-controller:
-  driver:
-    image: democratic-csi/democratic-csi
-node:
-  driver:
-    image: democratic-csi/democratic-csi
