@@ -1,0 +1,16 @@
+csiDriver:
+  name: "org.democratic-csi.nfs"
+
+# Driver config is supplied as a rendered secret (api key from Vault via ESO),
+# so it is never committed to Git. See postInstall/external-secret.yaml.
+driver:
+  existingConfigSecret: democratic-csi-driver-config
+
+storageClasses: []   # StorageClass managed declaratively in postInstall
+
+controller:
+  driver:
+    image: democratic-csi/democratic-csi
+node:
+  driver:
+    image: democratic-csi/democratic-csi
