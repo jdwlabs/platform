@@ -57,6 +57,9 @@ namespaces:
   - name: kubelet-serving-cert-approver
     quotaTier: platform
     networkPolicy: platform
+  - name: democratic-csi
+    quotaTier: platform
+    networkPolicy: platform
 
 project:
   elevated: true
@@ -77,6 +80,7 @@ project:
     - 'ghcr.io/actions/actions-runner-controller-charts'
     - 'https://charts.ectobit.com'
     - 'ghcr.io/nginx/charts'
+    - 'https://democratic-csi.github.io/charts/'
 
 services:
   # Wave 0: Management plane self-hosting
@@ -140,6 +144,13 @@ services:
     namespace: kube-system
     rawManifests: true
     postInstall: false
+
+  - name: democratic-csi
+    chart: democratic-csi
+    repo: https://democratic-csi.github.io/charts/
+    revision: 0.15.1
+    namespace: democratic-csi
+    postInstall: true
     syncWave: 1
 
   # Wave 2: Platform services
