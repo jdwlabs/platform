@@ -109,3 +109,19 @@ func TestVaultSeedPhase_ArgoCDDexFromEnv(t *testing.T) {
 		t.Fatalf("github-client-secret: got %v", got["github-client-secret"])
 	}
 }
+
+func TestStaticSeedSpecs_TruenasCSI(t *testing.T) {
+	spec, ok := staticSeedSpecs["truenas-csi"]
+	if !ok {
+		t.Fatal("truenas-csi seed spec missing")
+	}
+	if spec.Path != "truenas-csi" {
+		t.Fatalf("path = %q, want truenas-csi", spec.Path)
+	}
+	if len(spec.Fields) != 1 || spec.Fields[0].Name != "api_key" {
+		t.Fatalf("fields = %+v, want single api_key field", spec.Fields)
+	}
+	if spec.Fields[0].EnvVar != "PLATFORMCTL_TRUENAS_CSI_API_KEY" {
+		t.Fatalf("env = %q", spec.Fields[0].EnvVar)
+	}
+}

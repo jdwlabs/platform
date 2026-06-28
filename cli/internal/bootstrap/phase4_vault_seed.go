@@ -69,6 +69,9 @@ var staticSeedSpecs = map[string]seedSpec{
 		{"installation-id", "PLATFORMCTL_GRAFANA_GITSYNC_INSTALLATION_ID", false, false},
 		{"private-key", "PLATFORMCTL_GRAFANA_GITSYNC_PRIVATE_KEY", true, false},
 	}},
+	"truenas-csi": {Path: "truenas-csi", Fields: []seedField{
+		{"api_key", "PLATFORMCTL_TRUENAS_CSI_API_KEY", true, false},
+	}},
 }
 
 // VaultSeedPhase writes kv secrets for all platform and tenant paths.
