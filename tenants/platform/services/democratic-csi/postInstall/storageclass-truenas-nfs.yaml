@@ -1,0 +1,16 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-nfs
+  annotations:
+    # NFS-backed capacity tier on the TrueNAS RAIDZ2 pool (35TiB HDD over 1GbE).
+    # Non-default and Retain: Longhorn remains the default fast tier; this class
+    # is opt-in for bulk and RWX workloads whose data must survive PVC churn.
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: org.democratic-csi.nfs
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  fsType: nfs
+  detachedVolumesFromSnapshots: "false"
