@@ -60,6 +60,9 @@ namespaces:
   - name: democratic-csi
     quotaTier: platform
     networkPolicy: platform
+  - name: ai-sre
+    quotaTier: platform
+    networkPolicy: platform
 
 project:
   elevated: true
@@ -81,6 +84,7 @@ project:
     - 'https://charts.ectobit.com'
     - 'ghcr.io/nginx/charts'
     - 'https://democratic-csi.github.io/charts/'
+    - 'docker.litellm.ai/berriai'
 
 services:
   # Wave 0: Management plane self-hosting
