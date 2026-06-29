@@ -4,6 +4,10 @@ csiDriver:
 # Driver config is supplied as a rendered secret (api key from Vault via ESO),
 # so it is never committed to Git. See postInstall/external-secret.yaml.
 driver:
+  # Set only so the chart's mount helpers select NFS (not iSCSI) host mounts;
+  # the actual driver config comes from existingConfigSecret, not this value.
+  config:
+    driver: freenas-api-nfs
   existingConfigSecret: democratic-csi-driver-config
 
 storageClasses: []   # StorageClass managed declaratively in postInstall
