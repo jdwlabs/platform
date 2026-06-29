@@ -144,6 +144,7 @@ services:
     namespace: kube-system
     rawManifests: true
     postInstall: false
+    syncWave: 1
 
   - name: democratic-csi
     chart: democratic-csi
