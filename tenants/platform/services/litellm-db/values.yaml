@@ -1,0 +1,22 @@
+# Single-instance Postgres for the LiteLLM gateway (keys, budgets, spend log).
+# Mirrors the existing postgresql-cluster-prd pattern (cnpg 'cluster' chart 0.4.0).
+type: postgresql
+mode: standalone
+
+cluster:
+  instances: 1
+  storage:
+    size: 5Gi
+    storageClass: longhorn
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# CNPG auto-creates an 'app' database + 'litellm-db-app' secret with the URI.
+bootstrap:
+  initdb:
+    database: litellm
+    owner: litellm
