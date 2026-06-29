@@ -19,6 +19,18 @@ cluster:
     podAntiAffinityType: required
     topologyKey: kubernetes.io/hostname
 
+  # Without explicit limits the instance pods run BestEffort, so Talos's
+  # cgroup OOM-killer reaps them first whenever a 6Gi worker is squeezed
+  # (e.g. WAL replay during a node roll). Requests/limits promote them to
+  # Burstable — deprioritised for OOM — and let the scheduler reserve their
+  # footprint instead of overpacking a node. 768Mi fits ~3 instances per
+  # worker alongside Longhorn + system overhead.
+  resources:
+    requests:
+      memory: 256Mi
+    limits:
+      memory: 768Mi
+
   initdb:
     postInitSQL:
       - ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON TABLES TO app;
