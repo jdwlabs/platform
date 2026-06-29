@@ -292,11 +292,20 @@ services:
     postInstall: false
     syncWave: 5
 
-  # Wave 4: AI-SRE gateway database
+  # Wave 4: AI-SRE gateway database and cache
   - name: litellm-db
     chart: cluster
     repo: https://cloudnative-pg.github.io/charts
     revision: 0.4.0
     namespace: ai-sre
+    postInstall: false
+    syncWave: 4
+
+  - name: litellm-redis
+    chart: ""
+    repo: ""
+    revision: ""
+    namespace: ai-sre
+    rawManifests: true
     postInstall: false
     syncWave: 4

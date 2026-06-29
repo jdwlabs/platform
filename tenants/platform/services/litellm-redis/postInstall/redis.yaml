@@ -1,0 +1,35 @@
+# Ephemeral Redis for LiteLLM cross-replica routing + response cache.
+# No persistence: routing/cache state is reconstructable; loss is harmless.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm-redis
+  namespace: ai-sre
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: litellm-redis }
+  template:
+    metadata:
+      labels: { app: litellm-redis }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args: ["--save", "", "--appendonly", "no"]
+          ports:
+            - containerPort: 6379
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm-redis
+  namespace: ai-sre
+spec:
+  selector: { app: litellm-redis }
+  ports:
+    - port: 6379
+      targetPort: 6379
