@@ -309,3 +309,12 @@ services:
     rawManifests: true
     postInstall: false
     syncWave: 4
+
+  # Wave 5: AI-SRE LiteLLM gateway (depends on litellm-db wave 4)
+  - name: litellm
+    chart: litellm-helm
+    repo: docker.litellm.ai/berriai
+    revision: 0.1.2
+    namespace: ai-sre
+    postInstall: true
+    syncWave: 5
