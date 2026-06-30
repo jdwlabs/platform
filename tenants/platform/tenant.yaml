@@ -318,3 +318,12 @@ services:
     namespace: ai-sre
     postInstall: true
     syncWave: 5
+
+  # Wave 5: HolmesGPT agent (talks to litellm gateway, same wave; retries until ready)
+  - name: holmes
+    chart: holmes
+    repo: https://robusta-charts.storage.googleapis.com
+    revision: 0.34.0
+    namespace: ai-sre
+    postInstall: true
+    syncWave: 5
