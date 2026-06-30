@@ -1,0 +1,45 @@
+# Provider-agnostic LLM gateway. Backend swap = edit model_list, no client change.
+
+# Use the CNPG-managed litellm-db cluster instead of the chart's bundled Postgres.
+# CNPG generates secret litellm-db-app with keys username/password/host/uri.
+db:
+  deployStandalone: false
+  useExisting: true
+  endpoint: litellm-db-rw.ai-sre.svc.cluster.local
+  database: litellm
+  secret:
+    name: litellm-db-app
+    usernameKey: username
+    passwordKey: password
+
+# Built-in Redis disabled; we use our own ephemeral Redis (litellm-redis service).
+redis:
+  enabled: false
+
+# Injects ANTHROPIC_API_KEY and LITELLM_MASTER_KEY as env vars from Vault-backed ESO secret.
+environmentSecrets:
+  - litellm-secrets
+
+proxy_config:
+  model_list:
+    # Frontier tier — hard root-cause reasoning.
+    - model_name: claude-sonnet
+      litellm_params:
+        model: anthropic/claude-sonnet-4-6
+        api_key: os.environ/ANTHROPIC_API_KEY
+    # Phase 4 adds: local-qwen -> hosted_vllm/... api_base http://<pve5-ip>:8000
+  general_settings:
+    # LITELLM_MASTER_KEY is injected from the litellm-secrets ESO secret above.
+    master_key: os.environ/LITELLM_MASTER_KEY
+    store_model_in_db: true
+  router_settings:
+    redis_host: litellm-redis.ai-sre.svc.cluster.local
+    redis_port: 6379
+  litellm_settings:
+    drop_params: true
+    # Fallbacks: if frontier unavailable, degrade (local tier added Phase 4).
+    num_retries: 2
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { memory: 512Mi }
