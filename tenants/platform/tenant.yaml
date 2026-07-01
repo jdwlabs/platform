@@ -327,3 +327,13 @@ services:
     namespace: ai-sre
     postInstall: true
     syncWave: 5
+
+  # Wave 6: AI-SRE alert relay (webhook target; calls holmes wave 5, litellm wave 5)
+  - name: ai-sre-relay
+    chart: ""
+    repo: ""
+    revision: ""
+    namespace: ai-sre
+    rawManifests: true
+    postInstall: true
+    syncWave: 6
