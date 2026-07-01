@@ -13,13 +13,15 @@ singleBinary:
   resources:
     requests:
       cpu: 500m
-      memory: 2Gi
+      memory: 768Mi
     limits:
-      memory: 4Gi
+      memory: 1.5Gi
   persistence:
     enabled: true
-    storageClassName: "longhorn"
-    size: 20Gi
+    # NFS-backed NAS volume; chunk data lives here now that MinIO is gone.
+    # Sized to cover WAL + index + chunks previously split across two 20Gi PVCs.
+    storageClassName: "truenas-nfs"
+    size: 30Gi
 
 chunksCache:
   enabled: true
@@ -32,20 +34,13 @@ loki:
   commonConfig:
     replication_factor: 1
   storage:
-    type: s3
-    s3:
-      s3ForcePathStyle: true
-      insecure: true
-    bucketNames:
-      chunks: loki-chunks
-      ruler: loki-ruler
-      admin: loki-admin
+    type: filesystem
 
   schemaConfig:
     configs:
       - from: "2024-04-01"
         store: tsdb
-        object_store: s3
+        object_store: filesystem
         schema: v13
         index:
           prefix: loki_index_
@@ -77,14 +72,4 @@ monitoring:
     enabled: true
 
 minio:
-  enabled: true
-  resources:
-    requests:
-      cpu: 100m
-      memory: 512Mi
-    limits:
-      memory: 1Gi
-  persistence:
-    enabled: true
-    storageClassName: "longhorn"
-    size: 20Gi
+  enabled: false
