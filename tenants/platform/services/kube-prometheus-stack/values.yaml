@@ -15,16 +15,9 @@ prometheus:
     # volume fills; retention (time) and retentionSize (bytes) together bound
     # long-run TSDB growth and the RSS that tracks it.
     retentionSize: "20GB"
-    # Without requests Prometheus is BestEffort and the kubelet reaps it under
-    # node memory pressure mid-WAL-replay on the smaller workers. A 3Gi request
-    # makes it Burstable and large enough that the scheduler only fits it on a
-    # node with real headroom. No memory limit: replay transiently exceeds
-    # steady-state RSS and a hard limit would cgroup-OOM it; retention and
-    # retentionSize bound long-run growth instead.
-    resources:
-      requests:
-        cpu: 500m
-        memory: 3Gi
+    # 60s: halve ingested samples vs 30s default; head block and WAL scale with scrape rate
+    scrapeInterval: "60s"
+    evaluationInterval: "60s"
     storageSpec:
       volumeClaimTemplate:
         spec:
@@ -37,6 +30,50 @@ prometheus:
     podMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
     probeSelectorNilUsesHelmValues: false
+    # Peaked at ~2.9Gi with no limits; explicit bounds stop the request from
+    # crowding smaller workers. Replaces the earlier 3Gi-request/no-limit shape:
+    # WAL-replay spikes shrink with the 60s scrape + cardinality drops above,
+    # so a 2Gi ceiling now clears replay. Revisit if replay OOMs recur.
+    resources:
+      requests:
+        memory: 1Gi
+        cpu: 250m
+      limits:
+        memory: 2Gi
+        cpu: "1"
+
+kubelet:
+  serviceMonitor:
+    # Overrides chart defaults (must include all originals); appends TCP/UDP drops not in defaults
+    # (high cardinality: state x container x interface, not referenced in any dashboard)
+    cAdvisorMetricRelabelings:
+      - sourceLabels: [__name__]
+        action: drop
+        regex: 'container_cpu_(cfs_throttled_seconds_total|load_average_10s|system_seconds_total|user_seconds_total)'
+      - sourceLabels: [__name__]
+        action: drop
+        regex: 'container_fs_(io_current|io_time_seconds_total|io_time_weighted_seconds_total|reads_merged_total|sector_reads_total|sector_writes_total|writes_merged_total)'
+      - sourceLabels: [__name__]
+        action: drop
+        regex: 'container_memory_(mapped_file|swap)'
+      - sourceLabels: [__name__]
+        action: drop
+        regex: 'container_(file_descriptors|tasks_state|threads_max)'
+      - sourceLabels: [__name__, scope]
+        action: drop
+        regex: 'container_memory_failures_total;hierarchy'
+      - sourceLabels: [__name__, interface]
+        action: drop
+        regex: 'container_network_.*;(cali|cilium|cni|lxc|nodelocaldns|tunl).*'
+      - sourceLabels: [__name__]
+        action: drop
+        regex: 'container_spec.*'
+      - sourceLabels: [id, pod]
+        action: drop
+        regex: '.+;'
+      - sourceLabels: [__name__]
+        action: drop
+        regex: 'container_network_(tcp|udp)_usage_total'
 
 alertmanager:
   enabled: true
