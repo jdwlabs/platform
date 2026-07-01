@@ -1,0 +1,55 @@
+# Webhook relay: bridges Alertmanager to HolmesGPT so every firing alert triggers
+# an AI investigation via LiteLLM. Stateless; no persistent storage required.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-sre-relay
+  namespace: ai-sre
+  labels: { app: ai-sre-relay }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: ai-sre-relay }
+  template:
+    metadata:
+      labels: { app: ai-sre-relay }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: relay
+          # Reconcile this tag with the actual semver published by apps CI before deploying.
+          image: jdwlabs/ai-sre-relay:0.1.0
+          ports:
+            - { name: http, containerPort: 8080 }
+          envFrom:
+            - secretRef: { name: ai-sre-relay }
+          env:
+            - { name: HOLMES_URL, value: "http://holmes-holmes.ai-sre.svc.cluster.local" }
+            - { name: LITELLM_URL, value: "http://litellm.ai-sre.svc.cluster.local:4000/v1" }
+            - { name: LITELLM_MODEL, value: "claude-sonnet" }
+            - { name: JIRA_PROJECT, value: "JDWLABS" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-sre-relay
+  namespace: ai-sre
+spec:
+  selector: { app: ai-sre-relay }
+  ports:
+    - { name: http, port: 8080, targetPort: http }
