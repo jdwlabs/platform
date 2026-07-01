@@ -335,5 +335,5 @@ services:
     revision: ""
     namespace: ai-sre
     rawManifests: true
-    postInstall: true
+    postInstall: false
     syncWave: 6
