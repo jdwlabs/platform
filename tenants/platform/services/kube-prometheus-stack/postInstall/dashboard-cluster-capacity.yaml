@@ -641,7 +641,7 @@ data:
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
               "editorMode": "code",
-              "expr": "sum by(node) (container_memory_working_set_bytes{container!=\"\"}) and on(node) (kube_node_labels{label_node_role_kubernetes_io_control_plane=\"\"} or kube_node_labels{label_node_role_kubernetes_io_master=\"\"})",
+              "expr": "sum by(node) (container_memory_working_set_bytes{container!=\"\"}) and on(node) kube_node_role{role=\"control-plane\"}",
               "legendFormat": "{{node}} used",
               "range": true,
               "refId": "A"
@@ -649,7 +649,7 @@ data:
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
               "editorMode": "code",
-              "expr": "kube_node_status_allocatable{resource=\"memory\"} and on(node) (kube_node_labels{label_node_role_kubernetes_io_control_plane=\"\"} or kube_node_labels{label_node_role_kubernetes_io_master=\"\"})",
+              "expr": "kube_node_status_allocatable{resource=\"memory\"} and on(node) kube_node_role{role=\"control-plane\"}",
               "legendFormat": "Allocatable",
               "range": true,
               "refId": "B"
