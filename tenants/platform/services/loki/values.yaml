@@ -20,7 +20,7 @@ singleBinary:
     enabled: true
     # NFS-backed NAS volume; chunk data lives here now that MinIO is gone.
     # Sized to cover WAL + index + chunks previously split across two 20Gi PVCs.
-    storageClassName: "truenas-nfs"
+    storageClass: "truenas-nfs"
     size: 30Gi
 
 chunksCache:
