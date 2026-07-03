@@ -12,7 +12,7 @@ modelList:
   claude-sonnet:
     model: openai/claude-sonnet      # 'openai/' = OpenAI-compatible client; LiteLLM routes to Claude
     api_base: http://litellm.ai-sre.svc.cluster.local:4000/v1
-    api_key: "{{ env.OPENAI_API_KEY }}"
+    api_key: "{{env.OPENAI_API_KEY}}"
     temperature: 0
 
 # v1: read-only investigation toolsets only (Global Constraint: no delete/edit/reset).

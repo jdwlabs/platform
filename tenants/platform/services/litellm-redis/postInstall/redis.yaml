@@ -8,10 +8,10 @@ metadata:
 spec:
   replicas: 1
   selector:
-    matchLabels: { app: litellm-redis }
+    matchLabels: {app: litellm-redis}
   template:
     metadata:
-      labels: { app: litellm-redis }
+      labels: {app: litellm-redis}
     spec:
       containers:
         - name: redis
@@ -20,8 +20,8 @@ spec:
           ports:
             - containerPort: 6379
           resources:
-            requests: { cpu: 25m, memory: 64Mi }
-            limits: { memory: 128Mi }
+            requests: {cpu: 25m, memory: 64Mi}
+            limits: {memory: 128Mi}
 ---
 apiVersion: v1
 kind: Service
@@ -29,7 +29,7 @@ metadata:
   name: litellm-redis
   namespace: ai-sre
 spec:
-  selector: { app: litellm-redis }
+  selector: {app: litellm-redis}
   ports:
     - port: 6379
       targetPort: 6379
