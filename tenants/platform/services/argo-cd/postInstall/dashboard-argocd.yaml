@@ -1578,7 +1578,7 @@ data:
               "pointradius": 5,
               "targets": [
                 {
-                  "expr": "irate(process_cpu_seconds_total{job=\"argocd-metrics\",namespace=~\"$namespace\"}[1m])",
+                  "expr": "rate(process_cpu_seconds_total{job=\"argocd-metrics\",namespace=~\"$namespace\"}[$__rate_interval])",
                   "format": "time_series",
                   "intervalFactor": 1,
                   "legendFormat": "{{namespace}}",
