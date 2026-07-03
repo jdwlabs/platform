@@ -310,11 +310,14 @@ services:
     postInstall: false
     syncWave: 4
 
-  # Wave 5: AI-SRE LiteLLM gateway (depends on litellm-db wave 4)
+  # Wave 5: AI-SRE LiteLLM gateway (depends on litellm-db wave 4).
+  # Vendored chart: upstream hardcodes a purged bitnami image in the db-ready
+  # init container — see helm-charts/litellm-helm/README.md.
   - name: litellm
-    chart: litellm-helm
-    repo: docker.litellm.ai/berriai
-    revision: 0.1.2
+    chart: ""
+    chartPath: helm-charts/litellm-helm
+    repo: https://github.com/jdwlabs/platform.git
+    revision: main
     namespace: ai-sre
     postInstall: true
     syncWave: 5
