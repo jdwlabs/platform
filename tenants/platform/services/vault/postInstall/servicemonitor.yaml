@@ -8,6 +8,11 @@ spec:
     matchLabels:
       app.kubernetes.io/name: vault
       app.kubernetes.io/instance: platform-vault
+    # The headless platform-vault-internal service carries the same labels,
+    # which double-scraped the single vault pod; keep only the public service.
+    matchExpressions:
+      - key: vault-internal
+        operator: DoesNotExist
   namespaceSelector:
     matchNames:
       - vault
