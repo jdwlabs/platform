@@ -613,7 +613,7 @@ data:
           },
           "targets": [
             {
-              "expr": "sum(irate(log_messages_total[1m])) by (level)",
+              "expr": "sum(rate(log_messages_total[$__rate_interval])) by (level)",
               "interval": "",
               "legendFormat": "{{ level }}",
               "refId": "A"
