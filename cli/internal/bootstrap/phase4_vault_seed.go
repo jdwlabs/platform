@@ -72,6 +72,17 @@ var staticSeedSpecs = map[string]seedSpec{
 	"truenas-csi": {Path: "truenas-csi", Fields: []seedField{
 		{"api_key", "PLATFORMCTL_TRUENAS_CSI_API_KEY", true, false},
 	}},
+	// Shared by the holmes and ai-sre-relay ExternalSecrets. litellm_key is
+	// optional: it is normally seeded alongside the litellm service, and merge
+	// semantics in Apply keep it intact when only the relay creds are seeded.
+	"holmes": {Path: "holmes", Fields: []seedField{
+		{"litellm_key", "PLATFORMCTL_HOLMES_LITELLM_KEY", true, true},
+		{"discord_webhook_url", "PLATFORMCTL_HOLMES_DISCORD_WEBHOOK", true, false},
+		{"jira_url", "PLATFORMCTL_HOLMES_JIRA_URL", false, false},
+		{"jira_email", "PLATFORMCTL_HOLMES_JIRA_EMAIL", false, false},
+		{"jira_api_token", "PLATFORMCTL_HOLMES_JIRA_API_TOKEN", true, false},
+		{"github_token", "PLATFORMCTL_HOLMES_GITHUB_TOKEN", true, false},
+	}},
 }
 
 // VaultSeedPhase writes kv secrets for all platform and tenant paths.
@@ -143,6 +154,16 @@ func (p *VaultSeedPhase) Apply(ctx context.Context) error {
 		}
 		if len(values) == 0 {
 			continue // all optional fields absent — skip this path
+		}
+		// KV-v2 Put replaces the whole secret; merge over any existing fields
+		// so partial re-seeds (e.g. adding relay creds to an already-seeded
+		// path) don't wipe fields owned by other services.
+		if existing, err := c.GetKV(ctx, p.mount, spec.Path); err == nil {
+			for k, v := range existing {
+				if _, set := values[k]; !set {
+					values[k] = v
+				}
+			}
 		}
 		if err := c.PutKV(ctx, p.mount, spec.Path, values); err != nil {
 			return fmt.Errorf("put kv %s: %w", spec.Path, err)

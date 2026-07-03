@@ -125,3 +125,63 @@ func TestStaticSeedSpecs_TruenasCSI(t *testing.T) {
 		t.Fatalf("env = %q", spec.Fields[0].EnvVar)
 	}
 }
+
+func TestStaticSeedSpecs_Holmes(t *testing.T) {
+	spec, ok := staticSeedSpecs["holmes"]
+	if !ok {
+		t.Fatal("holmes seed spec missing")
+	}
+	if spec.Path != "holmes" {
+		t.Fatalf("path = %q, want holmes", spec.Path)
+	}
+	want := map[string]string{
+		"litellm_key":         "PLATFORMCTL_HOLMES_LITELLM_KEY",
+		"discord_webhook_url": "PLATFORMCTL_HOLMES_DISCORD_WEBHOOK",
+		"jira_url":            "PLATFORMCTL_HOLMES_JIRA_URL",
+		"jira_email":          "PLATFORMCTL_HOLMES_JIRA_EMAIL",
+		"jira_api_token":      "PLATFORMCTL_HOLMES_JIRA_API_TOKEN",
+		"github_token":        "PLATFORMCTL_HOLMES_GITHUB_TOKEN",
+	}
+	got := map[string]string{}
+	for _, f := range spec.Fields {
+		got[f.Name] = f.EnvVar
+	}
+	for name, env := range want {
+		if got[name] != env {
+			t.Fatalf("field %s env = %q, want %q (all: %v)", name, got[name], env, got)
+		}
+	}
+}
+
+func TestVaultSeedPhase_MergePreservesExistingFields(t *testing.T) {
+	srv, c := mockVaultKV(t)
+	// Pre-existing field seeded outside this spec run must survive a re-seed.
+	if err := c.PutKV(context.Background(), "secret", "holmes", map[string]any{
+		"litellm_key": "sk-existing",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PLATFORMCTL_HOLMES_DISCORD_WEBHOOK", "https://discord.example/hook")
+	t.Setenv("PLATFORMCTL_HOLMES_JIRA_URL", "https://jdwlabs.atlassian.net")
+	t.Setenv("PLATFORMCTL_HOLMES_JIRA_EMAIL", "ops@example.com")
+	t.Setenv("PLATFORMCTL_HOLMES_JIRA_API_TOKEN", "jira-tok")
+	t.Setenv("PLATFORMCTL_HOLMES_GITHUB_TOKEN", "gh-tok")
+
+	p := NewVaultSeedPhase(NewVaultAddrResolver(srv.URL, nil, nil), true, "secret", nil, []string{"holmes"})
+	if err := p.Apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	got, err := c.GetKV(context.Background(), "secret", "holmes")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got["litellm_key"] != "sk-existing" {
+		t.Fatalf("litellm_key clobbered: %v", got)
+	}
+	if got["discord_webhook_url"] != "https://discord.example/hook" {
+		t.Fatalf("discord_webhook_url: %v", got)
+	}
+	if got["github_token"] != "gh-tok" {
+		t.Fatalf("github_token: %v", got)
+	}
+}

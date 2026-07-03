@@ -417,9 +417,11 @@ func newBootstrapSeedCmd(g *Globals) *cobra.Command {
 		Short: "Seed Vault kv paths, bypassing phase detection",
 		Long: `Seed one or more Vault kv paths directly. Useful for seeding optional paths
 that were skipped during bootstrap, or re-seeding after field name corrections.
-With no arguments, all specs are seeded. Spec keys match tenant names and static
-paths: porkbun, grafana, longhorn, alertmanager, usersrole, <tenant>-github-app,
-<tenant>-ai-keys, <tenant>-discord-bot-token.`,
+Values merge over any existing fields at the path, so a partial re-seed never
+wipes fields owned by other services. With no arguments, all specs are seeded.
+Spec keys match tenant names and static paths: porkbun, grafana, longhorn,
+alertmanager, usersrole, argocd-dex, grafana-gitsync, truenas-csi, holmes,
+<tenant>-github-app, <tenant>-ai-keys, <tenant>-discord-bot-token.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			em := NewEmitter(os.Stdout, g.JSON)
