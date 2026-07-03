@@ -11,6 +11,11 @@ db:
     name: litellm-db-app
     usernameKey: username
     passwordKey: password
+  # Chart default docker.io/bitnami/postgresql:<pinned> no longer resolves --
+  # Bitnami purged versioned tags from the bitnami org; the same tag lives on
+  # in bitnamilegacy. Only used by the db-ready wait init container.
+  dbReadyImage: docker.io/bitnamilegacy/postgresql
+  dbReadyTag: "16.1.0-debian-11-r20"
 
 # Built-in Redis disabled; we use our own ephemeral Redis (litellm-redis service).
 redis:
