@@ -314,7 +314,7 @@ services:
   - name: litellm
     chart: litellm-helm
     repo: docker.litellm.ai/berriai
-    revision: 0.1.2
+    revision: 1.90.2
     namespace: ai-sre
     postInstall: true
     syncWave: 5
