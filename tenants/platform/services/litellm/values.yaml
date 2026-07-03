@@ -1,14 +1,14 @@
 # Provider-agnostic LLM gateway. Backend swap = edit model_list, no client change.
 
 # Use the CNPG-managed litellm-db cluster instead of the chart's bundled Postgres.
-# CNPG generates secret litellm-db-app with keys username/password/host/uri.
+# CNPG generates secret platform-litellm-db-cluster-app with keys username/password/host/uri.
 db:
   deployStandalone: false
   useExisting: true
-  endpoint: litellm-db-rw.ai-sre.svc.cluster.local
+  endpoint: platform-litellm-db-cluster-rw.ai-sre.svc.cluster.local
   database: litellm
   secret:
-    name: litellm-db-app
+    name: platform-litellm-db-cluster-app
     usernameKey: username
     passwordKey: password
   # Chart default docker.io/bitnami/postgresql:<pinned> no longer resolves --
