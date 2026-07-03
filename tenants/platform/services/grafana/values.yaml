@@ -1,4 +1,16 @@
 revisionHistoryLimit: 0
+# Prefer the large pve5 worker (labeled workload.jdwlabs.io/monitoring) so
+# the memory-heavy monitoring stack stays off the small general workers.
+# Soft preference: everything still schedules anywhere if that node is down.
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+            - key: workload.jdwlabs.io/monitoring
+              operator: In
+              values: ["true"]
 
 # Single replica on a ReadWriteOnce PVC: RollingUpdate deadlocks because the
 # new pod can't attach the volume until the old one is deleted. Recreate stops
