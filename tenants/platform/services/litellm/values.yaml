@@ -27,7 +27,7 @@ proxy_config:
       litellm_params:
         model: anthropic/claude-sonnet-4-6
         api_key: os.environ/ANTHROPIC_API_KEY
-    # Phase 4 adds: local-qwen -> hosted_vllm/... api_base http://<pve5-ip>:8000
+  # Phase 4 adds: local-qwen -> hosted_vllm/... api_base http://<pve5-ip>:8000
   general_settings:
     # LITELLM_MASTER_KEY is injected from the litellm-secrets ESO secret above.
     master_key: os.environ/LITELLM_MASTER_KEY
@@ -41,5 +41,5 @@ proxy_config:
     num_retries: 2
 
 resources:
-  requests: { cpu: 100m, memory: 256Mi }
-  limits: { memory: 512Mi }
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {memory: 512Mi}
