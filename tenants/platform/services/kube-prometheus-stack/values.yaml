@@ -9,6 +9,18 @@ prometheusOperator:
 
 prometheus:
   prometheusSpec:
+    # Prefer the large pve5 worker (labeled workload.jdwlabs.io/monitoring) so
+    # the memory-heavy monitoring stack stays off the small general workers.
+    # Soft preference: everything still schedules anywhere if that node is down.
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: workload.jdwlabs.io/monitoring
+                  operator: In
+                  values: ["true"]
     enableRemoteWriteReceiver: true
     retention: 15d
     # Kept below the 25Gi PVC (~26.8GB) so the size-based GC trips before the

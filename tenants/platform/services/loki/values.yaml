@@ -9,6 +9,18 @@ backend:
 
 singleBinary:
   replicas: 1
+  # Prefer the large pve5 worker (labeled workload.jdwlabs.io/monitoring) so
+  # the memory-heavy monitoring stack stays off the small general workers.
+  # Soft preference: everything still schedules anywhere if that node is down.
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: workload.jdwlabs.io/monitoring
+                operator: In
+                values: ["true"]
   priorityClassName: platform-critical
   resources:
     requests:
@@ -25,6 +37,18 @@ singleBinary:
 
 chunksCache:
   enabled: true
+  # Prefer the large pve5 worker (labeled workload.jdwlabs.io/monitoring) so
+  # the memory-heavy monitoring stack stays off the small general workers.
+  # Soft preference: everything still schedules anywhere if that node is down.
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: workload.jdwlabs.io/monitoring
+                operator: In
+                values: ["true"]
   allocatedMemory: 512   # MB
   maxItemMemory: 5
   replicas: 1
