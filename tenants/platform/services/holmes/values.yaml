@@ -7,6 +7,12 @@ additionalEnvVars:
         key: OPENAI_API_KEY
   - name: OPENAI_API_BASE
     value: "http://platform-litellm.ai-sre.svc.cluster.local:4000/v1"
+  # Holmes wraps every tool exec in `ulimit -v`. Go binaries (talosctl)
+  # reserve >800MB of virtual address space at startup regardless of real
+  # usage, so the x86 default of 800 kills them instantly with a fake OOM.
+  # 2048 gives Go runtime headroom while still bounding runaway tools.
+  - name: TOOL_MEMORY_LIMIT_MB
+    value: "2048"
 
 modelList:
   sre-investigator:
