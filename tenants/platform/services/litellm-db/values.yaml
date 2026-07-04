@@ -15,8 +15,6 @@ cluster:
     limits:
       memory: 512Mi
 
-# CNPG auto-creates an 'app' database + 'litellm-db-app' secret with the URI.
-bootstrap:
-  initdb:
-    database: litellm
-    owner: litellm
+# The chart bootstraps its default 'app' database + owner and generates the
+# platform-litellm-db-cluster-app secret. A top-level bootstrap: block is a
+# dead key here — initdb config would belong under cluster.initdb.
