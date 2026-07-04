@@ -174,6 +174,7 @@ func TestStaticSeedSpecs_Litellm(t *testing.T) {
 		"master_key":         "PLATFORMCTL_LITELLM_MASTER_KEY",
 		"anthropic_api_key":  "PLATFORMCTL_LITELLM_ANTHROPIC_API_KEY",
 		"openrouter_api_key": "PLATFORMCTL_LITELLM_OPENROUTER_API_KEY",
+		"nvidia_api_key":     "PLATFORMCTL_LITELLM_NVIDIA_API_KEY",
 	}
 	got := map[string]string{}
 	for _, f := range spec.Fields {

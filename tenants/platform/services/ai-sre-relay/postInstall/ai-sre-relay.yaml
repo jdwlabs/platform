@@ -27,7 +27,7 @@ spec:
           env:
             - {name: HOLMES_URL, value: "http://platform-holmes-holmes.ai-sre.svc.cluster.local"}
             - {name: LITELLM_URL, value: "http://platform-litellm.ai-sre.svc.cluster.local:4000/v1"}
-            - {name: LITELLM_MODEL, value: "claude-sonnet"}
+            - {name: LITELLM_MODEL, value: "sre-investigator"}
             - {name: JIRA_PROJECT, value: "JDWLABS"}
           readinessProbe:
             httpGet: {path: /healthz, port: http}
