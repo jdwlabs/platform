@@ -133,12 +133,24 @@ customSkills:
       technically survived.
 
       ## Suggested fix (human-applied)
-      Hard power-cycle the wedged control-plane node(s) in Proxmox, ONE AT A
-      TIME while quorum holds. talosctl reboot hangs here because its drain
-      needs the down API, and Talos does not support restarting etcd alone.
-      A peer stuck on the stale endpoint (or "wal: file already locked")
-      needs its own hard reset to refresh peer URLs. Durable fix: static
-      IPs / DHCP reservations for all control-plane nodes.
+      While quorum still holds and only the moved member is out (it logs
+      "failed to publish local member to cluster through raft" every 15s),
+      the surgical, zero-downtime fix is an etcd member update committed by
+      the healthy quorum — a reboot of the moved node does NOT refresh its
+      recorded peer URL:
+      1. Snapshot first: talosctl -n <healthy-cp> etcd snapshot backup.db
+      2. talosctl exposes no member-update; extract the etcd CA from the
+         EtcdRootSecret Talos resource (os:admin), mint a short-lived
+         client cert, and run against a HEALTHY member:
+         etcdctl member update <member-id> --peer-urls=https://<new-ip>:2380
+      The moved member rejoins raft within seconds; no wipe, no reboot, no
+      Longhorn replica rebuild.
+      Only when the API/quorum is fully down: hard power-cycle the wedged
+      control-plane node(s) in Proxmox, ONE AT A TIME. talosctl reboot
+      hangs there because its drain needs the down API, and Talos cannot
+      restart etcd alone. A peer stuck on a stale endpoint (or "wal: file
+      already locked") needs its own hard reset. Durable fix: static IPs /
+      DHCP reservations for all control-plane nodes.
 
   hugepages-oom:
     content: |
