@@ -9,8 +9,8 @@ additionalEnvVars:
     value: "http://platform-litellm.ai-sre.svc.cluster.local:4000/v1"
 
 modelList:
-  claude-sonnet:
-    model: openai/claude-sonnet      # 'openai/' = OpenAI-compatible client; LiteLLM routes to Claude
+  sre-investigator:
+    model: openai/sre-investigator   # 'openai/' = OpenAI-compatible client; LiteLLM picks the backend
     api_base: http://platform-litellm.ai-sre.svc.cluster.local:4000/v1
     api_key: "{{env.OPENAI_API_KEY}}"
     temperature: 0

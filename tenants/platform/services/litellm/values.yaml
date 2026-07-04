@@ -29,16 +29,29 @@ environmentSecrets:
 
 proxy_config:
   model_list:
-    # Frontier tier — hard root-cause reasoning. Routed through OpenRouter:
-    # the direct Anthropic key has no API credits (subscription plan only).
-    - model_name: claude-sonnet
+    # Zero-cost tier only — no paid API credits on any provider. Alias is
+    # role-named so backend swaps (Phase 4 local vLLM) never touch clients.
+    # All three backends verified for tool calling, which Holmes requires.
+    # OpenRouter :free = 50 req/day at $0 balance (1000/day once $10 lifetime
+    # credit purchased); NIM direct is a separate free quota pool.
+    - model_name: sre-investigator
       litellm_params:
-        model: openrouter/anthropic/claude-sonnet-4.6
+        model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
         api_key: os.environ/OPENROUTER_API_KEY
-        # Holmes asks for 64k output tokens; OpenRouter reserves credits for
-        # the full max_tokens per request. 16k is ample for root-cause prose.
+        # Holmes asks for 64k output tokens; some providers reserve quota for
+        # the full max_tokens per request. 16k is ample for RCA prose.
         max_tokens: 16384
-  # Phase 4 adds: local-qwen -> hosted_vllm/... api_base http://<pve5-ip>:8000
+    - model_name: sre-investigator-fb1
+      litellm_params:
+        model: openrouter/openai/gpt-oss-120b:free
+        api_key: os.environ/OPENROUTER_API_KEY
+        max_tokens: 16384
+    - model_name: sre-investigator-fb2
+      litellm_params:
+        model: nvidia_nim/nvidia/nemotron-3-super-120b-a12b
+        api_key: os.environ/NVIDIA_NIM_API_KEY
+        max_tokens: 16384
+  # Phase 4 adds: local vLLM tier -> hosted_vllm/... api_base http://<pve5-ip>:8000
   general_settings:
     # LITELLM_MASTER_KEY is injected from the litellm-secrets ESO secret above.
     master_key: os.environ/LITELLM_MASTER_KEY
@@ -46,9 +59,12 @@ proxy_config:
   router_settings:
     redis_host: litellm-redis.ai-sre.svc.cluster.local
     redis_port: 6379
+    # Free endpoints rate-limit and brown-out; degrade across quota pools
+    # before failing an investigation.
+    fallbacks:
+      - sre-investigator: ["sre-investigator-fb1", "sre-investigator-fb2"]
   litellm_settings:
     drop_params: true
-    # Fallbacks: if frontier unavailable, degrade (local tier added Phase 4).
     num_retries: 2
 
 # 2Gi: boot spike (Prisma engine + proxy import) OOMKilled the container at
