@@ -25,8 +25,8 @@ spec:
           envFrom:
             - secretRef: {name: ai-sre-relay}
           env:
-            - {name: HOLMES_URL, value: "http://holmes-holmes.ai-sre.svc.cluster.local"}
-            - {name: LITELLM_URL, value: "http://litellm.ai-sre.svc.cluster.local:4000/v1"}
+            - {name: HOLMES_URL, value: "http://platform-holmes-holmes.ai-sre.svc.cluster.local"}
+            - {name: LITELLM_URL, value: "http://platform-litellm.ai-sre.svc.cluster.local:4000/v1"}
             - {name: LITELLM_MODEL, value: "claude-sonnet"}
             - {name: JIRA_PROJECT, value: "JDWLABS"}
           readinessProbe:
