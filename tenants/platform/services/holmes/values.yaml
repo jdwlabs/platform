@@ -25,7 +25,7 @@ toolsets:
     enabled: true
     config:
       prometheus_url: http://platform-kube-prometheus-s-prometheus.monitoring.svc.cluster.local:9090
-  # 'skills' stays enabled — Phase 3 mounts .remember runbooks as custom skills.
+  # 'skills' stays enabled — customSkills below load the infra runbooks.
   skills:
     enabled: true
   # Disabled for v1: 'bash' can run mutating commands (violates read-only),
@@ -39,6 +39,137 @@ toolsets:
     enabled: false
   connectivity_check:
     enabled: false
+
+# Incident runbooks distilled from real cluster faults. The chart projects each
+# entry to /etc/holmes/skills/<name>/SKILL.md and appends the mount path to
+# CUSTOM_SKILL_PATHS automatically. Every fix is human-applied or a GitOps PR —
+# the agent recommends, never executes mutations.
+customSkills:
+  vxlan-blackhole:
+    content: |
+      ---
+      description: Cross-node pod traffic silently dropped while same-node traffic works (Flannel VXLAN overlay blackhole)
+      ---
+      # Runbook: VXLAN cross-node overlay blackhole
+
+      ## Symptoms
+      One worker's pod subnet (10.244.<n>.0/24) blackholes traffic to/from
+      other nodes. Pods on the bad node time out to the CoreDNS VIP
+      (10.96.0.10), to storage replicas on peer nodes, and to external
+      registries. Same-node traffic keeps working. Cluster-wide symptoms:
+      DNS timeouts, Longhorn replica rebuild cascades, slow ArgoCD reconcile.
+
+      ## Diagnose
+      1. kubernetes/core — map failing pods to nodes; confirm failures are
+         cross-node only (same-node pairs unaffected).
+      2. kubernetes/logs — CoreDNS and affected workloads show i/o timeouts,
+         not NXDOMAIN or refused.
+      3. prometheus/metrics — node network error counters on the suspect node.
+      4. If a talos toolset is available: talos_dmesg on the suspect node for
+         flannel/VXLAN tx-checksum errors.
+
+      ## Deceptive signals
+      - Node reports Ready=True throughout.
+      - Restarting the node's kube-flannel pod does NOT fix it — peers
+        re-learn cleanly but timeouts persist (stale VXLAN FDB/neighbor
+        entries live on PEER nodes, not the bad node).
+      - BestEffort pods OOM-killed with cni0/veth churn looks identical at
+        first glance — rule out the hugepages-oom runbook before concluding
+        overlay fault.
+      - A control-plane IP flip (etcd-ip-flip runbook) can also masquerade as
+        a recurring cross-node fault; check node IPs against history.
+
+      ## Root cause (historical)
+      Flannel VXLAN offload corruption / stale VTEP entries on peer nodes.
+      NOT a memory issue.
+
+      ## Suggested fix (human-applied)
+      Drain and reboot the affected node to force overlay re-convergence.
+      Durable mitigation: the vxlan-offload-fix service (already deployed).
+
+  etcd-ip-flip:
+    content: |
+      ---
+      description: Full kube-API outage from etcd peer mesh breaking after a control-plane node's DHCP IP changed
+      ---
+      # Runbook: etcd quorum loss from control-plane IP flip
+
+      ## Symptoms
+      Whole kube API times out (TLS handshake timeout) or linearized reads
+      take 5-22s. apiserver /livez reports "[-]etcd failed" on every node.
+      etcd raft term climbs rapidly (election storm); peer connections flap
+      with "broken pipe" / "no route to host".
+
+      ## Diagnose
+      1. Re-derive node-to-IP mapping LIVE (kubernetes/core: get nodes -o
+         wide) — never trust cached IPs; control-plane nodes have no static
+         leases and their IPs move.
+      2. If a talos toolset is available: talos_etcd_members — compare each
+         member's peer URLs against the node's current IP. A member being
+         dialed at a dead address is the smoking gun.
+      3. kubectl get --raw=/livez?verbose — isolates etcd as the sole
+         failing apiserver check.
+      4. A member whose local etcd service is unhealthy with "context
+         deadline exceeded" has its ReadIndex to the leader timing out.
+
+      ## Root cause (historical)
+      A control-plane node's DHCP lease flipped its IP; etcd peers kept
+      dialing the old address, breaking raft consensus while quorum
+      technically survived.
+
+      ## Suggested fix (human-applied)
+      Hard power-cycle the wedged control-plane node(s) in Proxmox, ONE AT A
+      TIME while quorum holds. talosctl reboot hangs here because its drain
+      needs the down API, and Talos does not support restarting etcd alone.
+      A peer stuck on the stale endpoint (or "wal: file already locked")
+      needs its own hard reset to refresh peer URLs. Durable fix: static
+      IPs / DHCP reservations for all control-plane nodes.
+
+  hugepages-oom:
+    content: |
+      ---
+      description: BestEffort pods OOM-killed (exit 137) despite free node memory — stranded hugepages reservation shrank allocatable
+      ---
+      # Runbook: BestEffort OOM from stranded hugepages
+
+      ## Symptoms
+      BestEffort pods (external-secrets, cert-manager-cainjector,
+      nginx-gateway, etc.) SIGKILLed with exit 137 and crash-looping while
+      the node looks healthy. Knock-on: ExternalSecrets never resolve, and
+      pods with memory requests go Pending with "Insufficient memory" on
+      nodes that appear to have room.
+
+      ## Diagnose
+      1. kubernetes/core — describe the node: compare capacity vs
+         allocatable memory; look for a hugepages-2Mi reservation that no
+         pod requests.
+      2. prometheus/metrics — node_memory_HugePages_* series: Total high,
+         Free equal to Total means the reservation is stranded.
+      3. If a talos toolset is available: talos_dmesg | grep -i oom — Talos'
+         userspace OOMController logging kills under kubepods/besteffort
+         confirms it.
+
+      ## Deceptive signals
+      - kubelet reports MemoryPressure=False (Talos OOMs before kubelet
+        eviction thresholds trip) and the node stays Ready=True.
+      - cni0/veth churn and SandboxChanged events from the crash-looping
+        pods mimic a CNI/VXLAN overlay fault — confirm OOMController kills
+        in dmesg before assuming the vxlan-blackhole runbook.
+
+      ## Root cause (historical)
+      Workers reserved 2Gi of hugepages via sysctl vm.nr_hugepages with no
+      consumer, cutting allocatable ~2Gi; the OOM controller then killed
+      BestEffort pods under load.
+
+      ## Suggested fix (GitOps PR, human-applied)
+      Remove the hugepages sysctl from the Talos worker machine config, set
+      vm.nr_hugepages back to 0 via a no-reboot patch (absence alone does
+      not reset the kernel), then restart kubelet per worker — kubelet only
+      re-reads hugepage capacity on restart. If a workload genuinely needs
+      hugepages later, wire it end-to-end: sysctl + application hugepage
+      setting + matching hugepages-2Mi pod requests, never an orphaned node
+      reservation. Caveat: freeing memory lets many pods start at once and
+      can tip an overcommitted control-plane node into OOM-thrash.
 
 # false = chart provisions the read-only ClusterRole (get/list/watch) AND keeps
 # the kubernetes/core+logs toolsets. true means "BYO RBAC": it strips those
