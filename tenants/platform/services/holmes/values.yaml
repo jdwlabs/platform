@@ -28,6 +28,21 @@ toolsets:
   # 'skills' stays enabled — customSkills below load the infra runbooks.
   skills:
     enabled: true
+  # Read-only Talos node access. Capability is bounded by the mounted
+  # talosconfig (os:reader role) — these tools cannot mutate even if the
+  # model asks; the binary comes from the talosctl-install initContainer.
+  talos/readonly:
+    enabled: true
+    tools:
+      - name: talos_health
+        description: "Cluster and node health via talosctl (read-only)."
+        command: "/opt/talos/bin/talosctl --talosconfig /var/run/secrets/talos/config health --nodes {{ node }}"
+      - name: talos_etcd_members
+        description: "List etcd members with peer URLs (read-only). Use for quorum / peer-mesh issues, e.g. a member dialed at a dead IP."
+        command: "/opt/talos/bin/talosctl --talosconfig /var/run/secrets/talos/config etcd members --nodes {{ node }}"
+      - name: talos_dmesg
+        description: "Kernel ring buffer for a node (read-only). Use for VXLAN/NIC faults and OOMController kills."
+        command: "/opt/talos/bin/talosctl --talosconfig /var/run/secrets/talos/config dmesg --nodes {{ node }}"
   # Disabled for v1: 'bash' can run mutating commands (violates read-only),
   # 'robusta' phones home to Robusta SaaS (self-hosted privacy), 'internet'
   # not needed for in-cluster RCA.
@@ -182,3 +197,38 @@ resources:
     memory: 2048Mi
   limits:
     memory: 2048Mi
+
+# The Holmes image ships no talosctl; fetch a pinned build matched to the
+# cluster's Talos version and verify it before the main container starts.
+initContainers:
+  - name: talosctl-install
+    image: curlimages/curl:8.9.1
+    command:
+      - sh
+      - -ec
+      - |
+        curl -fsSL -o /talos-bin/talosctl \
+          https://github.com/siderolabs/talos/releases/download/v1.13.4/talosctl-linux-amd64
+        echo "aae1dadd238f9dfbc9790d117a114424b2d59200ee12872d0d9f89e178a69aae  /talos-bin/talosctl" | sha256sum -c -
+        chmod 0555 /talos-bin/talosctl
+    volumeMounts:
+      - name: talos-bin
+        mountPath: /talos-bin
+
+additionalVolumes:
+  - name: talos-bin
+    emptyDir: {}
+  - name: talos-config
+    secret:
+      secretName: holmes-talos
+      # optional: the pod must come up (and keep serving k8s/prometheus
+      # investigations) before the talosconfig is seeded into Vault.
+      optional: true
+
+additionalVolumeMounts:
+  - name: talos-bin
+    mountPath: /opt/talos/bin
+    readOnly: true
+  - name: talos-config
+    mountPath: /var/run/secrets/talos
+    readOnly: true
