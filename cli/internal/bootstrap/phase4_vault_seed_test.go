@@ -141,10 +141,19 @@ func TestStaticSeedSpecs_Holmes(t *testing.T) {
 		"jira_email":          "PLATFORMCTL_HOLMES_JIRA_EMAIL",
 		"jira_api_token":      "PLATFORMCTL_HOLMES_JIRA_API_TOKEN",
 		"github_token":        "PLATFORMCTL_HOLMES_GITHUB_TOKEN",
+		"talosconfig":         "PLATFORMCTL_HOLMES_TALOSCONFIG",
 	}
 	got := map[string]string{}
 	for _, f := range spec.Fields {
 		got[f.Name] = f.EnvVar
+		if f.Name == "talosconfig" {
+			if !f.Secret {
+				t.Error("talosconfig must be Secret")
+			}
+			if !f.Optional {
+				t.Error("talosconfig must be Optional: relay-cred re-seeds must not prompt for it")
+			}
+		}
 	}
 	for name, env := range want {
 		if got[name] != env {
