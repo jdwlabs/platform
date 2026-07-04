@@ -6,7 +6,9 @@ db:
   deployStandalone: false
   useExisting: true
   endpoint: platform-litellm-db-cluster-rw.ai-sre.svc.cluster.local
-  database: litellm
+  # 'app', not 'litellm': the cnpg cluster chart bootstraps its default
+  # database/owner (app/app), matching the prd/non postgres clusters.
+  database: app
   secret:
     name: platform-litellm-db-cluster-app
     usernameKey: username
@@ -45,7 +47,8 @@ proxy_config:
     # Fallbacks: if frontier unavailable, degrade (local tier added Phase 4).
     num_retries: 2
 
-# Raised from 512Mi: OOMKilled in ~4s at boot (Prisma generate + proxy startup).
+# 2Gi: boot spike (Prisma engine + proxy import) OOMKilled the container at
+# both 512Mi and 1Gi within ~4s; verified starting clean at 2Gi.
 resources:
   requests: {cpu: 100m, memory: 512Mi}
-  limits: {memory: 1Gi}
+  limits: {memory: 2Gi}
