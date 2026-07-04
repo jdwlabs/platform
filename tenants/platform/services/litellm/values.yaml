@@ -35,6 +35,9 @@ proxy_config:
       litellm_params:
         model: openrouter/anthropic/claude-sonnet-4.6
         api_key: os.environ/OPENROUTER_API_KEY
+        # Holmes asks for 64k output tokens; OpenRouter reserves credits for
+        # the full max_tokens per request. 16k is ample for root-cause prose.
+        max_tokens: 16384
   # Phase 4 adds: local-qwen -> hosted_vllm/... api_base http://<pve5-ip>:8000
   general_settings:
     # LITELLM_MASTER_KEY is injected from the litellm-secrets ESO secret above.
