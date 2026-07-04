@@ -45,6 +45,7 @@ proxy_config:
     # Fallbacks: if frontier unavailable, degrade (local tier added Phase 4).
     num_retries: 2
 
+# Raised from 512Mi: OOMKilled in ~4s at boot (Prisma generate + proxy startup).
 resources:
-  requests: {cpu: 100m, memory: 256Mi}
-  limits: {memory: 512Mi}
+  requests: {cpu: 100m, memory: 512Mi}
+  limits: {memory: 1Gi}
