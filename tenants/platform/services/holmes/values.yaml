@@ -33,6 +33,7 @@ toolsets:
   # model asks; the binary comes from the talosctl-install initContainer.
   talos/readonly:
     enabled: true
+    description: "Read-only Talos node access (os:reader): node health, etcd membership, kernel logs."
     tools:
       - name: talos_health
         description: "Cluster and node health via talosctl (read-only)."
