@@ -48,8 +48,10 @@ toolsets:
         description: "List etcd members with peer URLs (read-only). Use for quorum / peer-mesh issues, e.g. a member dialed at a dead IP."
         command: "/opt/talos/bin/talosctl --talosconfig /var/run/secrets/talos/config etcd members --nodes {{ node }}"
       - name: talos_dmesg
-        description: "Kernel ring buffer for a node (read-only). Use for VXLAN/NIC faults and OOMController kills."
-        command: "/opt/talos/bin/talosctl --talosconfig /var/run/secrets/talos/config dmesg --nodes {{ node }}"
+        description: "Recent kernel ring buffer lines for a node (read-only). Use for VXLAN/NIC faults and OOMController kills."
+        # Full dmesg blows the tool-output token limit and Holmes keeps the
+        # HEAD (boot noise); the diagnostic lines are at the end.
+        command: "/opt/talos/bin/talosctl --talosconfig /var/run/secrets/talos/config dmesg --nodes {{ node }} | tail -n 300"
   # Disabled for v1: 'bash' can run mutating commands (violates read-only),
   # 'robusta' phones home to Robusta SaaS (self-hosted privacy), 'internet'
   # not needed for in-cluster RCA.
