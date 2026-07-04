@@ -153,6 +153,36 @@ func TestStaticSeedSpecs_Holmes(t *testing.T) {
 	}
 }
 
+func TestStaticSeedSpecs_Litellm(t *testing.T) {
+	spec, ok := staticSeedSpecs["litellm"]
+	if !ok {
+		t.Fatal("litellm seed spec missing")
+	}
+	if spec.Path != "litellm" {
+		t.Fatalf("path = %q, want litellm", spec.Path)
+	}
+	want := map[string]string{
+		"master_key":         "PLATFORMCTL_LITELLM_MASTER_KEY",
+		"anthropic_api_key":  "PLATFORMCTL_LITELLM_ANTHROPIC_API_KEY",
+		"openrouter_api_key": "PLATFORMCTL_LITELLM_OPENROUTER_API_KEY",
+	}
+	got := map[string]string{}
+	for _, f := range spec.Fields {
+		got[f.Name] = f.EnvVar
+		if !f.Secret {
+			t.Errorf("field %s must be Secret", f.Name)
+		}
+		if !f.Optional {
+			t.Errorf("field %s must be Optional: partial re-seeds must not prompt for keys that are already in Vault", f.Name)
+		}
+	}
+	for name, env := range want {
+		if got[name] != env {
+			t.Fatalf("field %s env = %q, want %q (all: %v)", name, got[name], env, got)
+		}
+	}
+}
+
 func TestVaultSeedPhase_MergePreservesExistingFields(t *testing.T) {
 	srv, c := mockVaultKV(t)
 	// Pre-existing field seeded outside this spec run must survive a re-seed.
