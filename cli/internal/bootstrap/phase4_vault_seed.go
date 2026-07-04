@@ -78,6 +78,7 @@ var staticSeedSpecs = map[string]seedSpec{
 		{"master_key", "PLATFORMCTL_LITELLM_MASTER_KEY", true, true},
 		{"anthropic_api_key", "PLATFORMCTL_LITELLM_ANTHROPIC_API_KEY", true, true},
 		{"openrouter_api_key", "PLATFORMCTL_LITELLM_OPENROUTER_API_KEY", true, true},
+		{"nvidia_api_key", "PLATFORMCTL_LITELLM_NVIDIA_API_KEY", true, true},
 	}},
 	// Shared by the holmes and ai-sre-relay ExternalSecrets. litellm_key is
 	// optional: it is normally seeded alongside the litellm service, and merge
