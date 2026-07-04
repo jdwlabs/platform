@@ -72,6 +72,13 @@ var staticSeedSpecs = map[string]seedSpec{
 	"truenas-csi": {Path: "truenas-csi", Fields: []seedField{
 		{"api_key", "PLATFORMCTL_TRUENAS_CSI_API_KEY", true, false},
 	}},
+	// LLM gateway credentials. Every field is optional so a partial re-seed
+	// (e.g. adding one provider key) merges over what's already in Vault.
+	"litellm": {Path: "litellm", Fields: []seedField{
+		{"master_key", "PLATFORMCTL_LITELLM_MASTER_KEY", true, true},
+		{"anthropic_api_key", "PLATFORMCTL_LITELLM_ANTHROPIC_API_KEY", true, true},
+		{"openrouter_api_key", "PLATFORMCTL_LITELLM_OPENROUTER_API_KEY", true, true},
+	}},
 	// Shared by the holmes and ai-sre-relay ExternalSecrets. litellm_key is
 	// optional: it is normally seeded alongside the litellm service, and merge
 	// semantics in Apply keep it intact when only the relay creds are seeded.
