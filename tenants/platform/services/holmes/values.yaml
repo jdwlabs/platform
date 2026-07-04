@@ -6,12 +6,12 @@ additionalEnvVars:
         name: holmes-llm
         key: OPENAI_API_KEY
   - name: OPENAI_API_BASE
-    value: "http://litellm.ai-sre.svc.cluster.local:4000/v1"
+    value: "http://platform-litellm.ai-sre.svc.cluster.local:4000/v1"
 
 modelList:
   claude-sonnet:
     model: openai/claude-sonnet      # 'openai/' = OpenAI-compatible client; LiteLLM routes to Claude
-    api_base: http://litellm.ai-sre.svc.cluster.local:4000/v1
+    api_base: http://platform-litellm.ai-sre.svc.cluster.local:4000/v1
     api_key: "{{env.OPENAI_API_KEY}}"
     temperature: 0
 
@@ -24,7 +24,7 @@ toolsets:
   prometheus/metrics:
     enabled: true
     config:
-      prometheus_url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+      prometheus_url: http://platform-kube-prometheus-s-prometheus.monitoring.svc.cluster.local:9090
   # 'skills' stays enabled — Phase 3 mounts .remember runbooks as custom skills.
   skills:
     enabled: true
