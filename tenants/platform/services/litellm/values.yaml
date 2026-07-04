@@ -23,17 +23,18 @@ db:
 redis:
   enabled: false
 
-# Injects ANTHROPIC_API_KEY and LITELLM_MASTER_KEY as env vars from Vault-backed ESO secret.
+# Injects provider API keys and LITELLM_MASTER_KEY as env vars from Vault-backed ESO secret.
 environmentSecrets:
   - litellm-secrets
 
 proxy_config:
   model_list:
-    # Frontier tier — hard root-cause reasoning.
+    # Frontier tier — hard root-cause reasoning. Routed through OpenRouter:
+    # the direct Anthropic key has no API credits (subscription plan only).
     - model_name: claude-sonnet
       litellm_params:
-        model: anthropic/claude-sonnet-4-6
-        api_key: os.environ/ANTHROPIC_API_KEY
+        model: openrouter/anthropic/claude-sonnet-4.6
+        api_key: os.environ/OPENROUTER_API_KEY
   # Phase 4 adds: local-qwen -> hosted_vllm/... api_base http://<pve5-ip>:8000
   general_settings:
     # LITELLM_MASTER_KEY is injected from the litellm-secrets ESO secret above.
