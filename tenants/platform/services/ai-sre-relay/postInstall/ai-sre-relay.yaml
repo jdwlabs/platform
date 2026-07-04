@@ -19,7 +19,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: relay
-          image: jdwlabs/ai-sre-relay:0.1.3
+          image: jdwlabs/ai-sre-relay:0.1.4
           ports:
             - {name: http, containerPort: 8080}
           envFrom:
@@ -28,9 +28,10 @@ spec:
             - {name: HOLMES_URL, value: "http://platform-holmes-holmes.ai-sre.svc.cluster.local"}
             - {name: LITELLM_URL, value: "http://platform-litellm.ai-sre.svc.cluster.local:4000/v1"}
             - {name: LITELLM_MODEL, value: "sre-investigator"}
-            # Free-tier investigations measured at ~5min with tool loops; this
-            # is the sole deadline for LLM-bound calls as of relay 0.1.2.
-            - {name: INVESTIGATION_TIMEOUT_SECONDS, value: "600"}
+            # Sole deadline for LLM-bound calls as of relay 0.1.2. Free-tier
+            # latency is high-variance: 433-600s+ observed on the big model;
+            # 900 gives the fallback chain room to run inside one alert.
+            - {name: INVESTIGATION_TIMEOUT_SECONDS, value: "900"}
             - {name: JIRA_PROJECT, value: "JDWLABS"}
           readinessProbe:
             httpGet: {path: /healthz, port: http}
