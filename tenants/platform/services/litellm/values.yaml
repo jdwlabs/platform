@@ -54,7 +54,14 @@ proxy_config:
         model: nvidia_nim/nvidia/nemotron-3-super-120b-a12b
         api_key: os.environ/NVIDIA_NIM_API_KEY
         max_tokens: 16384
-  # Phase 4 adds: local vLLM tier -> hosted_vllm/... api_base http://<pve5-ip>:8000
+    # Local tier: RTX 5090 VM on pve5 (vllm-inference, static IP outside
+    # the DHCP churn). Quota-immune backstop when every cloud pool is
+    # rate-limited or dark; smallest model, so it sits last in the chain.
+    - model_name: sre-investigator-local
+      litellm_params:
+        model: hosted_vllm/openai/gpt-oss-20b
+        api_base: http://192.168.1.50:8000/v1
+        max_tokens: 16384
   general_settings:
     # LITELLM_MASTER_KEY is injected from the litellm-secrets ESO secret above.
     master_key: os.environ/LITELLM_MASTER_KEY
@@ -65,7 +72,7 @@ proxy_config:
     # Free endpoints rate-limit and brown-out; degrade across quota pools
     # before failing an investigation.
     fallbacks:
-      - sre-investigator: ["sre-investigator-fb1", "sre-investigator-fb2"]
+      - sre-investigator: ["sre-investigator-fb1", "sre-investigator-fb2", "sre-investigator-local"]
   litellm_settings:
     drop_params: true
     num_retries: 2
