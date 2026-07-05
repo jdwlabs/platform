@@ -1,9 +1,16 @@
 # Hourly cluster drift scan on the free local GPU tier. Pinned directly to
 # sre-investigator-local (not the sre-investigator alias) so a low-value
-# periodic scan never spends free-tier cloud quota; if pve5/vLLM is down the
-# job fails cheaply and visibly (CronJob failure count), which is the
-# intended degrade mode for this workload. Real alerts keep the full
+# periodic scan never spends free-tier cloud quota. Real alerts keep the full
 # cloud-first fallback chain via the relay's own model selection.
+#
+# Known limitation: gpt-oss-20b under vLLM occasionally returns an empty
+# response to Holmes for this open-ended, tool-heavy prompt (Holmes then
+# 500s with "analysis: Input should be a valid string"), without ever
+# attempting a tool call -- a model-capability/prompt-complexity edge, not a
+# wiring bug (a trivial no-tool ask to the same model succeeds every time).
+# The job treats that as "inconclusive" and retries next hour rather than
+# failing loudly; a stronger small tool-calling model (the plan's original
+# placeholder was Qwen) is the real fix, left for a follow-up.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -34,11 +41,18 @@ spec:
                   "VERDICT: CLEAN" if nothing actionable was found, or
                   "VERDICT: ISSUE: <one-sentence summary>" if something is.'
 
-                  payload=$(curl -sf -m 480 http://platform-holmes-holmes/api/chat \
+                  http_code=$(curl -s -m 480 -o /tmp/resp.json -w '%{http_code}' \
+                    http://platform-holmes-holmes/api/chat \
                     -H 'Content-Type: application/json' \
                     -d "$(jq -n --arg ask "$ask" '{ask:$ask, model:"sre-investigator-local", stream:false}')")
 
-                  analysis=$(echo "$payload" | jq -r '.analysis // empty')
+                  if [ "$http_code" != "200" ]; then
+                    echo "drift-scan: inconclusive (holmes returned HTTP $http_code), retrying next hour"
+                    cat /tmp/resp.json
+                    exit 0
+                  fi
+
+                  analysis=$(jq -r '.analysis // empty' /tmp/resp.json)
                   echo "$analysis"
 
                   if ! echo "$analysis" | grep -q '^VERDICT: ISSUE:'; then
