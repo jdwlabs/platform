@@ -20,6 +20,16 @@ modelList:
     api_base: http://platform-litellm.ai-sre.svc.cluster.local:4000/v1
     api_key: "{{env.OPENAI_API_KEY}}"
     temperature: 0
+  # Holmes resolves `model` against its OWN modelList, not litellm's — an
+  # unrecognized name here silently falls back to a baked-in default that
+  # litellm then rejects. Needed so callers (e.g. the drift-scan CronJob) can
+  # pin directly to the free local tier, bypassing sre-investigator's
+  # cloud-first fallback chain.
+  sre-investigator-local:
+    model: openai/sre-investigator-local
+    api_base: http://platform-litellm.ai-sre.svc.cluster.local:4000/v1
+    api_key: "{{env.OPENAI_API_KEY}}"
+    temperature: 0
 
 # v1: read-only investigation toolsets only (Global Constraint: no delete/edit/reset).
 toolsets:

@@ -1,0 +1,65 @@
+# Hourly cluster drift scan on the free local GPU tier. Pinned directly to
+# sre-investigator-local (not the sre-investigator alias) so a low-value
+# periodic scan never spends free-tier cloud quota; if pve5/vLLM is down the
+# job fails cheaply and visibly (CronJob failure count), which is the
+# intended degrade mode for this workload. Real alerts keep the full
+# cloud-first fallback chain via the relay's own model selection.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: holmes-drift-scan
+  namespace: ai-sre
+spec:
+  schedule: "0 * * * *" # hourly
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: scan
+              # curlimages/curl has no jq and runs as non-root (apk install
+              # fails with Permission denied); this image ships both preinstalled.
+              image: dwdraju/alpine-curl-jq:latest
+              command:
+                - sh
+                - -ec
+                - |
+                  ask='Scan this Kubernetes cluster for drift: pending pods,
+                  restart spikes, near-OOM nodes, and TLS cert expiry within
+                  30 days. Investigate using the available tools before
+                  concluding. End your reply with exactly one final line:
+                  "VERDICT: CLEAN" if nothing actionable was found, or
+                  "VERDICT: ISSUE: <one-sentence summary>" if something is.'
+
+                  payload=$(curl -sf -m 480 http://platform-holmes-holmes/api/chat \
+                    -H 'Content-Type: application/json' \
+                    -d "$(jq -n --arg ask "$ask" '{ask:$ask, model:"sre-investigator-local", stream:false}')")
+
+                  analysis=$(echo "$payload" | jq -r '.analysis // empty')
+                  echo "$analysis"
+
+                  if ! echo "$analysis" | grep -q '^VERDICT: ISSUE:'; then
+                    echo "drift-scan: clean, nothing to escalate"
+                    exit 0
+                  fi
+
+                  summary=$(echo "$analysis" | sed -n 's/^VERDICT: ISSUE: //p')
+                  fingerprint="drift-scan-$(date -u +%Y%m%d)"
+                  echo "drift-scan: issue found, escalating via relay (fingerprint=$fingerprint)"
+
+                  curl -sf -m 30 http://ai-sre-relay:8080/webhook \
+                    -H 'Content-Type: application/json' \
+                    -d "$(jq -n --arg fp "$fingerprint" --arg summary "$summary" --arg desc "$analysis" '{
+                      receiver: "ai-sre",
+                      status: "firing",
+                      alerts: [{
+                        status: "firing",
+                        fingerprint: $fp,
+                        labels: {alertname: "ClusterDriftDetected", namespace: "ai-sre", severity: "warning"},
+                        annotations: {summary: $summary, description: $desc},
+                        startsAt: (now | strftime("%Y-%m-%dT%H:%M:%SZ"))
+                      }]
+                    }')"
