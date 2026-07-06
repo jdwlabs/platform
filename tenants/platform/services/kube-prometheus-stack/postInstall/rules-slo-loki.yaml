@@ -17,6 +17,11 @@ spec:
     # SLI: good = non-5xx Loki HTTP responses; bad = 5xx. Target: 99.9% over 30d
     # (0.1% error budget). Recording rules pre-compute the bad-event ratio over
     # each alert window so the burn-rate alerts stay cheap to evaluate.
+    #
+    # Gateway now has a control-plane health SLO (rules-slo-nginx-gateway.yaml)
+    # but still no true request-level availability SLO — the OSS data plane
+    # exposes no per-status-code metric (verified against the deployed chart,
+    # see that file's comment for what a real fix would require).
     - name: loki-slo-recording
       rules:
         - record: loki:request_errors:ratio_rate5m

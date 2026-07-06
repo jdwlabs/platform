@@ -1,0 +1,59 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: slo-nginx-gateway-rules
+  namespace: monitoring
+spec:
+  groups:
+    # NOTE: This is a control-plane health SLO, not a request-level gateway
+    # availability SLO. Verified against the actual deployed chart
+    # (ghcr.io/nginx/charts/nginx-gateway-fabric 2.5.1, see tenants/platform/
+    # tenant.yaml): the control-plane binary registers exactly one custom
+    # metric (nginx_gateway_fabric_event_batch_processing_milliseconds) plus
+    # standard controller-runtime metrics (controller_runtime_reconcile_total,
+    # up). The data-plane "nginx" DaemonSet that actually serves traffic has no
+    # metrics option in this chart version at all — there is no per-status-code
+    # or request-count metric available anywhere in this deployment. A true
+    # request-level availability SLO needs one of:
+    #   (a) an nginx-prometheus-exporter sidecar reading the data plane's
+    #       stub_status (still no per-status breakdown, connection stats only), or
+    #   (b) a Loki-log-derived SLI from nginx access logs (logs already flow to
+    #       Loki cluster-wide via alloy-logs/podLogs, but Loki's ruler here only
+    #       has `ruler.enable_api: true` — no rule storage backend wired up, so
+    #       LogQL recording/alert rules can't be loaded yet).
+    # Tracked as a follow-up; this rule set covers what's honestly available now.
+    - name: nginx-gateway-controlplane-recording
+      rules:
+        - record: nginx_gateway_fabric:reconcile_errors:ratio_rate5m
+          expr: |
+            sum(rate(controller_runtime_reconcile_total{app_kubernetes_io_name="nginx-gateway-fabric", result="error"}[5m]))
+            /
+            sum(rate(controller_runtime_reconcile_total{app_kubernetes_io_name="nginx-gateway-fabric"}[5m]))
+        - record: nginx_gateway_fabric:reconcile_errors:ratio_rate1h
+          expr: |
+            sum(rate(controller_runtime_reconcile_total{app_kubernetes_io_name="nginx-gateway-fabric", result="error"}[1h]))
+            /
+            sum(rate(controller_runtime_reconcile_total{app_kubernetes_io_name="nginx-gateway-fabric"}[1h]))
+    - name: nginx-gateway-controlplane-alerts
+      rules:
+        - alert: NginxGatewayFabricDown
+          expr: up{app_kubernetes_io_name="nginx-gateway-fabric"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "NGINX Gateway Fabric control plane is down"
+            description: "The nginx-gateway-fabric control-plane pod has not been scrapeable for 5m; Gateway API config changes will stop propagating to the data plane (existing routes keep serving on last-applied config)."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+        - alert: NginxGatewayFabricReconcileErrorsHigh
+          expr: |
+            nginx_gateway_fabric:reconcile_errors:ratio_rate1h > 0.1
+            and
+            nginx_gateway_fabric:reconcile_errors:ratio_rate5m > 0.1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "NGINX Gateway Fabric reconcile error rate elevated"
+            description: "Over 10% of reconcile attempts have errored over both the last hour and last 5m; Gateway/HTTPRoute changes may not be applying to the data plane."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
