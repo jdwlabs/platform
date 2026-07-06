@@ -1,4 +1,8 @@
 # Holmes talks to LiteLLM as an OpenAI-compatible endpoint; backend stays swappable.
+
+# ArgoCD holds prior manifests in git history; no need for k8s to keep old
+# ReplicaSets around too.
+revisionHistoryLimit: 0
 additionalEnvVars:
   - name: OPENAI_API_KEY
     valueFrom:
