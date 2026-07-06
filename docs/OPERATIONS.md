@@ -295,3 +295,4 @@ gates green.
 | Certs            | `kubectl get clusterissuer,certificate -A`            |
 | Postgres         | `kubectl get cluster -n database -o wide` (CNPG plugin) |
 | ARC runners      | `kubectl get pods -n arc-systems`                    |
+| Gateway (NGF)    | `kubectl get pods -n nginx-gateway`, then check `NginxGatewayFabricDown`/`NginxGatewayFabricReconcileErrorsHigh` alerts (control-plane health only, not request-level) |

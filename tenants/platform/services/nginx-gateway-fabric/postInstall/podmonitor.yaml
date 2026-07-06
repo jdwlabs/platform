@@ -1,0 +1,24 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: nginx-gateway-fabric-metrics
+  namespace: nginx-gateway
+spec:
+  # The chart's metrics port (nginxGateway.metrics, 9113) is exposed only as a
+  # container port + prometheus.io/scrape pod annotation, not a Service port
+  # (see chart's templates/service.yaml — only "agent-grpc"/443 there), so this
+  # must be a PodMonitor, not a ServiceMonitor.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nginx-gateway-fabric
+  namespaceSelector:
+    matchNames:
+      - nginx-gateway
+  # Copy this onto every scraped sample as app_kubernetes_io_name so alert
+  # rules can select on it directly instead of depending on the Prometheus
+  # Operator's default PodMonitor job-label naming (name of this object).
+  podTargetLabels:
+    - app.kubernetes.io/name
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 60s
