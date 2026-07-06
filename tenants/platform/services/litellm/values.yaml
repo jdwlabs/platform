@@ -1,5 +1,9 @@
 # Provider-agnostic LLM gateway. Backend swap = edit model_list, no client change.
 
+# ArgoCD holds prior manifests in git history; no need for k8s to keep old
+# ReplicaSets around too.
+revisionHistoryLimit: 0
+
 # Use the CNPG-managed litellm-db cluster instead of the chart's bundled Postgres.
 # CNPG generates secret platform-litellm-db-cluster-app with keys username/password/host/uri.
 db:
