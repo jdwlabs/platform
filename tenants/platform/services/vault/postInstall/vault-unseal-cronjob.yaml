@@ -23,6 +23,12 @@ spec:
       # Must finish inside one schedule interval (120s).
       activeDeadlineSeconds: 90
       backoffLimit: 2
+      # failedJobsHistoryLimit only prunes old Jobs when a *new* failure pushes
+      # the count over the limit. Since this runs every 2 minutes and rarely
+      # fails twice in a row, one old failed Job can linger indefinitely and
+      # keep kube_job_failed pinned at 1 (JDWLABS-125). TTL-clean any finished
+      # Job after an hour regardless of subsequent successes.
+      ttlSecondsAfterFinished: 3600
       template:
         spec:
           containers:
