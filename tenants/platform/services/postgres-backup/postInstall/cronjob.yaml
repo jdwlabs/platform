@@ -16,8 +16,8 @@ spec:
       # failedJobsHistoryLimit only prunes old Jobs when a *new* failure pushes
       # the count over the limit. If backups keep succeeding, a single old
       # failed Job object lingers forever and keeps kube_job_failed pinned at
-      # 1 (JDWLABS-111/120/121). TTL-clean any finished Job after a day
-      # regardless of subsequent successes.
+      # 1. TTL-clean any finished Job after a day regardless of subsequent
+      # successes.
       ttlSecondsAfterFinished: 86400
       template:
         spec:
