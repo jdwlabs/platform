@@ -14,6 +14,19 @@ nginx:
   kind: daemonSet
   config:
     ipFamily: ipv4
+  # The gateway DaemonSet has no business running on control-plane nodes.
+  # Explicit label-based anti-affinity (not just relying on the CP NoSchedule
+  # taint being present at schedule time) so a stray pod can't survive a
+  # taint-timing race during a CP node rejoin/reboot (recurring failure mode,
+  # see JDWLABS-115).
+  pod:
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
   service:
     type: NodePort
     nodePorts:
