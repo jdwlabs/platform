@@ -1,5 +1,11 @@
 global:
   priorityClassName: platform-critical
+  # User-deployed components (longhorn-manager, longhorn-ui, driver-deployer).
+  # Control-plane nodes have no toleration for their own NoSchedule taint set
+  # at pod-creation time, so a taint-timing race during a CP rejoin/reboot can
+  # still leave a stray pod there; nodeSelector prevents it from ever landing.
+  nodeSelector:
+    workload.jdwlabs.io/worker: "true"
 
 networkPolicies:
   enabled: false
@@ -15,6 +21,8 @@ defaultSettings:
   orphanResourceAutoDeletion: "replica-data"
   dataLocality: "best-effort"
   deletingConfirmationFlag: true
+  # System-managed components (engine-image, instance-manager, longhorn-csi-plugin).
+  systemManagedComponentsNodeSelector: "workload.jdwlabs.io/worker:true"
 
 longhornManager:
   priorityClassName: platform-critical
