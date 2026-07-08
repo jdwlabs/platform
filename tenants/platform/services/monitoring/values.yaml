@@ -32,6 +32,20 @@ alloy-logs:
         memory: 128Mi
       limits:
         memory: 256Mi
+    # The chart only wires a readinessProbe (hardcoded, 1s timeout) with no
+    # livenessProbe, so a wedged Alloy process just sits NotReady forever
+    # instead of being restarted — one replica ran wedged for 9 days,
+    # re-reading its hostPath log mounts the whole time and saturating that
+    # node's disk IO queue. Reuse the same /-/ready endpoint for liveness so
+    # kubelet kills and reschedules a stuck replica.
+    livenessProbe:
+      httpGet:
+        path: /-/ready
+        port: 12345
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 6
 
 alloy-metrics:
   enabled: true
