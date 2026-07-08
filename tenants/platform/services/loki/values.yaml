@@ -97,3 +97,18 @@ monitoring:
 
 minio:
   enabled: false
+
+# lokiCanary is a top-level chart key (the monitoring.lokiCanary.enabled above is a
+# harmless no-op left in place to avoid unrelated churn). Canary has no business
+# running on control-plane nodes: explicit label-based anti-affinity (not just
+# relying on the CP NoSchedule taint being present at schedule time) so a stray
+# pod can't survive a taint-timing race during a CP node rejoin/reboot (recurring
+# failure mode, see JDWLABS-90).
+lokiCanary:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
