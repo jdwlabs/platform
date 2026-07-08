@@ -11,3 +11,17 @@ driver:
   existingConfigSecret: democratic-csi-driver-config
 
 storageClasses: []   # StorageClass managed declaratively in postInstall
+
+node:
+  # The node DaemonSet has no business running on control-plane nodes.
+  # Explicit label-based anti-affinity (not just relying on the CP NoSchedule
+  # taint being present at schedule time) so a stray pod can't survive a
+  # taint-timing race during a CP node rejoin/reboot (recurring failure mode,
+  # see JDWLABS-123).
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
