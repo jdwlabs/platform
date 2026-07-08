@@ -87,6 +87,13 @@ See [docs/OPERATIONS.md §5](docs/OPERATIONS.md#5-troubleshooting-symptom--fix) 
 - [Tenant Model](docs/TENANT-MODEL.md)
 - [Onboarding Guide](docs/ONBOARDING.md)
 
+## Code & Manifest Comments
+
+Never put a Jira ticket ID (`JDWLABS-*`) or PR/issue number in a comment in
+any file here — YAML `values.yaml`/manifests included. Traceability lives
+in the commit message and PR description; comments should explain *why*
+the config is what it is so they stay meaningful after the ticket closes.
+
 ## Binary contract for AI agents
 
 Any AI agent operating this repo MUST drive cluster operations through
