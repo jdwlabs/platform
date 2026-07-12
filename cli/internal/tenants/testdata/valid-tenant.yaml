@@ -2,8 +2,8 @@ name: jdwlabs
 namespaces:
   - name: jdwlabs-prd
 services:
-  - name: openclaw
-    chartPath: helm-charts/openclaw
+  - name: example-svc
+    chartPath: helm-charts/example
     repo: https://github.com/jdwlabs/platform.git
     revision: main
     namespace: jdwlabs-ai

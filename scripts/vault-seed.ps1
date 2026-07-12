@@ -82,10 +82,6 @@ Write-Host "  Root token retrieved (length: $($script:ROOT_TOKEN.Length))" -Fore
 # PLATFORMCTL_DISCORD_BOT_TOKEN          (dotablaze-tech meowbot)
 # PLATFORMCTL_USERSROLE_JWT_KEY_NON
 # PLATFORMCTL_USERSROLE_JWT_KEY_PRD
-# PLATFORMCTL_JDWLABS_ANTHROPIC_API_KEY
-# PLATFORMCTL_JDWLABS_OPENAI_API_KEY
-# PLATFORMCTL_JDWLABS_OPENROUTER_API_KEY
-# PLATFORMCTL_JDWLABS_OPENCLAW_HTPASSWD  (pre-computed htpasswd for openclaw basic auth)
 # PLATFORMCTL_JDWLABS_GITHUB_APP_ID
 # PLATFORMCTL_JDWLABS_GITHUB_INSTALLATION_ID
 # PLATFORMCTL_JDWLABS_GITHUB_PRIVATE_KEY  (PEM key, newlines as \n)
@@ -128,14 +124,6 @@ VaultPut "dotablaze-tech-discord-bot-token" @{
 VaultPut "usersrole" @{
     "jwt_key_non" = Require-Env "PLATFORMCTL_USERSROLE_JWT_KEY_NON"
     "jwt_key_prd" = Require-Env "PLATFORMCTL_USERSROLE_JWT_KEY_PRD"
-}
-
-# kv/jdwlabs-ai-keys  — API keys AND htpasswd_string in one put (openclaw-basic-auth reads htpasswd_string from this same path)
-VaultPut "jdwlabs-ai-keys" @{
-    "anthropic_api_key"  = Require-Env "PLATFORMCTL_JDWLABS_ANTHROPIC_API_KEY"
-    "openai_api_key"     = Require-Env "PLATFORMCTL_JDWLABS_OPENAI_API_KEY"
-    "openrouter_api_key" = Require-Env "PLATFORMCTL_JDWLABS_OPENROUTER_API_KEY"
-    "htpasswd_string"    = Require-Env "PLATFORMCTL_JDWLABS_OPENCLAW_HTPASSWD"
 }
 
 # kv/jdwlabs-github-app

@@ -61,16 +61,13 @@ fastest way to get spans out of an existing service for the pilot.
 
 ## Pilot proposal
 
-**Pilot service: `openclaw` (namespace `jdwlabs-ai`, `ai.jdwlabs.com`).**
-
-Rationale:
-- Org-owned application code (helm-charts/openclaw), so SDK instrumentation is
-  fully under our control — no upstream dependency.
-- It is an agent runtime that fans out to multiple LLM/API backends; latency and
-  error attribution across those hops is exactly the problem traces solve.
-- Public-facing with real traffic, so the trace-to-logs / trace-to-metrics
-  correlation gets exercised end to end.
+No pilot service is currently selected (the original candidate was
+decommissioned before instrumentation started). When picking the next one,
+prefer a service that is org-owned (SDK instrumentation under our control),
+fans out to multiple backends (latency/error attribution across hops is the
+trace use case), and carries real traffic — `ai-sre-relay` is the leading
+candidate.
 
 Pilot exit criteria: spans visible in Grafana Explore (Tempo), service graph
-rendering openclaw -> downstream backends, and one click from a slow span to its
-Loki logs and to the RED metrics panel.
+rendering the pilot -> downstream backends, and one click from a slow span to
+its Loki logs and to the RED metrics panel.

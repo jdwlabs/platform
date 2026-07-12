@@ -19,9 +19,6 @@ namespaces:
     quotaTier: ci
     networkPolicy: ci
     arc: true
-  - name: jdwlabs-ai
-    quotaTier: standard
-    networkPolicy: default
 
 project:
   elevated: false
@@ -34,14 +31,6 @@ project:
       kind: ClusterRoleBinding
 
 services:
-  - name: openclaw
-    chartPath: helm-charts/openclaw
-    repo: https://github.com/jdwlabs/platform.git
-    revision: main
-    namespace: jdwlabs-ai
-    postInstall: true
-    syncWave: 10
-
   - name: arc-runner-set-jdwlabs
     chart: gha-runner-scale-set
     repo: ghcr.io/actions/actions-runner-controller-charts
