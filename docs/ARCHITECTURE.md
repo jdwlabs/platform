@@ -11,7 +11,7 @@ platform/
 ├── bootstrap/        # ArgoCD ApplicationSets and AppProjects
 ├── platform/         # Shared infrastructure apps (cluster-wide)
 ├── tenants/          # Per-tenant configurations (ARC runners, database schemas)
-├── helm-charts/      # Custom, versioned Helm charts (porkbun-webhook, openclaw)
+├── helm-charts/      # Custom, versioned Helm charts (porkbun-webhook, tenant-envelope)
 └── docs/             # Documentation
 ```
 
@@ -48,8 +48,8 @@ specific surfaces directly to recover from known-bad states.
 ### `extraSourceRepos` and multi-source Apps
 
 When a tenant's ArgoCD AppProject must reference more than one source
-repo (e.g. tenant uses `helm-charts/openclaw` from this repo and also
-needs its private deployment manifests from `<tenant>/deployments`),
+repo (e.g. tenant renders a chart or raw manifests from this repo and
+also needs its private deployment manifests from `<tenant>/deployments`),
 declare additional repos in `tenant.yaml`:
 
 ```yaml
@@ -66,10 +66,10 @@ Services use versioned Helm charts from the repository:
 ```yaml
 # tenants/jdwlabs/tenant.yaml
 services:
-  - name: openclaw
-    chart: openclaw
-    repo: https://jdwlabs.github.io/platform/
-    revision: 0.1.15
+  - name: arc-runner-set-jdwlabs
+    chart: gha-runner-scale-set
+    repo: ghcr.io/actions/actions-runner-controller-charts
+    revision: 0.14.1
 ```
 
 ## Traffic Routing

@@ -3,5 +3,5 @@ namespaces:
   - name: x
 services:
   - name: bad
-    chartPath: helm-charts/openclaw
+    chartPath: helm-charts/example
     # missing repo, revision, namespace, postInstall, syncWave

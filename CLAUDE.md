@@ -20,7 +20,7 @@ Run `platformctl bootstrap` from the repo root. See [docs/BOOTSTRAP.md](docs/BOO
 - `bootstrap/` - ArgoCD ApplicationSets and AppProjects for platform bootstrap
 - `platform/` - Shared infrastructure applications (Vault, cert-manager, nginx-gateway-fabric, etc.)
 - `tenants/` - Per-tenant configurations (tenant.yaml defines namespaces, services, ARC runners)
-- `helm-charts/` - Custom Helm charts (porkbun-webhook, openclaw, tenant-envelope)
+- `helm-charts/` - Custom Helm charts (porkbun-webhook, tenant-envelope)
 - `docs/` - Architecture and onboarding documentation (BOOTSTRAP.md, ARCHITECTURE.md, TENANT-MODEL.md, ONBOARDING.md, OPERATIONS.md)
 - `cli/` - Go source for `platformctl` (`go.mod`, `internal/`, `cmd/`, `Makefile`, `.goreleaser.yaml`)
 
@@ -141,12 +141,3 @@ Design specs live in `docs/superpowers/specs/`. Implementation plans
 live in `docs/superpowers/plans/`. Both are append-only — never edit a
 landed spec or plan; write a new one and reference the old.
 
-### OpenClaw service (jdwlabs-ai)
-
-OpenClaw is an autonomous agent runtime deployed as a tenant service:
-
-- **Namespace:** `jdwlabs-ai`
-- **Public URL:** `https://ai.jdwlabs.com`
-- **Vault secrets:** `kv/jdwlabs-ai-keys` fields `anthropic_api_key`, `openai_api_key`
-- **Troubleshoot connectivity:** `kubectl describe httproute openclaw -n jdwlabs-ai`
-- **Logs:** `kubectl logs -n jdwlabs-ai -l app.kubernetes.io/name=openclaw -c openclaw`
