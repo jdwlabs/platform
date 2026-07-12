@@ -63,7 +63,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md#deployments-applicationset) for the deploy
 | Path                          | Fields                                     |
 |-------------------------------|--------------------------------------------|
 | `kv/<name>-github-app`        | `app_id`, `installation_id`, `private_key` |
-| `kv/<name>-ai-keys`           | `openai`, `anthropic`                      |
+| `kv/<name>-ai-keys`           | `openai_api_key`, `anthropic_api_key`, `openrouter_api_key`, `nvidia_api_key` |
 | `kv/<name>-discord-bot-token` | `token`                                    |
 
 In non-interactive mode, each field reads from
