@@ -212,6 +212,7 @@ from environment variables. The contract:
 | `kv/<tenant>-ai-keys` `openai_api_key` (optional) | `PLATFORMCTL_<TENANT>_OPENAI_API_KEY`            |
 | `kv/<tenant>-ai-keys` `anthropic_api_key` (optional) | `PLATFORMCTL_<TENANT>_ANTHROPIC_API_KEY`      |
 | `kv/<tenant>-ai-keys` `openrouter_api_key` (optional) | `PLATFORMCTL_<TENANT>_OPENROUTER_API_KEY`   |
+| `kv/<tenant>-ai-keys` `nvidia_api_key` (optional) | `PLATFORMCTL_<TENANT>_NVIDIA_API_KEY`            |
 | `kv/<tenant>-discord-bot-token` `token` (optional) | `PLATFORMCTL_<TENANT>_DISCORD_BOT_TOKEN`       |
 | `kv/rclone-gdrive` `rclone_conf` (Phase 5)        | `PLATFORMCTL_RCLONE_CONF`                        |
 
