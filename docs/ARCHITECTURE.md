@@ -8,11 +8,15 @@
 
 ```
 platform/
-├── bootstrap/        # ArgoCD ApplicationSets and AppProjects
-├── platform/         # Shared infrastructure apps (cluster-wide)
-├── tenants/          # Per-tenant configurations (ARC runners, database schemas)
-├── helm-charts/      # Custom, versioned Helm charts (porkbun-webhook, tenant-envelope)
-└── docs/             # Documentation
+├── bootstrap/        # ArgoCD root Application, governance ApplicationSet, AppProjects, CRDs
+├── tenants/          # Per-tenant configurations; tenants/platform/services/ holds the
+│                     # shared infrastructure apps (the platform is itself a tenant)
+├── helm-charts/      # Custom, versioned Helm charts (porkbun-webhook, tenant-envelope, ...)
+├── cli/              # Go source for platformctl
+├── observability/    # Dashboards-as-code (jsonnet sources and generated dashboards)
+├── scripts/          # Operational helper scripts
+├── tools/            # Repo tooling (chart index generation)
+└── docs/             # Documentation; decision records under docs/adr/
 ```
 
 ## Chart Management & Publishing

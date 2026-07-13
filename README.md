@@ -9,11 +9,15 @@ Tenant-centric Kubernetes GitOps platform managed by ArgoCD.
 
 ## Structure
 
-- `bootstrap/` - ArgoCD ApplicationSets and AppProjects
-- `platform/` - Shared infrastructure apps (Vault, cert-manager, nginx-gateway-fabric, etc.)
-- `tenants/` - Per-tenant configurations (ARC runners, database schemas)
-- `helm-charts/` - Custom Helm charts (porkbun-webhook)
-- `docs/` - Architecture and onboarding documentation
+- `bootstrap/` - ArgoCD root Application, governance ApplicationSet, AppProjects, and CRD bootstrap
+- `tenants/` - Per-tenant configurations (`tenant.yaml` + per-service values under `tenants/<name>/services/`)
+- `tenants/platform/services/` - Shared infrastructure apps (Vault, cert-manager, nginx-gateway-fabric, etc.) — the platform itself is modeled as a tenant
+- `helm-charts/` - Custom and vendored Helm charts (kubelet-serving-cert-approver, litellm-helm, porkbun-webhook, tenant-envelope)
+- `cli/` - Go source for `platformctl`
+- `observability/` - Dashboards-as-code (jsonnet sources and generated dashboards)
+- `scripts/` - Operational helper scripts
+- `tools/` - Repo tooling (chart index generation)
+- `docs/` - Architecture and onboarding documentation; decision records under `docs/adr/`
 
 ## Tenants
 

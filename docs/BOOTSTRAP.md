@@ -151,6 +151,11 @@ Kubernetes cluster ready
                                 +-- Longhorn ingress auth
                                 +-- ARC runners register with GitHub
             +-- Wave 3:  CNPG operator, ARC controller
-            +-- Wave 4:  PostgreSQL clusters, db-ui
-            +-- Wave 5:  Tenant ARC runner sets, Atlas schema migrations
+            +-- Wave 4:  PostgreSQL clusters, db-ui, litellm-db, litellm-redis
+            +-- Wave 5:  postgres-backup, litellm, holmes,
+                          Tenant ARC runner sets, Atlas schema migrations
+            +-- Wave 6:  ai-sre-relay (alert webhook -> holmes/litellm)
 ```
+
+Per-service wave assignments are authoritative in `tenants/<name>/tenant.yaml`
+(`syncWave` field).
