@@ -1,0 +1,32 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Renovate is the single owner of dependency updates for this repo; keep repository-level (UI) Dependabot disabled.",
+    "Covers: Go modules (cli/), Helm chart dependencies (helm-charts/*/Chart.yaml), GitHub Actions pins, and chart revision pins in tenants/*/tenant.yaml via the custom regex managers below.",
+    "Tenant service entries with chart: \"\" (git-sourced or vendored via chartPath) are intentionally not matched — only registry-backed chart pins are updated."
+  ],
+  "extends": ["github>jdwlabs/.github"],
+  "postUpdateOptions": ["gomodTidy"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Chart pins in tenant manifests served from HTTPS Helm repositories (chart/repo/revision triples)",
+      "managerFilePatterns": ["/^tenants/.+/tenant\\.ya?ml$/"],
+      "matchStrings": [
+        "chart: (?<depName>[^\\s\"]+)\\s+repo: (?<registryUrl>https://[^\\s\"]+)\\s+revision: \"?(?<currentValue>[^\\s\"]+)\"?"
+      ],
+      "datasourceTemplate": "helm"
+    },
+    {
+      "customType": "regex",
+      "description": "Chart pins in tenant manifests served from OCI registries (ghcr.io)",
+      "managerFilePatterns": ["/^tenants/.+/tenant\\.ya?ml$/"],
+      "matchStrings": [
+        "chart: (?<chartName>[^\\s\"]+)\\s+repo: (?<ociRepo>ghcr\\.io/[^\\s\"]+)\\s+revision: \"?(?<currentValue>[^\\s\"]+)\"?"
+      ],
+      "datasourceTemplate": "docker",
+      "depNameTemplate": "{{{chartName}}}",
+      "packageNameTemplate": "{{{ociRepo}}}/{{{chartName}}}"
+    }
+  ]
+}
