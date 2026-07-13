@@ -2,15 +2,15 @@ cluster:
   name: jdwlabs
   namespace: monitoring
 
+# Single collection owner: kube-prometheus-stack scrapes all metrics via
+# Prometheus Operator ServiceMonitors/PodMonitors. Alloy previously re-scraped
+# kubelet, cAdvisor and the kubelet /metrics/resource endpoint (plus a
+# windows-exporter DaemonSet that never schedules on this Linux-only cluster)
+# and remote-wrote them into the same Prometheus, duplicating those series.
+# This release now ships pod logs and cluster events to Loki only.
+# See docs/observability/COLLECTION-OWNERSHIP.md.
 clusterMetrics:
-  enabled: true
-  # Do not deploy - kube-prometheus-stack owns these
-  node-exporter:
-    deploy: false
-    enabled: false
-  kube-state-metrics:
-    deploy: false
-    enabled: false
+  enabled: false
 
 clusterEvents:
   enabled: true
@@ -19,6 +19,12 @@ podLogs:
   enabled: true
 
 nodeLogs:
+  enabled: false
+
+# Emits usage-report metrics and therefore requires a metrics destination;
+# metrics shipping is disabled here, so this must be off for the chart to
+# render.
+selfReporting:
   enabled: false
 
 alloy-logs:
@@ -47,21 +53,10 @@ alloy-logs:
       timeoutSeconds: 5
       failureThreshold: 6
 
+# Metrics collection is owned by kube-prometheus-stack; with clusterMetrics
+# disabled there is nothing for this instance to collect.
 alloy-metrics:
-  enabled: true
-  controller:
-    # Prefer the large pve5 worker (labeled workload.jdwlabs.io/monitoring) so
-    # the memory-heavy monitoring stack stays off the small general workers.
-    # Soft preference: everything still schedules anywhere if that node is down.
-    affinity:
-      nodeAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            preference:
-              matchExpressions:
-                - key: workload.jdwlabs.io/monitoring
-                  operator: In
-                  values: ["true"]
+  enabled: false
 
 alloy-singleton:
   enabled: true
@@ -70,6 +65,3 @@ destinations:
   - name: Loki
     type: loki
     url: "http://platform-loki:3100/loki/api/v1/push"
-  - name: Prometheus
-    type: prometheus
-    url: "http://platform-kube-prometheus-stack-prometheus:9090/api/v1/write"

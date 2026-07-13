@@ -3,9 +3,6 @@ kind: PrometheusRule
 metadata:
   name: storage-capacity-rules
   namespace: monitoring
-  labels:
-    app: kube-prometheus-stack
-    release: platform-kube-prometheus-stack
 spec:
   groups:
     - name: storage-capacity
