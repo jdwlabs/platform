@@ -1,0 +1,8 @@
+# Last matching pattern wins; keep the catch-all first.
+* @jdwillmsen
+
+# Tenant platform definitions gate what runs on the cluster.
+/tenants/platform/ @jdwillmsen
+
+# platformctl is an agent-facing CLI; interface changes need owner review.
+/cli/ @jdwillmsen
