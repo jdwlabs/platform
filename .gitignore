@@ -10,3 +10,12 @@ docs/superpowers/
 worktrees/
 .worktrees/
 .secrets/
+
+# Secrets — local credentials must never be committed
+.env*
+*.key
+*.pem
+kubeconfig*
+*.kubeconfig
+# Go sources named kubeconfig*.go (e.g. in cli/) are code, not credentials
+!kubeconfig*.go
