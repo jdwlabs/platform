@@ -8,24 +8,33 @@ replicas: 1
 service:
   port: 80
 
-# Memory-bounded, CPU-unthrottled: the live upstream deployment was BestEffort
-# and observed spiking to ~600Mi, so the limit gives headroom above that while
-# still protecting the node. No CPU limit on purpose — this is an interactive
-# admin UI and throttling only adds latency; the request keeps it schedulable
-# and out of BestEffort.
+# Memory-bounded: the live upstream deployment was BestEffort and observed
+# spiking to ~600Mi, so the limit gives headroom above that while still
+# protecting the node. The CPU limit is set generously high — an interactive
+# admin UI should never hit 1 CPU, so the limit satisfies bounded-by-policy
+# without adding throttle latency.
 resources:
   requests:
     cpu: 50m
     memory: 256Mi
   limits:
+    cpu: "1"
     memory: 768Mi
 
-# The official image already drops to its own non-root "adminer" user.
-# runAsNonRoot is deliberately omitted: the image user is non-numeric, so the
-# kubelet cannot verify it and would fail the pod with
-# CreateContainerConfigError if runAsNonRoot were set without a numeric UID.
+# Adminer is plain PHP serving world-readable files, so it tolerates running
+# as an arbitrary high UID (the OpenShift model). An explicit numeric UID/GID
+# lets runAsNonRoot be verified by the kubelet (the image's own "adminer" user
+# is non-numeric, which would otherwise CreateContainerConfigError).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+
+# Root FS is read-only; PHP only ever writes session files, which land on the
+# emptyDir mounted at /tmp by the deployment template.
 containerSecurityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL
