@@ -29,12 +29,13 @@ longhornManager:
   resources:
     requests:
       cpu: "100m"
-      # Raised from 512Mi: longhorn-manager was OOM-killed (exitCode 137)
-      # under volume churn, disrupting instance-managers.
-      memory: "1Gi"
+      # ~165Mi steady-state per manager; 512Mi leaves churn headroom without
+      # reserving 1Gi/node the scheduler can never hand out. OOM protection
+      # comes from the limit below, not the request.
+      memory: "512Mi"
     limits:
       cpu: "1000m"
-      # Raised from 1Gi to stop OOM-kills under volume churn.
+      # Raised from 1Gi to stop OOM-kills under volume churn. Do not lower.
       memory: "2Gi"
 
 longhornDriver:
