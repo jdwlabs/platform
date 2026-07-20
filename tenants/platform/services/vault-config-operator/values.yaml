@@ -1,6 +1,13 @@
 enableMonitoring: false
 enableCertManager: true
 
+# The chart's default request (250Mi) is deliberately left untouched — Helm
+# deep-merges values, so only the missing limit is added. Observed usage is
+# ~26Mi; 512Mi (2x the request) just bounds a leak without risking the pod.
+resources:
+  limits:
+    memory: 512Mi
+
 env:
   - name: VAULT_ADDR
     value: http://platform-vault.vault:8200
