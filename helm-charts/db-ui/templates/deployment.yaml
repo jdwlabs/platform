@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "db-ui.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "db-ui.labels" . | nindent 4 }}
 spec:
@@ -14,6 +15,13 @@ spec:
       labels:
         {{- include "db-ui.selectorLabels" . | nindent 8 }}
     spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      volumes:
+        # PHP session storage — the only writable path adminer needs with a
+        # read-only root filesystem.
+        - name: tmp
+          emptyDir: {}
       containers:
         - name: adminer
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -24,6 +32,9 @@ spec:
           {{- end }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           ports:
