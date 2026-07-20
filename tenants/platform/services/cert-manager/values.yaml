@@ -5,18 +5,33 @@ extraArgs:
   - --dns01-recursive-nameservers-only
   - --dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53
 
-# webhook:
-#  limits:
-#    ephemeral-storage: 500Mi
+# All three pods ran BestEffort (first evicted under node memory pressure,
+# invisible to the scheduler). Requests are ~1.5-2x observed steady state;
+# limits leave >=2x burst headroom so nothing gets throttled or OOM-killed
+# under certificate-renewal spikes.
 
-# cainjector:
-#  enabled: false
+# Controller observed ~37Mi.
+resources:
+  requests:
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+
+# cainjector observed ~66Mi (caches CRDs/webhook configs, the biggest of the three).
+cainjector:
+  resources:
+    requests:
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# Webhook observed ~32Mi.
+webhook:
+  resources:
+    requests:
+      memory: 64Mi
+    limits:
+      memory: 128Mi
 
 startupapicheck:
   enabled: false
-#  limits:
-#    ephemeral-storage: 500Mi
-
-# resources:
-#  limits:
-#    ephemeral-storage: 500Mi
