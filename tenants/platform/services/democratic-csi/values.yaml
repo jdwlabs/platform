@@ -12,7 +12,67 @@ driver:
 
 storageClasses: []   # StorageClass managed declaratively in postInstall
 
+# Both pods ran BestEffort with real, sustained usage (controller ~143Mi,
+# node DS ~86Mi per pod) — first evicted under node memory pressure and
+# invisible to the scheduler. Requests are ~1.5x observed per container;
+# limits leave burst headroom for mount storms / large volume operations.
+controller:
+  # democratic-csi driver container carries most of the controller pod's usage.
+  driver:
+    resources:
+      requests:
+        memory: 96Mi
+      limits:
+        memory: 256Mi
+  # CSI sidecars idle ~20-30Mi each.
+  externalAttacher:
+    resources:
+      requests:
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+  externalProvisioner:
+    resources:
+      requests:
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+  externalResizer:
+    resources:
+      requests:
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+  externalSnapshotter:
+    resources:
+      requests:
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+
 node:
+  # NFS driver container does the actual mount work and carries most of the
+  # node pod's ~86Mi observed usage.
+  driver:
+    resources:
+      requests:
+        memory: 96Mi
+      limits:
+        memory: 256Mi
+  driverRegistrar:
+    resources:
+      requests:
+        memory: 32Mi
+      limits:
+        memory: 64Mi
+  # Busybox cleanup container; negligible footprint but bounded so the pod has
+  # no unbounded container.
+  cleanup:
+    resources:
+      requests:
+        memory: 16Mi
+      limits:
+        memory: 32Mi
   # The node DaemonSet has no business running on control-plane nodes.
   # Explicit label-based anti-affinity (not just relying on the CP NoSchedule
   # taint being present at schedule time) so a stray pod can't survive a
