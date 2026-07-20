@@ -36,7 +36,7 @@ The cluster is not starved — it is mis-declared and mis-placed. Requests under
 | talos-g1i-e3h | worker | 4373 Mi | 72.9% | 77% |
 | talos-k3y-y3e | worker | 4373 Mi | 61.7% | 67% |
 | talos-lx0-6a4 | worker (pve5) | 62749 Mi | **11.9%** | **11%** |
-| talos-oam-s4g | CP | 33.7% → 932 Mi | 33.7% | 92% |
+| talos-oam-s4g | CP | 2763 Mi | 33.7% | 92% |
 
 Two structural findings, unchanged from the 2026-07-15 capture:
 
