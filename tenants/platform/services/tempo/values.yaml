@@ -2,7 +2,9 @@ tempo:
   resources:
     requests:
       cpu: 200m
-      memory: 512Mi
+      # ~55Mi live with metrics-generator on; 128Mi covers ingest spikes
+      # while the 1Gi limit keeps the real burst guard.
+      memory: 128Mi
     limits:
       memory: 1Gi
 
