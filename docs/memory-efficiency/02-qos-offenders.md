@@ -91,3 +91,7 @@ All four tenant-app namespaces (jdwlabs-non/prd, dotablaze-tech-non/prd) and arg
 ## Talos-managed allowlist (not fixable from this repo)
 
 kube-proxy, kube-flannel, CP static pods (apiserver/etcd/controller-manager), kube-system metrics-server — machine-config territory in the infrastructure repo. Tracked by the epic, excluded from this repo's zero-offender goal. Note the kube-system metrics-server duplicates the platform `metrics-server` release (both ~200Mi req, ~45Mi use) — dedup is a hit-list item.
+
+## Longhorn chart-gap allowlist (no values knob in chart 1.11.1)
+
+Instance-managers (~290–400Mi live each, ×5 nodes), longhorn-driver-deployer, longhorn-ui, and the engine-image DaemonSet expose no memory `resources` values in chart 1.11.1 (`guaranteedInstanceManagerCPU` is CPU-only; verified against 1.12.0 — still absent). Upstream tracking: [longhorn/longhorn#13202](https://github.com/longhorn/longhorn/issues/13202) (allow setting resource requirements on instance-manager pods) and [longhorn/longhorn#6351](https://github.com/longhorn/longhorn/issues/6351) (instance-manager resource request strategy). Re-check on every Longhorn chart upgrade; until then these are excluded from the zero-offender goal. Their eviction protection comes from `defaultSettings.priorityClass` instead.
