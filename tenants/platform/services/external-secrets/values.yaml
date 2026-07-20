@@ -1,0 +1,26 @@
+# All three pods ran BestEffort (first evicted under node memory pressure,
+# invisible to the scheduler). Requests are ~1.5-2x observed steady state;
+# limits leave >=2x burst headroom for secret-sync reconcile spikes.
+
+# Controller observed ~63Mi.
+resources:
+  requests:
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+# cert-controller observed ~38Mi.
+certController:
+  resources:
+    requests:
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+# Webhook observed ~82Mi.
+webhook:
+  resources:
+    requests:
+      memory: 128Mi
+    limits:
+      memory: 256Mi
