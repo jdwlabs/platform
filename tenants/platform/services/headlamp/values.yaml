@@ -2,6 +2,15 @@ clusterRoleBinding:
   create: true
   clusterRoleName: cluster-admin
 
+# Ran BestEffort (first evicted under node memory pressure, invisible to the
+# scheduler). Observed ~48Mi; request ~2x that, limit leaves headroom for
+# UI/API bursts.
+resources:
+  requests:
+    memory: 96Mi
+  limits:
+    memory: 192Mi
+
 config:
   oidc:
     # externalSecret mode is the only chart path that wires the client
