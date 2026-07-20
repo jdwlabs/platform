@@ -23,6 +23,19 @@ defaultSettings:
   deletingConfirmationFlag: true
   # System-managed components (engine-image, instance-manager, longhorn-csi-plugin).
   systemManagedComponentsNodeSelector: "workload.jdwlabs.io/worker:true"
+  # The CSI components all ran BestEffort — this Longhorn setting (a JSON
+  # string) is the only knob the chart exposes for them. Requests are ~1.5-2x
+  # observed per pod (attacher ~26Mi, provisioner ~32Mi, resizer ~27Mi,
+  # snapshotter ~34Mi, csi-plugin pod ~52Mi across its three containers);
+  # limits leave >=2x headroom so volume churn doesn't OOM the CSI path.
+  systemManagedCSIComponentsResourceLimits: >-
+    {"csi-attacher":{"requests":{"memory":"48Mi"},"limits":{"memory":"128Mi"}},
+    "csi-provisioner":{"requests":{"memory":"64Mi"},"limits":{"memory":"128Mi"}},
+    "csi-resizer":{"requests":{"memory":"48Mi"},"limits":{"memory":"128Mi"}},
+    "csi-snapshotter":{"requests":{"memory":"64Mi"},"limits":{"memory":"128Mi"}},
+    "longhorn-csi-plugin":{"requests":{"memory":"64Mi"},"limits":{"memory":"256Mi"}},
+    "node-driver-registrar":{"requests":{"memory":"16Mi"},"limits":{"memory":"64Mi"}},
+    "longhorn-liveness-probe":{"requests":{"memory":"16Mi"},"limits":{"memory":"64Mi"}}}
 
 longhornManager:
   priorityClassName: platform-critical
@@ -38,25 +51,16 @@ longhornManager:
       # Raised from 1Gi to stop OOM-kills under volume churn. Do not lower.
       memory: "2Gi"
 
+# The chart exposes no resources values for longhorn-driver-deployer,
+# longhorn-ui, the engine-image DaemonSet, or instance-manager memory
+# (guaranteedInstanceManagerCPU is CPU-only) — earlier longhornDriver/
+# longhornUI resources blocks here were silently ignored by the chart and
+# have been removed rather than left looking effective.
 longhornDriver:
   priorityClassName: platform-critical
-  resources:
-    requests:
-      cpu: "50m"
-      memory: "128Mi"
-    limits:
-      cpu: "500m"
-      memory: "512Mi"
 
 longhornUI:
   replicas: 1
-  resources:
-    requests:
-      cpu: "100m"
-      memory: "256Mi"
-    limits:
-      cpu: "500m"
-      memory: "512Mi"
 
 ingress:
   enabled: false # Managed via Gateway API in postInstall
