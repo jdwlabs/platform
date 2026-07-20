@@ -46,9 +46,12 @@ prometheus:
     # crowding smaller workers. Replaces the earlier 3Gi-request/no-limit shape:
     # WAL-replay spikes shrink with the 60s scrape + cardinality drops above,
     # so a 2Gi ceiling now clears replay. Revisit if replay OOMs recur.
+    # Request 1536Mi: steady-state RSS runs ~1.5Gi live, so a 1Gi request
+    # under-declared by ~500Mi and the scheduler placed other pods into memory
+    # Prometheus was already using.
     resources:
       requests:
-        memory: 1Gi
+        memory: 1536Mi
         cpu: 250m
       limits:
         memory: 2Gi
