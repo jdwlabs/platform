@@ -1,0 +1,8 @@
+# Operator ran BestEffort (first evicted under node memory pressure, invisible
+# to the scheduler). Observed ~54Mi steady state; request is ~1.75x that for
+# scheduler visibility, limit leaves generous headroom for reconcile bursts.
+resources:
+  requests:
+    memory: 96Mi
+  limits:
+    memory: 256Mi
