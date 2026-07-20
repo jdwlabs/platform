@@ -1,5 +1,4 @@
 global:
-  priorityClassName: platform-critical
   # User-deployed components (longhorn-manager, longhorn-ui, driver-deployer).
   # Control-plane nodes have no toleration for their own NoSchedule taint set
   # at pod-creation time, so a taint-timing race during a CP rejoin/reboot can
@@ -11,6 +10,12 @@ networkPolicies:
   enabled: false
 
 defaultSettings:
+  # The chart key is priorityClass, not priorityClassName — the *Name variants
+  # previously here were silently ignored and longhorn ran the chart default
+  # longhorn-critical. This setting also covers system-managed components
+  # (instance-manager, CSI, engine-image) and is the default for user-deployed
+  # components that don't set their own priorityClass.
+  priorityClass: platform-critical
   defaultReplicaCount: 3
   replicaSoftAntiAffinity: true
   replicaAutoBalance: "best-effort"
@@ -38,7 +43,7 @@ defaultSettings:
     "longhorn-liveness-probe":{"requests":{"memory":"16Mi"},"limits":{"memory":"64Mi"}}}
 
 longhornManager:
-  priorityClassName: platform-critical
+  priorityClass: platform-critical
   resources:
     requests:
       cpu: "100m"
@@ -57,7 +62,7 @@ longhornManager:
 # longhornUI resources blocks here were silently ignored by the chart and
 # have been removed rather than left looking effective.
 longhornDriver:
-  priorityClassName: platform-critical
+  priorityClass: platform-critical
 
 longhornUI:
   replicas: 1
