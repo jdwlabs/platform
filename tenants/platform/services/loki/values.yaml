@@ -53,6 +53,18 @@ chunksCache:
   maxItemMemory: 5
   replicas: 1
 
+# The chart derives the container request from allocatedMemory (×1.2 memcached
+# overhead), so this is the only knob that actually shrinks the reservation.
+# Default 1024MB reserved ~1.2Gi for a cache holding ~25Mi — queries here are
+# rarely repeated, so a small results cache loses nothing. chunksCache above is
+# deliberately untouched: memcached fills to its allocation and it runs ~90%
+# utilized.
+resultsCache:
+  enabled: true
+  allocatedMemory: 64   # MB
+  maxItemMemory: 5
+  replicas: 1
+
 loki:
   auth_enabled: false
   commonConfig:
