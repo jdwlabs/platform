@@ -58,6 +58,16 @@ alloy-logs:
 alloy-metrics:
   enabled: false
 
+# Operator ran BestEffort (first evicted under node memory pressure,
+# invisible to the scheduler). Observed ~57Mi; request ~1.7x that, limit
+# leaves headroom for Alloy CR reconcile bursts.
+alloy-operator:
+  resources:
+    requests:
+      memory: 96Mi
+    limits:
+      memory: 256Mi
+
 alloy-singleton:
   enabled: true
   # Cluster-events collector ran ~170Mi live against the chart's 50Mi default

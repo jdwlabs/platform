@@ -6,6 +6,14 @@ prometheusOperator:
   admissionWebhooks:
     certManager:
       enabled: true
+  # Ran BestEffort (first evicted under node memory pressure, invisible to
+  # the scheduler). Observed ~58Mi; request ~1.7x that, limit leaves headroom
+  # for reconciles over many ServiceMonitors.
+  resources:
+    requests:
+      memory: 96Mi
+    limits:
+      memory: 256Mi
 
 prometheus:
   prometheusSpec:
@@ -97,6 +105,15 @@ alertmanager:
   alertmanagerSpec:
     useExistingSecret: true
     configSecret: alertmanager-config
+    # The 200Mi request is the prometheus-operator default, restated here so
+    # it survives operator-default changes; observed usage is ~46Mi. The pod
+    # previously had no limit — 512Mi bounds it while leaving generous room
+    # for alert-storm bursts.
+    resources:
+      requests:
+        memory: 200Mi
+      limits:
+        memory: 512Mi
     storage:
       volumeClaimTemplate:
         spec:
@@ -127,12 +144,29 @@ kube-state-metrics:
         - sourceLabels: [__name__]
           regex: "kube_.*_annotations"
           action: drop
+  # Ran BestEffort. Observed ~33Mi; request ~2x that. Memory scales with
+  # object count, which grows slowly here — 128Mi limit is ample.
+  resources:
+    requests:
+      memory: 64Mi
+    limits:
+      memory: 128Mi
 
 nodeExporter:
   enabled: true
   prometheus:
     monitor:
       enabled: true
+
+# Configuration for the prometheus-node-exporter subchart. The DaemonSet ran
+# BestEffort at ~19Mi observed per node (151Mi across 8); node-exporter's
+# footprint is flat, so a tight bound is safe.
+prometheus-node-exporter:
+  resources:
+    requests:
+      memory: 32Mi
+    limits:
+      memory: 64Mi
 
 # Grafana managed separately
 grafana:
