@@ -24,10 +24,12 @@ cluster:
   # (e.g. WAL replay during a node roll). Requests/limits promote them to
   # Burstable — deprioritised for OOM — and let the scheduler reserve their
   # footprint instead of overpacking a node. 768Mi fits ~3 instances per
-  # worker alongside Longhorn + system overhead.
+  # worker alongside Longhorn + system overhead. 192Mi request is the floor:
+  # instances idle ~75Mi but WAL replay after a node roll needs the margin —
+  # do not trim further.
   resources:
     requests:
-      memory: 256Mi
+      memory: 192Mi
     limits:
       memory: 768Mi
 
