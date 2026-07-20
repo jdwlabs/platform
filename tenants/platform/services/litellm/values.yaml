@@ -81,8 +81,13 @@ proxy_config:
     drop_params: true
     num_retries: 2
 
-# 2Gi: boot spike (Prisma engine + proxy import) OOMKilled the container at
-# both 512Mi and 1Gi within ~4s; verified starting clean at 2Gi.
+# 2Gi limit: boot spike (Prisma engine + proxy import) OOMKilled the container
+# at both 512Mi and 1Gi within ~4s; verified starting clean at 2Gi.
+# Request matches the limit because steady-state usage sits at ~1.99Gi live —
+# a lower request hides ~1.5Gi from the scheduler and lets it pack this pod
+# onto nodes that are actually full. Equal request/limit makes the pod
+# effectively Guaranteed on memory, so it is not an OOM-kill candidate under
+# node pressure.
 resources:
-  requests: {cpu: 100m, memory: 512Mi}
+  requests: {cpu: 100m, memory: 2Gi}
   limits: {memory: 2Gi}

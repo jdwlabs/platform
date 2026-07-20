@@ -60,6 +60,13 @@ alloy-metrics:
 
 alloy-singleton:
   enabled: true
+  # Cluster-events collector ran ~170Mi live against the chart's 50Mi default
+  # request — 120Mi invisible to the scheduler. 192Mi covers observed steady
+  # state with modest headroom.
+  alloy:
+    resources:
+      requests:
+        memory: 192Mi
 
 destinations:
   - name: Loki

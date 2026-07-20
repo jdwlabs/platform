@@ -43,10 +43,13 @@ server:
            tls_disable = "true"
         }
         service_registration "kubernetes" {}
+  # Request 384Mi: steady-state usage runs ~345Mi live, above the old 256Mi
+  # request, so the scheduler was placing against less memory than Vault
+  # actually holds. 512Mi limit unchanged — ample burst headroom observed.
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 384Mi
     limits:
       cpu: 500m
       memory: 512Mi
