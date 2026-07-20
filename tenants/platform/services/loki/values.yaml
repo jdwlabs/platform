@@ -97,6 +97,15 @@ loki:
   ruler:
     enable_api: true
 
+# Gateway (nginx) ran BestEffort at ~13Mi observed; it only proxies to the
+# single binary, so a tight bound is safe.
+gateway:
+  resources:
+    requests:
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+
 monitoring:
   serviceMonitor:
     enabled: true
@@ -117,6 +126,13 @@ minio:
 # pod can't survive a taint-timing race during a CP node rejoin/reboot (a
 # recurring failure mode).
 lokiCanary:
+  # Ran BestEffort at ~19Mi observed per node (96Mi across 5); the canary
+  # write/read loop has a flat footprint, so a tight bound is safe.
+  resources:
+    requests:
+      memory: 32Mi
+    limits:
+      memory: 64Mi
   affinity:
     nodeAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:

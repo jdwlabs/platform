@@ -34,6 +34,15 @@ admin:
   passwordKey: admin-password
 
 sidecar:
+  # The dashboard sidecar was the one container in this pod with no bounds
+  # (the grafana container above is already bounded). It watches ConfigMaps
+  # and buffers dashboard JSON in memory, so give it room for large-dashboard
+  # reload bursts.
+  resources:
+    requests:
+      memory: 64Mi
+    limits:
+      memory: 192Mi
   dashboards:
     enabled: true
     label: grafana_dashboard
