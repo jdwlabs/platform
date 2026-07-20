@@ -1,0 +1,11 @@
+apiVersion: v2
+name: db-ui
+description: Minimal in-house Deployment + Service for Adminer. Replaces the upstream ectobit adminer chart so the single-container DB admin tool runs with bounded resources and health probes instead of BestEffort.
+type: application
+version: 0.1.0
+appVersion: "4.8.1"
+sources:
+  - https://github.com/vrana/adminer
+maintainers:
+  - name: jdwlabs
+    email: jdwillmsen@gmail.com

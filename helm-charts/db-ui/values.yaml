@@ -1,0 +1,41 @@
+image:
+  repository: adminer
+  tag: "4.8.1"
+  pullPolicy: IfNotPresent
+
+replicas: 1
+
+service:
+  port: 80
+
+# Memory-bounded, CPU-unthrottled: the live upstream deployment was BestEffort
+# and observed spiking to ~600Mi, so the limit gives headroom above that while
+# still protecting the node. No CPU limit on purpose — this is an interactive
+# admin UI and throttling only adds latency; the request keeps it schedulable
+# and out of BestEffort.
+resources:
+  requests:
+    cpu: 50m
+    memory: 256Mi
+  limits:
+    memory: 768Mi
+
+# The official image already drops to its own non-root "adminer" user.
+# runAsNonRoot is deliberately omitted: the image user is non-numeric, so the
+# kubelet cannot verify it and would fail the pod with
+# CreateContainerConfigError if runAsNonRoot were set without a numeric UID.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+# Extra environment variables for the adminer container
+# (e.g. ADMINER_DEFAULT_SERVER to pre-fill the login form).
+env: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

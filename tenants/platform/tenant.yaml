@@ -81,7 +81,6 @@ project:
     - 'https://kubernetes-sigs.github.io/headlamp/'
     - 'https://cloudnative-pg.github.io/charts'
     - 'ghcr.io/actions/actions-runner-controller-charts'
-    - 'https://charts.ectobit.com'
     - 'ghcr.io/nginx/charts'
     - 'https://democratic-csi.github.io/charts/'
     - 'docker.litellm.ai/berriai'
@@ -276,9 +275,10 @@ services:
     syncWave: 4
 
   - name: db-ui
-    chart: adminer
-    repo: https://charts.ectobit.com
-    revision: 0.1.8
+    chart: ""
+    chartPath: helm-charts/db-ui
+    repo: https://github.com/jdwlabs/platform.git
+    revision: main
     namespace: database
     postInstall: true
     syncWave: 4

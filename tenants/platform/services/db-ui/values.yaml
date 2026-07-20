@@ -1,0 +1,2 @@
+# Intentionally empty: the in-house chart's defaults (helm-charts/db-ui/values.yaml)
+# carry the resource bounds and probes. Put platform-specific overrides here.

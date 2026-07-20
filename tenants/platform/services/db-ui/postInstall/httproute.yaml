@@ -14,5 +14,5 @@ spec:
     - dbui.jdwlabs.com
   rules:
     - backendRefs:
-        - name: platform-db-ui-adminer
+        - name: db-ui
           port: 80
