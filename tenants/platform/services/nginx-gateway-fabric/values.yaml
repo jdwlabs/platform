@@ -1,6 +1,14 @@
 nginxGateway:
   kind: deployment
   replicas: 2
+  # Control-plane pods ran BestEffort at ~51Mi observed per replica. Request
+  # ~2x observed for scheduler visibility; limit leaves headroom for config
+  # reload bursts across many routes.
+  resources:
+    requests:
+      memory: 96Mi
+    limits:
+      memory: 192Mi
   snippets:
     enable: true
   config:
@@ -12,6 +20,16 @@ nginxGateway:
 
 nginx:
   kind: daemonSet
+  # Data-plane DaemonSet ran BestEffort at ~64Mi observed per pod (321Mi
+  # across 5). Request ~2x observed; limit generous because nginx buffer
+  # memory scales with concurrent connections and a data-plane OOM drops
+  # live traffic.
+  container:
+    resources:
+      requests:
+        memory: 128Mi
+      limits:
+        memory: 256Mi
   config:
     ipFamily: ipv4
   # The gateway DaemonSet has no business running on control-plane nodes.
