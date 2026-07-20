@@ -2,7 +2,7 @@
 
 Captured 2026-07-20 17:31 UTC, 187 pods / 22 namespaces, 87 distinct workloads (deduped by ownerReference root + namespace).
 
-**Counts: BestEffort 32 · missing memory-limit 50 · missing memory-request 45 (containers, non-deduped).**
+**Counts (workloads with ≥1 offending container): BestEffort 32 · missing memory-limit 50 · missing memory-request 45.**
 
 All four tenant-app namespaces (jdwlabs-non/prd, dotablaze-tech-non/prd) and argocd are clean — zero offenders in every class. The debt is platform add-ons, operators, and Talos-managed kube-system daemons. Each offender's fix target is its GitOps source path — never `kubectl edit`.
 
