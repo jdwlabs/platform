@@ -1,13 +1,45 @@
+# Nightly volume hygiene. All three jobs sit in the "default" group so every
+# volume without explicit recurring-job labels inherits them — earlier
+# versions of these jobs had no groups, so they matched zero volumes and
+# never ran. Snapshot chains grew unbounded as a result: the Prometheus
+# volume reached 1.85x its nominal size (49.8GB actual on 26.8GB) and was
+# the largest real-space consumer in a disk-pressure incident.
+#
+# Ordering is deliberate: snapshot-delete marks excess snapshots removed,
+# snapshot-cleanup purges removable/system snapshots, then filesystem-trim
+# reclaims freed blocks. Staggered off-peak with concurrency 1 so each
+# volume sees one bounded IO pass per night.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: snapshot-delete
+  namespace: longhorn-system
+spec:
+  # Hard cap on ALL snapshots per volume (system- and user-created alike),
+  # unlike snapshot-cleanup which only touches removable/system snapshots —
+  # this is what actually bounds chain bloat. retain 3 keeps a short
+  # rollback window; longer history is not Longhorn's job on this cluster:
+  # CNPG replicates at the application layer and postgres-backup takes
+  # logical dumps, Vault raft holds a full copy per pod.
+  cron: "0 3 * * *" # Daily at 3 AM
+  task: "snapshot-delete"
+  groups: ["default"]
+  retain: 3
+  concurrency: 1
+---
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
 metadata:
   name: snapshot-cleanup
   namespace: longhorn-system
 spec:
-  cron: "0 1 * * *" # Daily at 1 AM
+  # Purges removable and system-generated snapshots (e.g. rebuild leftovers).
+  # retain is ignored for this task — Longhorn mutates it to 0.
+  cron: "30 3 * * *" # Daily at 3:30 AM, after snapshot-delete
   task: "snapshot-cleanup"
+  groups: ["default"]
   retain: 0
-  concurrency: 2
+  concurrency: 1
 ---
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
@@ -15,7 +47,11 @@ metadata:
   name: filesystem-trim
   namespace: longhorn-system
 spec:
-  cron: "0 3 * * *" # Daily at 3 AM
+  # Trims the filesystem so blocks deleted inside the volume are returned
+  # to Longhorn; runs last so space freed by the snapshot jobs is reclaimed
+  # in the same night.
+  cron: "0 4 * * *" # Daily at 4 AM, after snapshot work
   task: "filesystem-trim"
+  groups: ["default"]
   retain: 0
   concurrency: 1
