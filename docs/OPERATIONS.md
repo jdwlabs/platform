@@ -176,7 +176,7 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | Pods CrashLoop with `Error: secret "<name>" not found`           | `platformctl tenants verify-secrets` — reports every ExternalSecret ref that fails to resolve against live Vault (missing kv path or missing field) |
 | ArgoCD App stuck `OutOfSync` after manual edit                   | `kubectl annotate app <name> -n argocd argocd.argoproj.io/refresh=hard`                                    |
 | Cert is `Pending` for >10 minutes                                | `kubectl describe certificate <name> -n <ns>` → look at events; usually DNS-01 propagation                 |
-| ARC runners offline in GitHub                                    | Check `kv/<tenant>-github-app` field `installation_id`; check ARC controller logs in `arc-systems`         |
+| ARC runners offline in GitHub                                    | ARC is dormant by default (CI runs on GitHub-hosted runners — see "Self-hosted CI runners (ARC)" below). If re-enabled: check `kv/<tenant>-github-app` field `installation_id`; check ARC controller logs in `arc-systems` |
 | New tenant ns won't reconcile                                    | Re-run `platformctl tenants validate tenants/`                                                             |
 | "Immutable field" errors during GitOps takeover                  | Delete the conflicting Deployments/StatefulSets/Pods so ArgoCD re-creates them                             |
 | Orphan tenant namespaces after removing a tenant from `tenants/` | `platformctl bootstrap heal --orphan-namespaces`                                                           |
@@ -295,5 +295,35 @@ gates green.
 | Secrets          | `kubectl get clustersecretstore`, then ExternalSecret |
 | Certs            | `kubectl get clusterissuer,certificate -A`            |
 | Postgres         | `kubectl get cluster -n database -o wide` (CNPG plugin) |
-| ARC runners      | `kubectl get pods -n arc-systems`                    |
+| ARC runners      | Dormant by default — `arc-systems` should be empty; see "Self-hosted CI runners (ARC)" |
 | Gateway (NGF)    | `kubectl get pods -n nginx-gateway`, then check `NginxGatewayFabricDown`/`NginxGatewayFabricReconcileErrorsHigh` alerts (control-plane health only, not request-level) |
+
+## Self-hosted CI runners (ARC) — dormant
+
+All CI runs exclusively on GitHub-hosted runners (`ubuntu-latest`). The ARC
+stack (controller + per-tenant runner scale sets) is retained in-repo but
+**disabled by default**: the service entries are commented out in
+`tenants/platform/tenant.yaml` (controller) and
+`tenants/{jdwlabs,dotablaze-tech}/tenant.yaml` (runner sets). Values,
+postInstall manifests, runner namespaces, ARC RBAC, and the
+`kv/<tenant>-github-app` Vault secrets are all kept intact so nothing needs
+rebuilding to come back.
+
+**Steady state while dormant:**
+
+- `arc-systems`, `jdwlabs-runners`, `dotablaze-tech-runners` namespaces exist
+  but run zero pods
+- No workflow may target `ubuntu-jdwlabs` / `ubuntu-dotablaze-tech` on an
+  automatic trigger — such jobs would queue forever (the deployments-repo E2E
+  workflow is manual-dispatch only for this reason)
+
+**Re-enable procedure:**
+
+1. Uncomment the `arc-systems` service in `tenants/platform/tenant.yaml`
+2. Uncomment the `arc-runner-set-<tenant>` service(s) in the tenant file(s)
+3. Verify `kv/<tenant>-github-app` still resolves:
+   `platformctl tenants verify-secrets`
+4. Merge; ArgoCD deploys controller (wave 3) then runner sets (wave 5)
+5. Smoke-test with the apps repo `ARC Test kubernetes Workflow`
+   (workflow_dispatch, input `arc_name`), and confirm runners appear in the
+   GitHub org under Settings > Actions > Runners

@@ -5,7 +5,7 @@
 ### Prerequisites
 
 - [ ] Tenant's GitHub org URL confirmed
-- [ ] GitHub App created in tenant's org for ARC runners
+- [ ] GitHub App created in tenant's org for ARC runners (only if enabling self-hosted runners — ARC is dormant by default, CI runs on GitHub-hosted runners; see OPERATIONS.md)
 - [ ] `platformctl` installed (see [BOOTSTRAP.md §2](BOOTSTRAP.md#2-install-platformctl))
 
 ### Step 1: Clone the platform repo and add your tenant
@@ -43,8 +43,8 @@ malformed service entry. The error message tells you exactly which field.
 
 ### Step 4: Create service configs
 
-- [ ] Create `tenants/<tenant>/services/arc-runner-set-<tenant>/values.yaml`
-- [ ] Create `tenants/<tenant>/services/arc-runner-set-<tenant>/postInstall/externalsecret.yaml`
+- [ ] (Only if enabling self-hosted ARC runners) Create `tenants/<tenant>/services/arc-runner-set-<tenant>/values.yaml`
+- [ ] (Only if enabling self-hosted ARC runners) Create `tenants/<tenant>/services/arc-runner-set-<tenant>/postInstall/externalsecret.yaml`
 
 ### Step 5: Set up a deployment repo (optional)
 
@@ -73,8 +73,8 @@ for the per-tenant paths and env var contract.
 
 - [ ] `platformctl bootstrap verify` reports all gates green
 - [ ] ArgoCD Application `governance-<tenant>` shows Synced/Healthy
-- [ ] Pods running in `<tenant>-runners` namespace
-- [ ] Runner appears in GitHub org Settings > Actions > Runners
+- [ ] (Only if ARC enabled) Pods running in `<tenant>-runners` namespace
+- [ ] (Only if ARC enabled) Runner appears in GitHub org Settings > Actions > Runners
 - [ ] If deployment repo configured: ArgoCD Applications `<tenant>-<name>` show Synced/Healthy
 
 ## Offboarding a Tenant

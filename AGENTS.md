@@ -66,7 +66,7 @@ Each tenant (jdwlabs, dotablaze-tech) has:
 - **ExternalSecrets Operator**: Syncs Vault secrets to Kubernetes secrets
 - **Longhorn**: Block storage
 - **CNPG Operator**: PostgreSQL clusters
-- **ARC Controller**: Self-hosted GitHub Actions runners
+- **ARC Controller**: Self-hosted GitHub Actions runners — dormant; CI runs exclusively on GitHub-hosted runners (service entries commented in tenant.yaml, see OPERATIONS.md)
 - **Atlas Operator**: Database schema migrations
 - **Monitoring Stack**: Prometheus, Grafana, Loki, Tempo, Alertmanager
 - **AI-SRE Stack**: LiteLLM gateway, HolmesGPT agent, alert relay (`ai-sre` namespace)
@@ -79,9 +79,9 @@ Each tenant (jdwlabs, dotablaze-tech) has:
 | 0    | Bootstrap (AppProjects, ArgoCD self-management) |
 | 1    | cert-manager, porkbun-webhook, kubelet-serving-cert-approver, nginx-gateway-fabric, Longhorn, local-path-provisioner, democratic-csi |
 | 2    | Vault, ESO, vault-config-operator, metrics-server, monitoring, Grafana, Loki, kube-prometheus-stack, Tempo, Headlamp |
-| 3    | CNPG operator, ARC controller |
+| 3    | CNPG operator, ARC controller (dormant — commented out) |
 | 4    | PostgreSQL clusters, db-ui, litellm-db, litellm-redis |
-| 5    | postgres-backup, litellm, holmes, tenant ARC runner sets, Atlas schema migrations |
+| 5    | postgres-backup, litellm, holmes, tenant ARC runner sets (dormant — commented out), Atlas schema migrations |
 | 6    | ai-sre-relay (alert webhook target; calls holmes and litellm) |
 
 The authoritative per-service wave assignments live in `tenants/<name>/tenant.yaml` (`syncWave` field).
