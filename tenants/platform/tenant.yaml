@@ -249,13 +249,17 @@ services:
     postInstall: true
     syncWave: 3
 
-  - name: arc-systems
-    chart: gha-runner-scale-set-controller
-    repo: ghcr.io/actions/actions-runner-controller-charts
-    revision: 0.14.1
-    namespace: arc-systems
-    postInstall: true
-    syncWave: 3
+  # ARC is dormant: CI runs exclusively on GitHub-hosted runners. The controller
+  # is kept here (commented, with its values/postInstall intact) so self-hosted
+  # runners can be re-enabled by uncommenting — see OPERATIONS.md "Self-hosted
+  # CI runners (ARC) — dormant". The arc-systems namespace stays defined above.
+  # - name: arc-systems
+  #   chart: gha-runner-scale-set-controller
+  #   repo: ghcr.io/actions/actions-runner-controller-charts
+  #   revision: 0.14.1
+  #   namespace: arc-systems
+  #   postInstall: true
+  #   syncWave: 3
 
   # Wave 4: Shared database infrastructure
   - name: postgresql-cluster-non

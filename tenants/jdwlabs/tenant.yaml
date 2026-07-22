@@ -31,13 +31,16 @@ project:
       kind: ClusterRoleBinding
 
 services:
-  - name: arc-runner-set-jdwlabs
-    chart: gha-runner-scale-set
-    repo: ghcr.io/actions/actions-runner-controller-charts
-    revision: 0.14.1
-    namespace: jdwlabs-runners
-    postInstall: true
-    syncWave: 5
+  # ARC is dormant: CI runs exclusively on GitHub-hosted runners. Kept
+  # commented (values/postInstall intact, namespace still defined) for easy
+  # re-enable — see platform OPERATIONS.md "Self-hosted CI runners (ARC)".
+  # - name: arc-runner-set-jdwlabs
+  #   chart: gha-runner-scale-set
+  #   repo: ghcr.io/actions/actions-runner-controller-charts
+  #   revision: 0.14.1
+  #   namespace: jdwlabs-runners
+  #   postInstall: true
+  #   syncWave: 5
 
   - name: jdwlabs-schemas
     chart: ""

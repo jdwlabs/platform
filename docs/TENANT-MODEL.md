@@ -5,7 +5,7 @@
 A tenant is a GitHub organization (or individual developer account) that:
 
 1. Owns one or more Kubernetes namespaces with isolation boundaries
-2. Has dedicated ARC runner sets registered to their GitHub org
+2. Has dedicated ARC runner sets registered to their GitHub org (dormant — CI runs on GitHub-hosted runners; see OPERATIONS.md "Self-hosted CI runners (ARC)")
 3. Has their own database schemas within shared CNPG clusters
 4. Has scoped secrets in Vault under a per-tenant path prefix
 5. Has an ArgoCD AppProject restricting deployments to their own namespaces
@@ -24,7 +24,7 @@ Each tenant receives:
 - **Namespaces** with `platform.jdwlabs.io/tenant` labels
 - **ArgoCD AppProject** scoped to their namespaces (no cluster-scoped resources)
 - **Vault path prefix** for secret isolation
-- **ARC runner sets** registered to their GitHub org
+- **ARC runner sets** registered to their GitHub org (dormant by default)
 - **Database schemas** managed by Atlas operator in shared CNPG clusters
 - **NetworkPolicies** (default-deny + DNS + ingress controller)
 - **ResourceQuota** and **LimitRange** per namespace
