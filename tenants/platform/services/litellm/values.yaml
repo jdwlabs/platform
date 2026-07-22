@@ -60,10 +60,12 @@ proxy_config:
         max_tokens: 16384
     # Local tier: RTX 5090 VM on pve5 (vllm-inference, static IP outside
     # the DHCP churn). Quota-immune backstop when every cloud pool is
-    # rate-limited or dark; smallest model, so it sits last in the chain.
+    # rate-limited or dark; sits last as the local-of-last-resort tier.
+    # Qwen3-Coder-30B-A3B (AWQ 4-bit) MoE — stronger tool calling than the
+    # prior gpt-oss-20b, same served endpoint contract.
     - model_name: sre-investigator-local
       litellm_params:
-        model: hosted_vllm/openai/gpt-oss-20b
+        model: hosted_vllm/qwen/qwen3-coder-30b-a3b
         api_base: http://192.168.1.50:8000/v1
         max_tokens: 16384
   general_settings:
