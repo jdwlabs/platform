@@ -67,10 +67,14 @@ controller:
   resources:
     requests:
       cpu: 200m
-      memory: 512Mi
+      # Controller sits ~740Mi steady managing 50+ apps; request tracks live
+      # use so the scheduler sees it.
+      memory: 768Mi
     limits:
       cpu: 1000m
-      memory: 1Gi
+      # 1Gi was OOM-killed during mass-merge sync storms; keep burst headroom
+      # ~2x steady state.
+      memory: 1536Mi
 
 server:
   service:
