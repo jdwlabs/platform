@@ -31,6 +31,24 @@ configs:
               - name: jdwlabs
             loadAllGroups: false
             useLoginAsID: false
+        # Google connector for Google-centric devices. Unlike GitHub's `orgs`
+        # gate there is no authentication-side restriction here: the account is
+        # a personal Gmail, so `hostedDomains` (Workspace-only) cannot apply
+        # and ANY Google account can complete the Dex login. Authorization is
+        # what gates access — identities resolve to the Google account email,
+        # and only emails explicitly granted in ArgoCD policy.csv (below) or
+        # the headlamp-oidc-admin ClusterRoleBinding get any RBAC; everyone
+        # else authenticates into nothing (fail closed). clientID/secret come
+        # from the Google OAuth client via Vault (key argocd-dex). The
+        # redirectURI must be registered as an authorized redirect URI on that
+        # OAuth client.
+        - type: google
+          id: google
+          name: Google
+          config:
+            clientID: $dex-secrets:google-client-id
+            clientSecret: $dex-secrets:google-client-secret
+            redirectURI: https://argocd.jdwlabs.com/api/dex/callback
       enablePasswordDB: true
       oauth2:
         skipApprovalScreen: true
@@ -58,6 +76,12 @@ configs:
       # SSO login via the Dex staticPasswords admin (admin@jdwlabs.com);
       # separate identity from the built-in local `admin` account.
       g, admin@jdwlabs.com, role:admin
+      # Social-connector logins (GitHub and Google) both resolve to this
+      # verified email. This grant is the ONLY thing authorizing the Google
+      # connector — Google authenticates any Google account, so every other
+      # Google identity lands here with no role at all (no policy.default is
+      # set — fail closed).
+      g, jdwillmsen@gmail.com, role:admin
 
 controller:
   metrics:
