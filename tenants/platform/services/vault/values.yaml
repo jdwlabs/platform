@@ -3,49 +3,79 @@ ui:
 
 server:
   dataStorage:
-    storageClass: null
+    # longhorn-single (1 Longhorn replica, best-effort locality, Retain) —
+    # defined in the longhorn service's postInstall. Raft already replicates
+    # the data across the 3 pods at the app layer: the default 3-replica
+    # class would store 9 copies and, worse, a single Longhorn
+    # instance-manager fault could stall I/O for several Vault members at
+    # once — recreating the storage-layer SPOF this migration removes. With
+    # one local replica per member, a Longhorn fault costs at most one
+    # member and raft quorum (2/3) survives.
+    storageClass: longhorn-single
   auditStorage:
     storageClass: null
-  standalone:
-    config: |
-      listener "tcp" {
-        address = "[::]:8200"
-        cluster_address = "[::]:8201"
-        tls_disable = "true"
-        # Vault only honors unauthenticated_metrics_access inside the
-        # listener's telemetry stanza; at top level it is ignored and
-        # Prometheus scrapes of /v1/sys/metrics get 403.
-        telemetry {
-          unauthenticated_metrics_access = true
-        }
-      }
-      storage "file" {
-        path = "/vault/data"
-      }
-      telemetry {
-        prometheus_retention_time = "30s"
-        disable_hostname = true
-      }
   ha:
-    enabled: false
+    enabled: true
+    replicas: 3
+    # Chart-native PDB (only rendered in HA mode). maxUnavailable: 1 keeps
+    # raft quorum (2 of 3) through any single voluntary eviction; the raw
+    # postInstall PDB that covered the standalone gap is removed alongside.
+    disruptionBudget:
+      enabled: true
+      maxUnavailable: 1
     raft:
-      enabled: false
+      enabled: true
+      # Sets VAULT_RAFT_NODE_ID to the pod name, so raft member ids are
+      # stable across pod restarts.
       setNodeId: true
       config: |
         cluster_name = "vault-integrated-storage"
-        storage "raft" {
-           path    = "/vault/data/"
-        }
 
         listener "tcp" {
-           address = "[::]:8200"
-           cluster_address = "[::]:8201"
-           tls_disable = "true"
+          address = "[::]:8200"
+          cluster_address = "[::]:8201"
+          tls_disable = "true"
+          # Vault only honors unauthenticated_metrics_access inside the
+          # listener's telemetry stanza; at top level it is ignored and
+          # Prometheus scrapes of /v1/sys/metrics get 403.
+          telemetry {
+            unauthenticated_metrics_access = true
+          }
         }
+
+        storage "raft" {
+          path = "/vault/data"
+          # Join via per-pod DNS on the headless internal service
+          # (publishNotReadyAddresses: true, so names resolve while pods
+          # are still sealed/unready). Every member lists every member;
+          # self-joins are no-ops, so the same config works on all pods.
+          retry_join {
+            leader_api_addr = "http://platform-vault-0.platform-vault-internal:8200"
+          }
+          retry_join {
+            leader_api_addr = "http://platform-vault-1.platform-vault-internal:8200"
+          }
+          retry_join {
+            leader_api_addr = "http://platform-vault-2.platform-vault-internal:8200"
+          }
+        }
+
         service_registration "kubernetes" {}
+
+        telemetry {
+          prometheus_retention_time = "30s"
+          disable_hostname = true
+        }
+  # Chart-default affinity is kept: REQUIRED (hard) pod anti-affinity on
+  # kubernetes.io/hostname. With 5 schedulable workers and 3 replicas this
+  # is satisfiable, and a node failure can then never take out two raft
+  # members at once — soft anti-affinity could co-locate members under
+  # memory pressure and turn one node loss into quorum loss.
   # Request 384Mi: steady-state usage runs ~345Mi live, above the old 256Mi
   # request, so the scheduler was placing against less memory than Vault
   # actually holds. 512Mi limit unchanged — ample burst headroom observed.
+  # Raft standbys hold less than the active node, so the same sizing fits
+  # all three members.
   resources:
     requests:
       cpu: 100m

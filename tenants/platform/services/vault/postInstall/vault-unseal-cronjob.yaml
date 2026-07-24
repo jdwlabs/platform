@@ -31,14 +31,43 @@ spec:
       ttlSecondsAfterFinished: 3600
       template:
         spec:
+          # One container per raft member: each pod seals independently, and
+          # the ClusterIP service round-robins (publishNotReadyAddresses), so
+          # a single service-addressed unseal would hit an arbitrary pod.
+          # Per-pod DNS on the headless internal service resolves even while
+          # a pod is sealed/unready. All members share the single Shamir key.
           containers:
-            - name: vault-unseal
+            - name: vault-unseal-0
               # Upstream publishes no semver tags; pin by digest so the pull is
               # reproducible and immune to a moving :latest re-tag.
               image: blockloop/vault-unseal@sha256:41bcab66bb0759f8b3887b7b2f22a282d5ff3c6e2fc7829eeb2d1c98e3870c62
               env:
                 - name: VAULT_ADDR
-                  value: "http://platform-vault.vault.svc:8200"
+                  value: "http://platform-vault-0.platform-vault-internal.vault.svc:8200"
+                - name: VAULT_SKIP_VERIFY
+                  value: "1"
+                - name: VAULT_UNSEAL_KEY_1
+                  valueFrom:
+                    secretKeyRef:
+                      name: vault-unseal-keys
+                      key: unseal_key_1
+            - name: vault-unseal-1
+              image: blockloop/vault-unseal@sha256:41bcab66bb0759f8b3887b7b2f22a282d5ff3c6e2fc7829eeb2d1c98e3870c62
+              env:
+                - name: VAULT_ADDR
+                  value: "http://platform-vault-1.platform-vault-internal.vault.svc:8200"
+                - name: VAULT_SKIP_VERIFY
+                  value: "1"
+                - name: VAULT_UNSEAL_KEY_1
+                  valueFrom:
+                    secretKeyRef:
+                      name: vault-unseal-keys
+                      key: unseal_key_1
+            - name: vault-unseal-2
+              image: blockloop/vault-unseal@sha256:41bcab66bb0759f8b3887b7b2f22a282d5ff3c6e2fc7829eeb2d1c98e3870c62
+              env:
+                - name: VAULT_ADDR
+                  value: "http://platform-vault-2.platform-vault-internal.vault.svc:8200"
                 - name: VAULT_SKIP_VERIFY
                   value: "1"
                 - name: VAULT_UNSEAL_KEY_1
