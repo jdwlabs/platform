@@ -63,6 +63,12 @@ var staticSeedSpecs = map[string]seedSpec{
 		{"headlamp-client-secret", "PLATFORMCTL_ARGOCD_DEX_HEADLAMP_CLIENT_SECRET", true, false},
 		{"github-client-id", "PLATFORMCTL_ARGOCD_DEX_GITHUB_CLIENT_ID", false, false},
 		{"github-client-secret", "PLATFORMCTL_ARGOCD_DEX_GITHUB_CLIENT_SECRET", true, false},
+		// Required by the dex-secrets ExternalSecret, but optional here so a
+		// partial re-seed (e.g. rotating only the admin password) does not
+		// demand the Google credentials; merge semantics in Apply keep the
+		// existing values intact.
+		{"google-client-id", "PLATFORMCTL_ARGOCD_DEX_GOOGLE_CLIENT_ID", false, true},
+		{"google-client-secret", "PLATFORMCTL_ARGOCD_DEX_GOOGLE_CLIENT_SECRET", true, true},
 	}},
 	"grafana-gitsync": {Path: "grafana-gitsync", Fields: []seedField{
 		{"app-id", "PLATFORMCTL_GRAFANA_GITSYNC_APP_ID", false, false},
