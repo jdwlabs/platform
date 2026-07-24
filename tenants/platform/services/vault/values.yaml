@@ -3,7 +3,15 @@ ui:
 
 server:
   dataStorage:
-    storageClass: null
+    # longhorn-single (1 Longhorn replica, best-effort locality, Retain) —
+    # defined in the longhorn service's postInstall. Raft already replicates
+    # the data across the 3 pods at the app layer: the default 3-replica
+    # class would store 9 copies and, worse, a single Longhorn
+    # instance-manager fault could stall I/O for several Vault members at
+    # once — recreating the storage-layer SPOF this migration removes. With
+    # one local replica per member, a Longhorn fault costs at most one
+    # member and raft quorum (2/3) survives.
+    storageClass: longhorn-single
   auditStorage:
     storageClass: null
   ha:
@@ -18,9 +26,7 @@ server:
     raft:
       enabled: true
       # Sets VAULT_RAFT_NODE_ID to the pod name, so raft member ids are
-      # stable across pod restarts. The offline `vault operator migrate`
-      # run must use node_id "platform-vault-0" to match (see
-      # docs/VAULT-RAFT-MIGRATION.md).
+      # stable across pod restarts.
       setNodeId: true
       config: |
         cluster_name = "vault-integrated-storage"
