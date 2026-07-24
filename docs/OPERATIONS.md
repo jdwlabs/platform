@@ -206,6 +206,10 @@ from environment variables. The contract:
 | `kv/usersrole` `jwt_secret`                       | `PLATFORMCTL_USERSROLE_JWT_SECRET`               |
 | `kv/argocd-dex` `admin-password-hash`             | `PLATFORMCTL_ARGOCD_DEX_ADMIN_PASSWORD_HASH`     |
 | `kv/argocd-dex` `headlamp-client-secret`          | `PLATFORMCTL_ARGOCD_DEX_HEADLAMP_CLIENT_SECRET`  |
+| `kv/argocd-dex` `github-client-id`                | `PLATFORMCTL_ARGOCD_DEX_GITHUB_CLIENT_ID`        |
+| `kv/argocd-dex` `github-client-secret`            | `PLATFORMCTL_ARGOCD_DEX_GITHUB_CLIENT_SECRET`    |
+| `kv/argocd-dex` `google-client-id` (optional)     | `PLATFORMCTL_ARGOCD_DEX_GOOGLE_CLIENT_ID`        |
+| `kv/argocd-dex` `google-client-secret` (optional) | `PLATFORMCTL_ARGOCD_DEX_GOOGLE_CLIENT_SECRET`    |
 | `kv/<tenant>-github-app` `github_app_id`          | `PLATFORMCTL_<TENANT>_GITHUB_APP_ID`             |
 | `kv/<tenant>-github-app` `github_app_installation_id` | `PLATFORMCTL_<TENANT>_GITHUB_INSTALLATION_ID` |
 | `kv/<tenant>-github-app` `github_app_private_key` | `PLATFORMCTL_<TENANT>_GITHUB_PRIVATE_KEY`        |

@@ -77,7 +77,7 @@ reboots), not on a daily timer.
 | `offline_access` refresh tokens | **Implemented**  | Pure repo config (Headlamp OIDC scopes); removes the daily re-login, the main mobile pain point   |
 | GitHub upstream connector       | **Implemented**  | Org-gated (`orgs: [jdwlabs]`) social login; phones already signed into GitHub get a 2–3 tap cold login with passkey/biometric — see §6 |
 | Passkey / WebAuthn (direct)     | Ruled out        | Dex has no native WebAuthn connector; the GitHub connector delivers passkey login via GitHub's own auth instead of replacing Dex |
-| Google upstream connector       | Viable, alt.     | Equivalent UX for Google-centric phones, but a personal-gmail account has no `hostedDomains` filter, so access control is messier than GitHub's `orgs` gate |
+| Google upstream connector       | **Implemented**  | Equivalent UX for Google-centric phones. A personal-gmail account has no `hostedDomains` filter, so any Google account can *authenticate* — authorization is gated entirely by the per-email RBAC grants (see §6.1) |
 | VPN / Tailscale / WireGuard     | Ruled out        | Unnecessary: the dashboard is already public HTTPS behind the platform gateway with valid certs   |
 
 Remaining friction after this change: re-login after Dex/Headlamp pod
@@ -106,12 +106,44 @@ the GitHub OAuth App exists and its credentials are in Vault. One-time steps:
 Access is gated to `jdwlabs` org members (`orgs: [jdwlabs]`); membership alone
 does not grant cluster-admin — only emails bound in `headlamp-oidc-admin` do.
 
-> With both the static-password DB (`enablePasswordDB: true`) and the GitHub
-> connector enabled, Dex shows a connector picker (one extra tap). Drop
-> `enablePasswordDB: true` and the `staticPasswords` block to make GitHub the
-> only — and therefore automatic — connector, at the cost of losing the
-> password fallback. Google remains a documented alternative connector (same
-> wiring, `type: google`) if a Google-centric flow is ever preferred.
+> With the static-password DB (`enablePasswordDB: true`) and the GitHub and
+> Google connectors all enabled, Dex shows a connector picker (one extra
+> tap). Drop `enablePasswordDB: true` and the `staticPasswords` block to
+> shrink the picker to the two social connectors, at the cost of losing the
+> password fallback.
+
+## 6.1 Google login setup (implemented — requires one-time operator steps)
+
+The Google upstream connector (`type: google`) shares the wiring above but
+its access model is inverted: there is no equivalent of GitHub's
+`orgs: [jdwlabs]` gate. `hostedDomains` only works for Google Workspace
+domains, and the operator account is a personal Gmail — so **any Google
+account in the world can complete the Dex login**. That is safe only because
+authorization fails closed on both consumers:
+
+- **Headlamp / Kubernetes**: RBAC is granted per email by the
+  `headlamp-oidc-admin` ClusterRoleBinding
+  (`oidc:jdwillmsen@gmail.com`); any other Google identity authenticates
+  but holds a token with zero RBAC.
+- **ArgoCD**: `policy.csv` grants `role:admin` to `jdwillmsen@gmail.com`
+  only, and no `policy.default` is set, so unknown identities get no role.
+
+Never add a `policy.default` or a wildcard RBAC subject while the Google
+connector is enabled.
+
+One-time steps (mirror of §6):
+
+1. Create an **OAuth 2.0 Client ID** (type *Web application*) in the Google
+   Cloud console (APIs & Services → Credentials) with authorized redirect
+   URI `https://argocd.jdwlabs.com/api/dex/callback`.
+2. Put the client ID and secret in Vault at `kv/argocd-dex` as fields
+   `google-client-id` and `google-client-secret`
+   (`platformctl bootstrap seed argocd-dex` with the
+   `PLATFORMCTL_ARGOCD_DEX_GOOGLE_*` env vars). The `dex-secrets`
+   ExternalSecret maps both fields — names in git, values in Vault.
+3. Confirm the Google account's email matches the `oidc:<email>` subject in
+   `tenants/platform/services/headlamp/postInstall/oidc-admin-rbac.yaml`
+   and the `g, <email>, role:admin` grant in the ArgoCD `policy.csv`.
 
 ## 7. Troubleshooting
 
@@ -121,5 +153,7 @@ does not grant cluster-admin — only emails bound in `headlamp-oidc-admin` do.
 | Redirect loop between Headlamp and Dex        | `headlamp-oidc-secret` out of date — check the ExternalSecret in the `headlamp` namespace, then restart the Headlamp pod |
 | GitHub login shows "access denied"            | Account is not a `jdwlabs` org member, or the OAuth App callback URL ≠ `https://argocd.jdwlabs.com/api/dex/callback`, or `github-client-id`/`-secret` missing from `kv/argocd-dex` |
 | GitHub login succeeds but `403`/no access     | GitHub primary email ≠ the `oidc:<email>` subject in `headlamp-oidc-admin` — update the ClusterRoleBinding |
+| Google login fails at Google (`redirect_uri_mismatch` / invalid client) | OAuth client redirect URI ≠ `https://argocd.jdwlabs.com/api/dex/callback`, or `google-client-id`/`-secret` missing from `kv/argocd-dex` |
+| Google login succeeds but `403`/no access     | Expected for every Google account except the granted email — the connector authenticates anyone; only `oidc:jdwillmsen@gmail.com` (Headlamp CRB) and the `policy.csv` grant (ArgoCD) authorize |
 | Dex rejects the password                      | Hash in Vault out of sync — rotate per [OPERATIONS.md §1.2](OPERATIONS.md#12-headlamp-mobile-login-oidc-via-dex) |
 | Daily forced re-login returns                 | Refresh token not being issued — confirm `OIDC_SCOPES` includes `offline_access` in `tenants/platform/services/headlamp/postInstall/oidc-externalsecret.yaml` |
