@@ -1,0 +1,18 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: platform-vault
+  namespace: vault
+spec:
+  # Vault runs standalone (1 replica) and the upstream chart only renders its
+  # PDB in HA mode, so this raw manifest covers the gap. minAvailable: 1 on a
+  # single replica deliberately blocks ALL voluntary evictions: Vault is the
+  # trust root for ESO/cert-manager, so a drain that evicts it must be an
+  # explicit operator decision (kubectl drain will hang on this pod until the
+  # operator intervenes), not a side effect of routine node maintenance.
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+      app.kubernetes.io/instance: platform-vault
+      component: server
