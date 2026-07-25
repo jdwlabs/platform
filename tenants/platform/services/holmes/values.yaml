@@ -226,12 +226,18 @@ customSkills:
 # toolsets and renders only a bare ServiceAccount, leaving Holmes blind.
 k8sRBAC: false
 
+# Request equals limit deliberately: Guaranteed QoS keeps the investigation
+# agent from being the first thing evicted when a node is under memory
+# pressure, which is exactly when it is needed. 1536Mi sits ~4x steady state
+# (365Mi idle) and ~1.8x the highest figure observed during a tool-heavy
+# investigation, so bursts have room while the reservation no longer holds
+# half a gig that nothing ever touches.
 resources:
   requests:
     cpu: 100m
-    memory: 2048Mi
+    memory: 1536Mi
   limits:
-    memory: 2048Mi
+    memory: 1536Mi
 
 # The Holmes image ships no talosctl; fetch a pinned build matched to the
 # cluster's Talos version and verify it before the main container starts.
