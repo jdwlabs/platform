@@ -65,6 +65,15 @@ resultsCache:
   maxItemMemory: 5
   replicas: 1
 
+# Shared by both memcached StatefulSets; the exporter sidecar ran unbounded in
+# each while the memcached container beside it was capped. Observed 8-24Mi.
+memcachedExporter:
+  resources:
+    requests:
+      memory: 32Mi
+    limits:
+      memory: 96Mi
+
 loki:
   auth_enabled: false
   commonConfig:
