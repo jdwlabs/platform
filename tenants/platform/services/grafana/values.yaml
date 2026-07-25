@@ -28,6 +28,16 @@ resources:
   limits:
     memory: 512Mi
 
+# Runs `chown -R` over the data volume before grafana starts. Trivial and
+# short-lived, but an unbounded init container drags the whole pod's QoS class
+# down with it regardless of how well-bounded the containers beside it are.
+initChownData:
+  resources:
+    requests:
+      memory: 16Mi
+    limits:
+      memory: 64Mi
+
 admin:
   existingSecret: grafana-admin-credentials
   userKey: admin-user

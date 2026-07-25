@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: longhorn-defaults
+  namespace: longhorn-system
+spec:
+  limits:
+    # The chart exposes no resources values for instance-manager, engine-image,
+    # longhorn-ui, or longhorn-driver-deployer, so those containers admit with
+    # neither request nor limit and land in BestEffort — first to be evicted
+    # when a node comes under memory pressure, which is exactly backwards for
+    # the storage data plane every other workload depends on. A namespace
+    # default gives the scheduler something to reserve against.
+    #
+    # defaultRequest only, deliberately: `default` would also impose a memory
+    # ceiling on instance-manager, whose footprint scales with attached volumes
+    # and rebuild activity (observed 151-601Mi across nodes at rest). An OOM
+    # kill there breaks volume I/O and triggers replica rebuilds, which is a
+    # worse failure than the unbounded growth the ceiling would prevent.
+    # Containers that set their own requests are unaffected.
+    - type: Container
+      defaultRequest:
+        memory: 64Mi

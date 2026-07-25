@@ -134,6 +134,10 @@ db:
   # Use an existing postgres server/cluster
   useExisting: false
 
+  # Resources for the db-ready wait init container. Empty renders no resources
+  # block, preserving upstream behaviour for anyone using chart defaults.
+  dbReadyResources: {}
+
   # How to connect to the existing postgres server/cluster
   endpoint: localhost
   database: litellm

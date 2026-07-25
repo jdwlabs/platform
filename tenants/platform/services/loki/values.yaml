@@ -74,6 +74,17 @@ memcachedExporter:
     limits:
       memory: 96Mi
 
+# The rules sidecar (k8s-sidecar) beside the loki container ran unbounded while
+# loki itself was capped. It holds the watched rule ConfigMaps in memory and
+# sits at ~77Mi steady state; the limit leaves room for a full re-list when the
+# watch reconnects.
+sidecar:
+  resources:
+    requests:
+      memory: 96Mi
+    limits:
+      memory: 256Mi
+
 loki:
   auth_enabled: false
   commonConfig:
