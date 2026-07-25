@@ -52,6 +52,15 @@ alloy-logs:
       periodSeconds: 10
       timeoutSeconds: 5
       failureThreshold: 6
+  # Runs on every node beside the alloy container and shipped with a request but
+  # no limit, so ~44Mi/node was unbounded across the whole DaemonSet — the
+  # largest uncapped footprint left after the primary-container sweep.
+  configReloader:
+    resources:
+      requests:
+        memory: 64Mi
+      limits:
+        memory: 128Mi
 
 # Metrics collection is owned by kube-prometheus-stack; with clusterMetrics
 # disabled there is nothing for this instance to collect.
@@ -77,6 +86,16 @@ alloy-singleton:
     resources:
       requests:
         memory: 192Mi
+      # Request without a limit left this Burstable-unbounded; the cap gives
+      # roughly 2x headroom over observed steady state for event bursts.
+      limits:
+        memory: 384Mi
+  configReloader:
+    resources:
+      requests:
+        memory: 64Mi
+      limits:
+        memory: 128Mi
 
 destinations:
   - name: Loki
