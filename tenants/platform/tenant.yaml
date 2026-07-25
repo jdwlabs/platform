@@ -185,7 +185,7 @@ services:
   - name: metrics-server
     chart: metrics-server
     repo: https://kubernetes-sigs.github.io/metrics-server/
-    revision: 3.13.0
+    revision: 3.13.1
     namespace: metrics-server
     postInstall: false
     syncWave: 2
@@ -193,7 +193,7 @@ services:
   - name: monitoring
     chart: k8s-monitoring
     repo: https://grafana.github.io/helm-charts
-    revision: 3.8.10
+    revision: 3.8.11
     namespace: monitoring
     postInstall: false
     syncWave: 2
@@ -201,7 +201,7 @@ services:
   - name: grafana
     chart: grafana
     repo: https://grafana-community.github.io/helm-charts
-    revision: 12.4.7
+    revision: 12.8.0
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -217,7 +217,7 @@ services:
   - name: kube-prometheus-stack
     chart: kube-prometheus-stack
     repo: https://prometheus-community.github.io/helm-charts
-    revision: "86.2.3"
+    revision: "86.3.2"
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -235,7 +235,7 @@ services:
   - name: headlamp
     chart: headlamp
     repo: https://kubernetes-sigs.github.io/headlamp/
-    revision: 0.41.0
+    revision: 0.43.0
     namespace: headlamp
     postInstall: true
     syncWave: 2
@@ -330,7 +330,7 @@ services:
   - name: holmes
     chart: holmes
     repo: https://robusta-charts.storage.googleapis.com
-    revision: 0.34.0
+    revision: 0.36.0
     namespace: ai-sre
     postInstall: true
     syncWave: 5

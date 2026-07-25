@@ -237,7 +237,7 @@ resources:
 # cluster's Talos version and verify it before the main container starts.
 initContainers:
   - name: talosctl-install
-    image: curlimages/curl:8.9.1
+    image: curlimages/curl:8.21.0
     command:
       - sh
       - -ec
