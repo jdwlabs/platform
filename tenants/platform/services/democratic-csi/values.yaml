@@ -12,6 +12,16 @@ driver:
 
 storageClasses: []   # StorageClass managed declaratively in postInstall
 
+# One top-level key covers the csi-proxy sidecar in both the controller pod and
+# the node DaemonSet; the chart reads it from the same place for each. It was
+# the last unbounded container in either pod. Observed 2-11Mi.
+csiProxy:
+  resources:
+    requests:
+      memory: 16Mi
+    limits:
+      memory: 64Mi
+
 # Both pods ran BestEffort with real, sustained usage (controller ~143Mi,
 # node DS ~86Mi per pod) — first evicted under node memory pressure and
 # invisible to the scheduler. Requests are ~1.5x observed per container;
