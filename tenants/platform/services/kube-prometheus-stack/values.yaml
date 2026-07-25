@@ -14,6 +14,14 @@ prometheusOperator:
       memory: 96Mi
     limits:
       memory: 256Mi
+  # The operator injects this sidecar into both the Prometheus and Alertmanager
+  # pods, and it shipped unbounded on all of them. Observed ~13Mi.
+  prometheusConfigReloader:
+    resources:
+      requests:
+        memory: 24Mi
+      limits:
+        memory: 64Mi
 
 prometheus:
   prometheusSpec:
