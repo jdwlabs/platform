@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: nginx-gateway-defaults
+  namespace: nginx-gateway
+spec:
+  limits:
+    # nginx.container.resources reaches the data-plane nginx container but not
+    # the init container beside it — the provisioner that builds the DaemonSet
+    # renders no resources for init at all, so the pod admits as BestEffort
+    # despite nginx itself being sized. Verified against the live pod spec, not
+    # the values file.
+    #
+    # defaultRequest only, matching the storage namespace: the init container
+    # copies config and exits, and a ceiling on it buys nothing while adding a
+    # way for the gateway data plane to fail to start. Its 64Mi request sits
+    # under the nginx container's 128Mi, so pod scheduling is unchanged.
+    - type: Container
+      defaultRequest:
+        memory: 64Mi

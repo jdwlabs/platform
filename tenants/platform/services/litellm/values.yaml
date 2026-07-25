@@ -22,6 +22,14 @@ db:
   # in bitnamilegacy. Only used by the db-ready wait init container.
   dbReadyImage: docker.io/bitnamilegacy/postgresql
   dbReadyTag: "16.1.0-debian-11-r20"
+  # Polls the database until it answers, then exits. Upstream renders no
+  # resources for it at all, which left the pod BestEffort no matter how the
+  # gateway container beside it was sized.
+  dbReadyResources:
+    requests:
+      memory: 16Mi
+    limits:
+      memory: 64Mi
 
 # Built-in Redis disabled; we use our own ephemeral Redis (litellm-redis service).
 redis:

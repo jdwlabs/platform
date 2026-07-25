@@ -37,6 +37,10 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.db.dbReadyImage }}:{{ .Values.db.dbReadyTag | default "16.1.0-debian-11-r20" }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.db.dbReadyResources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             {{- if .Values.db.deployStandalone }}
             - name: DATABASE_USERNAME

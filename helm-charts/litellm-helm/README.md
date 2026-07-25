@@ -19,6 +19,11 @@ cannot fix it.
 - `templates/deployment.yaml`: `db-ready` init container image is now
   templated from `db.dbReadyImage` + `db.dbReadyTag` (default preserves
   the original tag). Tenant values point these at `bitnamilegacy`.
+- `templates/deployment.yaml` + `values.yaml`: the `db-ready` init
+  container accepts resources via `db.dbReadyResources`. Upstream renders
+  no `resources` field on any code path, so the container is BestEffort
+  and pulls the whole pod's QoS class down with it. Defaults to `{}` so
+  upstream behaviour is unchanged when the value is unset.
 
 ## Upgrading
 
