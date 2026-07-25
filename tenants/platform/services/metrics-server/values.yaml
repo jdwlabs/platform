@@ -1,2 +1,11 @@
 args:
   - --kubelet-insecure-tls
+
+# Shipped with no declared memory at all. Observed ~37Mi; usage tracks node and
+# pod count, so the limit leaves room for the cluster to grow before this needs
+# revisiting.
+resources:
+  requests:
+    memory: 64Mi
+  limits:
+    memory: 192Mi
