@@ -147,13 +147,18 @@ func TestCheckVaultPodReady_CrashLoopFails(t *testing.T) {
 	}
 }
 
-func newStatefulSet(ns, name string, strategy appsv1.StatefulSetUpdateStrategyType, cur, upd string) *appsv1.StatefulSet {
+func newStatefulSet(ns, name string, strategy appsv1.StatefulSetUpdateStrategyType, cur, upd string, replicas, updated int32) *appsv1.StatefulSet {
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 		Spec: appsv1.StatefulSetSpec{
 			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: strategy},
 		},
-		Status: appsv1.StatefulSetStatus{CurrentRevision: cur, UpdateRevision: upd},
+		Status: appsv1.StatefulSetStatus{
+			CurrentRevision: cur,
+			UpdateRevision:  upd,
+			Replicas:        replicas,
+			UpdatedReplicas: updated,
+		},
 	}
 }
 
@@ -162,15 +167,15 @@ func newStatefulSet(ns, name string, strategy appsv1.StatefulSetUpdateStrategyTy
 func TestCheckStatefulSetRevisions_OnDeleteSkewIsSurfaced(t *testing.T) {
 	kube := fake.NewSimpleClientset(
 		newStatefulSet("vault", "platform-vault", appsv1.OnDeleteStatefulSetStrategyType,
-			"platform-vault-65d6fbffd6", "platform-vault-556744bc94"),
+			"platform-vault-65d6fbffd6", "platform-vault-556744bc94", 1, 0),
 		newStatefulSet("monitoring", "platform-loki", appsv1.RollingUpdateStatefulSetStrategyType,
-			"platform-loki-797785bc86", "platform-loki-797785bc86"),
+			"platform-loki-797785bc86", "platform-loki-797785bc86", 1, 1),
 	)
 	r := checkStatefulSetRevisions(context.Background(), kube)
 	if r.Status != StatusWarn {
 		t.Fatalf("expected warn for pending OnDelete roll, got %s: %s", r.Status, r.Message)
 	}
-	for _, want := range []string{"vault/platform-vault", "OnDelete", "65d6fbffd6", "556744bc94"} {
+	for _, want := range []string{"vault/platform-vault", "OnDelete", "0/1", "556744bc94"} {
 		if !strings.Contains(r.Message, want) {
 			t.Fatalf("expected %q in message, got: %s", want, r.Message)
 		}
@@ -180,10 +185,25 @@ func TestCheckStatefulSetRevisions_OnDeleteSkewIsSurfaced(t *testing.T) {
 	}
 }
 
+// Regression: under OnDelete the controller never advances currentRevision, even
+// once every pod runs updateRevision. Comparing the two revisions therefore
+// warns forever on an already-adopted StatefulSet — which is how the live Vault
+// StatefulSet looked after its pod had picked up 2.0.3.
+func TestCheckStatefulSetRevisions_OnDeleteAdoptedIsNotPending(t *testing.T) {
+	kube := fake.NewSimpleClientset(
+		newStatefulSet("vault", "platform-vault", appsv1.OnDeleteStatefulSetStrategyType,
+			"platform-vault-65d6fbffd6", "platform-vault-556744bc94", 1, 1),
+	)
+	r := checkStatefulSetRevisions(context.Background(), kube)
+	if r.Status != StatusPass {
+		t.Fatalf("stale currentRevision with every pod updated must pass, got %s: %s", r.Status, r.Message)
+	}
+}
+
 func TestCheckStatefulSetRevisions_NoSkewPasses(t *testing.T) {
 	kube := fake.NewSimpleClientset(
 		newStatefulSet("monitoring", "platform-loki", appsv1.RollingUpdateStatefulSetStrategyType,
-			"platform-loki-797785bc86", "platform-loki-797785bc86"),
+			"platform-loki-797785bc86", "platform-loki-797785bc86", 1, 1),
 	)
 	r := checkStatefulSetRevisions(context.Background(), kube)
 	if r.Status != StatusPass {
@@ -191,15 +211,39 @@ func TestCheckStatefulSetRevisions_NoSkewPasses(t *testing.T) {
 	}
 }
 
-// A StatefulSet mid-creation has neither revision written yet; that is unsettled,
+// A StatefulSet mid-creation has no revision written yet; that is unsettled,
 // not skewed, and must not be reported as a pending roll.
 func TestCheckStatefulSetRevisions_UnsettledIsNotSkew(t *testing.T) {
 	kube := fake.NewSimpleClientset(
-		newStatefulSet("vault", "platform-vault", appsv1.OnDeleteStatefulSetStrategyType, "", ""),
+		newStatefulSet("vault", "platform-vault", appsv1.OnDeleteStatefulSetStrategyType, "", "", 0, 0),
 	)
 	r := checkStatefulSetRevisions(context.Background(), kube)
 	if r.Status != StatusPass {
 		t.Fatalf("expected pass for unsettled StatefulSet, got %s: %s", r.Status, r.Message)
+	}
+}
+
+// Scaled to zero: no pods exist to adopt anything.
+func TestCheckStatefulSetRevisions_ScaledToZeroIsNotPending(t *testing.T) {
+	kube := fake.NewSimpleClientset(
+		newStatefulSet("monitoring", "platform-tempo", appsv1.RollingUpdateStatefulSetStrategyType,
+			"platform-tempo-aaa", "platform-tempo-bbb", 0, 0),
+	)
+	r := checkStatefulSetRevisions(context.Background(), kube)
+	if r.Status != StatusPass {
+		t.Fatalf("expected pass for scaled-to-zero StatefulSet, got %s: %s", r.Status, r.Message)
+	}
+}
+
+// A RollingUpdate genuinely mid-roll is a real pending state, transient but real.
+func TestCheckStatefulSetRevisions_RollingUpdateInProgressWarns(t *testing.T) {
+	kube := fake.NewSimpleClientset(
+		newStatefulSet("monitoring", "platform-loki", appsv1.RollingUpdateStatefulSetStrategyType,
+			"platform-loki-old", "platform-loki-new", 3, 1),
+	)
+	r := checkStatefulSetRevisions(context.Background(), kube)
+	if r.Status != StatusWarn || !strings.Contains(r.Message, "1/3") {
+		t.Fatalf("expected warn naming 1/3 rolled, got %s: %s", r.Status, r.Message)
 	}
 }
 
