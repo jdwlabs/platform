@@ -19,6 +19,11 @@ cannot fix it.
 - `templates/deployment.yaml`: `db-ready` init container image is now
   templated from `db.dbReadyImage` + `db.dbReadyTag` (default preserves
   the original tag). Tenant values point these at `bitnamilegacy`.
+- `values.yaml`: `dbReadyImage` / `dbReadyTag` are declared under `db`,
+  not `image`. Upstream declares them under `image`, which no template
+  reads — rendering with chart defaults produced `":16.1.0-debian-11-r20"`,
+  an empty repository. The default repository is also `bitnamilegacy`
+  rather than `bitnami`, because the upstream default 404s on pull.
 - `templates/deployment.yaml` + `values.yaml`: the `db-ready` init
   container accepts resources via `db.dbReadyResources`. Upstream renders
   no `resources` field on any code path, so the container is BestEffort
