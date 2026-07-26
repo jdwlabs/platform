@@ -161,7 +161,7 @@ services:
   - name: external-secrets
     chart: external-secrets
     repo: https://charts.external-secrets.io
-    revision: 0.20.4
+    revision: 2.8.0
     namespace: external-secrets
     postInstall: true
     syncWave: 2
