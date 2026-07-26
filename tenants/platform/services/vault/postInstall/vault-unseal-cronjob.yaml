@@ -31,57 +31,133 @@ spec:
       ttlSecondsAfterFinished: 3600
       template:
         spec:
+          # Numeric uid is required, not stylistic: the vault image declares its
+          # user as the *name* "vault", and kubelet refuses a pod that sets
+          # runAsNonRoot against a non-numeric image user because it cannot
+          # verify the user is not root. A uid above 10000 also stays clear of
+          # any host-mapped system account.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 100001
+            runAsGroup: 100001
+            seccompProfile:
+              type: RuntimeDefault
           # One container per raft member: each pod seals independently, and
           # the ClusterIP service round-robins (publishNotReadyAddresses), so
           # a single service-addressed unseal would hit an arbitrary pod.
           # Per-pod DNS on the headless internal service resolves even while
           # a pod is sealed/unready. All members share the single Shamir key.
+          # Separate containers rather than one loop so an unreachable member
+          # cannot stop the others from being unsealed.
+          #
+          # Every container below sets a request and no limit. The request lifts
+          # the pod out of BestEffort so the kubelet stops evicting it first
+          # under node memory pressure; a ceiling would be the wrong trade,
+          # because this is the only thing that unseals Vault after a restart
+          # and an OOM kill would leave the whole platform without secrets.
           containers:
             - name: vault-unseal-0
-              # Upstream publishes no semver tags; pin by digest so the pull is
-              # reproducible and immune to a moving :latest re-tag.
-              image: blockloop/vault-unseal@sha256:41bcab66bb0759f8b3887b7b2f22a282d5ff3c6e2fc7829eeb2d1c98e3870c62
-              # Request only, no limit: a request lifts the pod out of
-              # BestEffort so the kubelet stops evicting it first under node
-              # memory pressure. A ceiling here would be the wrong trade — this
-              # is the only thing that unseals Vault after a restart, and an
-              # OOM kill would leave the whole platform without secrets.
+              # The official image, matching the chart's app version, replaces a
+              # third-party unseal image that was unmaintained, published no
+              # semver tags, and shipped a Vault 0.6.4 base. Digest is the
+              # multi-arch index, so the pull stays deterministic. This tag must
+              # be bumped together with the chart's appVersion.
+              image: hashicorp/vault:2.0.3@sha256:a296a888b118615dc01d5f1a6846e6d4a7277946caaed5b447008fff5fe06b54
+              command: ["/bin/sh", "-ec"]
+              # `vault status` exit codes: 0 unsealed, 2 sealed, 1 unreachable.
+              # Only 0 means there is nothing to do; an unreachable member falls
+              # through to the unseal attempt and fails the container, so it
+              # surfaces as a failed job instead of being silently skipped.
+              # The key goes in on stdin ("-") rather than as an argument so it
+              # never appears in the container's process list.
+              args:
+                - |
+                  if vault status >/dev/null 2>&1; then exit 0; fi
+                  printf '%s\n' "$VAULT_UNSEAL_KEY_1" | vault operator unseal -
+              env:
+                - name: VAULT_ADDR
+                  value: "http://platform-vault-0.platform-vault-internal.vault.svc:8200"
+                # The image's home directory is not writable under a read-only
+                # root filesystem; the vault CLI only needs somewhere to land
+                # incidental state, so point it at the tmp volume.
+                - name: HOME
+                  value: /tmp
+                - name: VAULT_UNSEAL_KEY_1
+                  valueFrom:
+                    secretKeyRef:
+                      name: vault-unseal-keys
+                      key: unseal_key_1
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
               resources:
                 requests:
                   cpu: 10m
                   memory: 32Mi
-              env:
-                - name: VAULT_ADDR
-                  value: "http://platform-vault-0.platform-vault-internal.vault.svc:8200"
-                - name: VAULT_SKIP_VERIFY
-                  value: "1"
-                - name: VAULT_UNSEAL_KEY_1
-                  valueFrom:
-                    secretKeyRef:
-                      name: vault-unseal-keys
-                      key: unseal_key_1
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
             - name: vault-unseal-1
-              image: blockloop/vault-unseal@sha256:41bcab66bb0759f8b3887b7b2f22a282d5ff3c6e2fc7829eeb2d1c98e3870c62
+              image: hashicorp/vault:2.0.3@sha256:a296a888b118615dc01d5f1a6846e6d4a7277946caaed5b447008fff5fe06b54
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  if vault status >/dev/null 2>&1; then exit 0; fi
+                  printf '%s\n' "$VAULT_UNSEAL_KEY_1" | vault operator unseal -
               env:
                 - name: VAULT_ADDR
                   value: "http://platform-vault-1.platform-vault-internal.vault.svc:8200"
-                - name: VAULT_SKIP_VERIFY
-                  value: "1"
+                - name: HOME
+                  value: /tmp
                 - name: VAULT_UNSEAL_KEY_1
                   valueFrom:
                     secretKeyRef:
                       name: vault-unseal-keys
                       key: unseal_key_1
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
             - name: vault-unseal-2
-              image: blockloop/vault-unseal@sha256:41bcab66bb0759f8b3887b7b2f22a282d5ff3c6e2fc7829eeb2d1c98e3870c62
+              image: hashicorp/vault:2.0.3@sha256:a296a888b118615dc01d5f1a6846e6d4a7277946caaed5b447008fff5fe06b54
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  if vault status >/dev/null 2>&1; then exit 0; fi
+                  printf '%s\n' "$VAULT_UNSEAL_KEY_1" | vault operator unseal -
               env:
                 - name: VAULT_ADDR
                   value: "http://platform-vault-2.platform-vault-internal.vault.svc:8200"
-                - name: VAULT_SKIP_VERIFY
-                  value: "1"
+                - name: HOME
+                  value: /tmp
                 - name: VAULT_UNSEAL_KEY_1
                   valueFrom:
                     secretKeyRef:
                       name: vault-unseal-keys
                       key: unseal_key_1
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}
           restartPolicy: OnFailure
