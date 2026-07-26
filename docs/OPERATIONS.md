@@ -116,6 +116,13 @@ keys — restore Vault from a snapshot or reinstall.
 **Root token rotation, re-key:** see upstream Vault docs. `platformctl`
 does not orchestrate these yet.
 
+**Reading the `vault-pod` health check:** it asserts pods are *Ready*, not
+merely Running. Readiness is the seal signal — the chart's readiness probe
+runs `vault status`, whose exit code encodes seal state — so a sealed Vault
+shows as `Running, not Ready` and fails the check. A partially-ready set
+warns rather than fails, because a raft quorum of unsealed members still
+serves reads.
+
 ## 3. PostgreSQL operations
 
 **Manual backup trigger:**
@@ -187,6 +194,7 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | `platformctl bootstrap heal --cert-approver` fails "not found"  | ArgoCD app is named `platform-kubelet-serving-cert-approver`, not `kubelet-serving-cert-approver`. Refresh directly: `kubectl annotate application platform-kubelet-serving-cert-approver -n argocd argocd.argoproj.io/refresh=normal --overwrite` |
 | `platform-nginx-gateway-fabric` stuck `OutOfSync` / `Running`   | Helm cert-generator Job TTL race; run `platformctl bootstrap heal --stuck-sync --sync-app platform-nginx-gateway-fabric` |
 | Gateway HTTPS listener `InvalidListener` / all HTTPS routes failing | `wildcard-jdwlabs-tls` secret missing; `kubectl apply -f tenants/platform/services/nginx-gateway-fabric/postInstall/certificate.yaml` then wait 5–15 min for DNS-01 |
+| `statefulset-revisions` warns `N/M pending roll` | A StatefulSet has an applied revision its pods have not adopted — expected under `updateStrategy: OnDelete`, where the controller records a new `updateRevision` but never rolls pods. Nothing is broken; the change is simply not running yet. Adopt it by deleting the pods deliberately, one at a time, verifying health between each. For Vault, expect a seal after each delete until the auto-unseal CronJob catches up. |
 
 ## 6. Non-interactive / CI mode
 

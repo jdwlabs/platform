@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -55,7 +56,10 @@ func operatorChecks(kube kubernetes.Interface, dyn dynamic.Interface) []Check {
 			return checkStorageClassExists(ctx, kube, "longhorn")
 		}},
 		{Layer: 1, Group: "Operators", Name: "vault-pod", Run: func(ctx context.Context) Result {
-			return checkVaultPodRunning(ctx, kube)
+			return checkVaultPodReady(ctx, kube)
+		}},
+		{Layer: 1, Group: "Operators", Name: "statefulset-revisions", Run: func(ctx context.Context) Result {
+			return checkStatefulSetRevisions(ctx, kube)
 		}},
 	}
 }
@@ -185,7 +189,15 @@ func checkStorageClassExists(ctx context.Context, kube kubernetes.Interface, nam
 	return Pass("StorageClass present")
 }
 
-func checkVaultPodRunning(ctx context.Context, kube kubernetes.Interface) Result {
+// checkVaultPodReady asserts Vault pods are Ready, not merely Running.
+//
+// Readiness is the seal signal. The chart's readiness probe runs `vault status`,
+// whose exit code encodes seal state (0 unsealed, 2 sealed), so a sealed Vault
+// is Running-but-not-Ready. Asserting on pod phase alone reports a sealed
+// Vault — one serving no secrets to anything — as healthy. Reading the pod
+// condition rather than calling /v1/sys/health keeps the check dependency-free:
+// it needs no route to Vault and no token, only the API server already in use.
+func checkVaultPodReady(ctx context.Context, kube kubernetes.Interface) Result {
 	pods, err := kube.CoreV1().Pods("vault").List(ctx, metav1.ListOptions{
 		LabelSelector: "app.kubernetes.io/name=vault",
 	})
@@ -198,22 +210,90 @@ func checkVaultPodRunning(ctx context.Context, kube kubernetes.Interface) Result
 	if len(pods.Items) == 0 {
 		return Fail("no vault pods found")
 	}
+
+	var ready, notReady []string
 	for _, pod := range pods.Items {
 		for _, cs := range pod.Status.ContainerStatuses {
 			if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
 				return Failf("pod %s: CrashLoopBackOff", pod.Name)
 			}
 		}
-		if pod.Status.Phase == corev1.PodRunning {
-			for _, cs := range pod.Status.ContainerStatuses {
-				if cs.State.Running != nil {
-					return Passf("pod %s: Running", pod.Name)
-				}
-			}
+		if pod.Status.Phase != corev1.PodRunning {
+			notReady = append(notReady, fmt.Sprintf("%s (phase=%s)", pod.Name, pod.Status.Phase))
+			continue
+		}
+		if podIsReady(pod) {
+			ready = append(ready, pod.Name)
+		} else {
+			notReady = append(notReady, fmt.Sprintf("%s (Running, not Ready — sealed or starting)", pod.Name))
 		}
 	}
-	pod := pods.Items[0]
-	return Warnf("pod %s: phase=%s (initializing)", pod.Name, pod.Status.Phase)
+
+	switch {
+	case len(notReady) == 0:
+		return Passf("%d/%d pods Ready (unsealed)", len(ready), len(pods.Items))
+	case len(ready) == 0:
+		return Failf("0/%d pods Ready: %s", len(pods.Items), strings.Join(notReady, "; "))
+	default:
+		// Partially ready is degraded rather than down: with raft HA a quorum of
+		// unsealed members still serves reads, but the cluster has lost headroom.
+		return Warnf("%d/%d pods Ready: %s", len(ready), len(pods.Items), strings.Join(notReady, "; "))
+	}
+}
+
+func podIsReady(pod corev1.Pod) bool {
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type == corev1.PodReady {
+			return cond.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
+// checkStatefulSetRevisions flags StatefulSets whose applied revision has not
+// been adopted by their pods.
+//
+// Under updateStrategy: OnDelete the controller records a new updateRevision but
+// never rolls pods, so an applied image or config change can sit unadopted
+// indefinitely while everything else reads green — ArgoCD's StatefulSet health
+// check treats OnDelete as healthy unconditionally, and .spec.updateStrategy
+// sits in ignoreDifferences so a git diff will not show it either. This is the
+// only signal that distinguishes "applied" from "running".
+func checkStatefulSetRevisions(ctx context.Context, kube kubernetes.Interface) Result {
+	sets, err := kube.AppsV1().StatefulSets(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return Failf("list statefulsets: %v", err)
+	}
+	if len(sets.Items) == 0 {
+		return Pass("no StatefulSets found")
+	}
+
+	var skewed []string
+	for _, sts := range sets.Items {
+		cur, upd := sts.Status.CurrentRevision, sts.Status.UpdateRevision
+		// Both empty during initial creation, before the controller has written
+		// either revision — not a skew, just not settled yet.
+		if cur == "" || upd == "" || cur == upd {
+			continue
+		}
+		skewed = append(skewed, fmt.Sprintf("%s/%s [%s] %s→%s",
+			sts.Namespace, sts.Name, sts.Spec.UpdateStrategy.Type,
+			revisionHash(cur), revisionHash(upd)))
+	}
+
+	if len(skewed) == 0 {
+		return Passf("all %d StatefulSets at current revision", len(sets.Items))
+	}
+	return Warnf("%d/%d pending roll: %s", len(skewed), len(sets.Items), strings.Join(skewed, "; "))
+}
+
+// revisionHash trims the owner-name prefix from a ControllerRevision name,
+// leaving the hash suffix that actually distinguishes two revisions.
+func revisionHash(rev string) string {
+	if i := strings.LastIndex(rev, "-"); i >= 0 && i < len(rev)-1 {
+		return rev[i+1:]
+	}
+	return rev
 }
 
 func checkGatewayClassAccepted(ctx context.Context, dyn dynamic.Interface, name string) Result {
