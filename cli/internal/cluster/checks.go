@@ -259,6 +259,14 @@ func podIsReady(pod corev1.Pod) bool {
 // check treats OnDelete as healthy unconditionally, and .spec.updateStrategy
 // sits in ignoreDifferences so a git diff will not show it either. This is the
 // only signal that distinguishes "applied" from "running".
+//
+// Adoption is measured by updatedReplicas, not by currentRevision. Under
+// OnDelete the controller never advances .status.currentRevision, even once
+// every pod is running updateRevision — so comparing the two revisions reports
+// a permanent skew on any OnDelete StatefulSet, which would train readers to
+// ignore exactly the signal this check exists to raise. updatedReplicas counts
+// pods whose controller-revision-hash equals updateRevision, which is the
+// question actually being asked.
 func checkStatefulSetRevisions(ctx context.Context, kube kubernetes.Interface) Result {
 	sets, err := kube.AppsV1().StatefulSets(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -268,23 +276,27 @@ func checkStatefulSetRevisions(ctx context.Context, kube kubernetes.Interface) R
 		return Pass("no StatefulSets found")
 	}
 
-	var skewed []string
+	var pending []string
 	for _, sts := range sets.Items {
-		cur, upd := sts.Status.CurrentRevision, sts.Status.UpdateRevision
-		// Both empty during initial creation, before the controller has written
-		// either revision — not a skew, just not settled yet.
-		if cur == "" || upd == "" || cur == upd {
+		// No revision recorded yet (mid-creation), or scaled to zero: nothing to
+		// adopt either way.
+		if sts.Status.UpdateRevision == "" || sts.Status.Replicas == 0 {
 			continue
 		}
-		skewed = append(skewed, fmt.Sprintf("%s/%s [%s] %s→%s",
+		stale := sts.Status.Replicas - sts.Status.UpdatedReplicas
+		if stale <= 0 {
+			continue
+		}
+		pending = append(pending, fmt.Sprintf("%s/%s [%s] %d/%d pods on %s",
 			sts.Namespace, sts.Name, sts.Spec.UpdateStrategy.Type,
-			revisionHash(cur), revisionHash(upd)))
+			sts.Status.UpdatedReplicas, sts.Status.Replicas,
+			revisionHash(sts.Status.UpdateRevision)))
 	}
 
-	if len(skewed) == 0 {
-		return Passf("all %d StatefulSets at current revision", len(sets.Items))
+	if len(pending) == 0 {
+		return Passf("all %d StatefulSets fully rolled", len(sets.Items))
 	}
-	return Warnf("%d/%d pending roll: %s", len(skewed), len(sets.Items), strings.Join(skewed, "; "))
+	return Warnf("%d/%d pending roll: %s", len(pending), len(sets.Items), strings.Join(pending, "; "))
 }
 
 // revisionHash trims the owner-name prefix from a ControllerRevision name,
