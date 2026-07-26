@@ -169,7 +169,11 @@ services:
   - name: vault
     chart: vault
     repo: https://helm.releases.hashicorp.com
-    revision: 0.34.0
+    # Chart 0.34.0 ships Vault 2.0.3; 0.30.1 ships 1.20.1. The chart version is
+    # a minor bump, the application version it pins is a major — hold here
+    # unless the 2.x roll has been verified against this single-node,
+    # file-storage deployment.
+    revision: 0.30.1
     namespace: vault
     postInstall: true
     syncWave: 2
