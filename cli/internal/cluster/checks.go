@@ -10,6 +10,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -33,6 +34,7 @@ func AllChecks(kube kubernetes.Interface, dyn dynamic.Interface) []Check {
 	checks = append(checks, secretChecks(kube, dyn)...)
 	checks = append(checks, tlsChecks(kube, dyn)...)
 	checks = append(checks, argocdChecks(kube, dyn)...)
+	checks = append(checks, policyChecks(kube)...)
 	return checks
 }
 
@@ -134,6 +136,19 @@ func argocdChecks(kube kubernetes.Interface, dyn dynamic.Interface) []Check {
 	return []Check{
 		{Layer: 5, Group: "ArgoCD", Name: "applications", Run: func(ctx context.Context) Result {
 			return checkAllApplicationsHealthy(ctx, dyn)
+		}},
+		{Layer: 5, Group: "ArgoCD", Name: "image-drift", Run: func(ctx context.Context) Result {
+			return checkArgoWorkloadImageDrift(ctx, kube, dyn)
+		}},
+	}
+}
+
+// --- Layer 6: Policy adoption ---
+
+func policyChecks(kube kubernetes.Interface) []Check {
+	return []Check{
+		{Layer: 6, Group: "Policy", Name: "limitrange-adoption", Run: func(ctx context.Context) Result {
+			return checkLimitRangeAdoption(ctx, kube)
 		}},
 	}
 }
@@ -443,6 +458,263 @@ func checkAllApplicationsHealthy(ctx context.Context, dyn dynamic.Interface) Res
 		return Warnf("%d/%d out-of-sync: %s", len(unsynced), total, strings.Join(unsynced, ", "))
 	}
 	return Passf("all %d apps Synced+Healthy", total)
+}
+
+// checkArgoWorkloadImageDrift flags workloads whose ArgoCD-managed pod
+// template declares one image tag while the pods actually observed running
+// report another.
+//
+// ArgoCD marks a workload Synced the moment its spec is applied to the API
+// server — that is a declaration, not an observation. A StatefulSet under
+// OnDelete, a Deployment stuck mid-rollout, or a DaemonSet whose old pods
+// were never evicted can all sit "Synced" indefinitely while a real pod
+// keeps serving the previous image, and none of that shows up in sync or
+// health status. Each workload's own pods are read by its own selector
+// rather than by an ArgoCD tracking label: this cluster's tracking mode is
+// annotation-based (visible on managed resources' `argocd.argoproj.io/
+// tracking-id` annotation), so pods are not guaranteed to carry the
+// `app.kubernetes.io/instance` label a label-based install would rely on.
+// This generalizes the lesson checkStatefulSetRevisions encodes — measure
+// adoption by what is running — across every workload kind an Application
+// manages, not only StatefulSets.
+func checkArgoWorkloadImageDrift(ctx context.Context, kube kubernetes.Interface, dyn dynamic.Interface) Result {
+	apps, err := dyn.Resource(gvrApplication).Namespace("argocd").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return Failf("list applications: %v", err)
+	}
+
+	var drifted []string
+	checked := 0
+	for _, app := range apps.Items {
+		resources, _, _ := unstructured.NestedSlice(app.Object, "status", "resources")
+		for _, raw := range resources {
+			res, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			kind, _ := res["kind"].(string)
+			ns, _ := res["namespace"].(string)
+			name, _ := res["name"].(string)
+			if ns == "" || name == "" {
+				continue
+			}
+
+			declared, selector, err := workloadTemplate(ctx, kube, kind, ns, name)
+			if err != nil || len(declared) == 0 || len(selector) == 0 {
+				// Not an image-bearing workload kind, or it no longer exists —
+				// either way there is nothing to compare, not a failure.
+				continue
+			}
+
+			pods, err := kube.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
+				LabelSelector: labels.SelectorFromSet(selector).String(),
+			})
+			if err != nil || len(pods.Items) == 0 {
+				continue // nothing running to observe, e.g. scaled to zero
+			}
+			checked++
+			running := map[string][]string{}
+			for _, pod := range pods.Items {
+				for _, cs := range pod.Status.ContainerStatuses {
+					repo, tag := splitImageRef(cs.Image)
+					if !containsString(running[repo], tag) {
+						running[repo] = append(running[repo], tag)
+					}
+				}
+			}
+
+			for _, image := range declared {
+				repo, tag := splitImageRef(image)
+				runningTags, seen := running[repo]
+				if !seen {
+					continue // no running container observed for this image; not comparable
+				}
+				if !containsString(runningTags, tag) {
+					drifted = append(drifted, fmt.Sprintf("%s/%s (%s): declared %s, running %s",
+						ns, name, kind, tag, strings.Join(runningTags, ",")))
+				}
+			}
+		}
+	}
+
+	if checked == 0 {
+		return Pass("no ArgoCD-managed workload had running pods available to verify")
+	}
+	if len(drifted) == 0 {
+		return Passf("declared image observed running on all %d verified workload(s)", checked)
+	}
+	return Warnf("%d workload(s) running a different tag than declared: %s", len(drifted), strings.Join(drifted, "; "))
+}
+
+// workloadTemplate returns the declared container images and pod selector for
+// the named Deployment, StatefulSet, or DaemonSet. Any other kind returns no
+// images, which the caller treats as nothing to compare rather than a failure.
+func workloadTemplate(ctx context.Context, kube kubernetes.Interface, kind, ns, name string) ([]string, map[string]string, error) {
+	switch kind {
+	case "Deployment":
+		d, err := kube.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return nil, nil, err
+		}
+		return containerImages(d.Spec.Template.Spec.Containers), selectorLabels(d.Spec.Selector), nil
+	case "StatefulSet":
+		s, err := kube.AppsV1().StatefulSets(ns).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return nil, nil, err
+		}
+		return containerImages(s.Spec.Template.Spec.Containers), selectorLabels(s.Spec.Selector), nil
+	case "DaemonSet":
+		ds, err := kube.AppsV1().DaemonSets(ns).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return nil, nil, err
+		}
+		return containerImages(ds.Spec.Template.Spec.Containers), selectorLabels(ds.Spec.Selector), nil
+	default:
+		return nil, nil, nil
+	}
+}
+
+func selectorLabels(sel *metav1.LabelSelector) map[string]string {
+	if sel == nil {
+		return nil
+	}
+	return sel.MatchLabels
+}
+
+func containerImages(containers []corev1.Container) []string {
+	images := make([]string, 0, len(containers))
+	for _, c := range containers {
+		images = append(images, c.Image)
+	}
+	return images
+}
+
+// splitImageRef separates an image reference into a normalized repository and
+// tag, dropping any digest suffix and any Docker Hub prefix the container
+// runtime adds when reporting what is actually running. containerd
+// canonicalizes unqualified Docker Hub references on report-back — e.g. a pod
+// template asking for "redis:7-alpine" comes back from the kubelet as
+// "docker.io/library/redis:7-alpine" — even though the workload spec that
+// requested the pull never had that prefix. Comparing the raw strings would
+// flag every unqualified image as permanently drifted.
+func splitImageRef(ref string) (repo, tag string) {
+	if i := strings.Index(ref, "@"); i >= 0 {
+		ref = ref[:i]
+	}
+	repo = ref
+	for _, prefix := range []string{"index.docker.io/library/", "index.docker.io/", "docker.io/library/", "docker.io/"} {
+		if trimmed := strings.TrimPrefix(repo, prefix); trimmed != repo {
+			repo = trimmed
+			break
+		}
+	}
+	if i := strings.LastIndex(repo, ":"); i >= 0 && !strings.Contains(repo[i:], "/") {
+		return repo[:i], repo[i+1:]
+	}
+	return repo, ""
+}
+
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// resourceDefault names one field (requests or limits) a LimitRange
+// auto-populates for a container that omits it.
+type resourceDefault struct {
+	resource corev1.ResourceName
+	field    string // "requests" or "limits"
+}
+
+// containerDefaults returns the (resource, field) pairs a Container-scoped
+// LimitRange entry defaults. Pod-scoped entries are ignored: they cap sums
+// across a pod's containers rather than defaulting any single container's
+// spec, so they carry nothing for this per-container comparison.
+func containerDefaults(lr corev1.LimitRange) []resourceDefault {
+	var defaults []resourceDefault
+	for _, item := range lr.Spec.Limits {
+		if item.Type != corev1.LimitTypeContainer {
+			continue
+		}
+		for res := range item.DefaultRequest {
+			defaults = append(defaults, resourceDefault{res, "requests"})
+		}
+		for res := range item.Default {
+			defaults = append(defaults, resourceDefault{res, "limits"})
+		}
+	}
+	return defaults
+}
+
+func hasResourceField(res corev1.ResourceRequirements, d resourceDefault) bool {
+	if d.field == "limits" {
+		_, ok := res.Limits[d.resource]
+		return ok
+	}
+	_, ok := res.Requests[d.resource]
+	return ok
+}
+
+// checkLimitRangeAdoption flags pod containers that predate their
+// namespace's LimitRange and therefore never received the field it defaults.
+//
+// A LimitRange only defaults resources.requests/limits at admission — it
+// mutates a pod's spec once, on create, and nothing reconciles that spec
+// afterward. A pod admitted before the LimitRange existed keeps running with
+// whatever (or nothing) it was given at the time, indefinitely, and nothing
+// about it looks wrong: ArgoCD reports the LimitRange itself Synced, because
+// the LimitRange resource applied fine — it is the untouched pods that
+// drifted from the policy's intent. Comparing each pod's own
+// CreationTimestamp against the LimitRange's is the only way to tell "should
+// have been defaulted" from "was defaulted and nothing is wrong."
+func checkLimitRangeAdoption(ctx context.Context, kube kubernetes.Interface) Result {
+	limitRanges, err := kube.CoreV1().LimitRanges(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return Failf("list limitranges: %v", err)
+	}
+	if len(limitRanges.Items) == 0 {
+		return Pass("no LimitRanges found")
+	}
+
+	var stale []string
+	checked := 0
+	for _, lr := range limitRanges.Items {
+		defaults := containerDefaults(lr)
+		if len(defaults) == 0 {
+			continue
+		}
+		pods, err := kube.CoreV1().Pods(lr.Namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return Failf("list pods in %s: %v", lr.Namespace, err)
+		}
+		checked++
+		for _, pod := range pods.Items {
+			if !pod.CreationTimestamp.Time.Before(lr.CreationTimestamp.Time) {
+				continue // admitted with the LimitRange already in effect
+			}
+			for _, c := range pod.Spec.Containers {
+				for _, d := range defaults {
+					if !hasResourceField(c.Resources, d) {
+						stale = append(stale, fmt.Sprintf("%s/%s[%s] missing %s.%s (predates limitrange/%s)",
+							pod.Namespace, pod.Name, c.Name, d.field, d.resource, lr.Name))
+					}
+				}
+			}
+		}
+	}
+
+	if checked == 0 {
+		return Pass("no LimitRanges define container-level defaults")
+	}
+	if len(stale) == 0 {
+		return Passf("all pods in %d LimitRange-governed namespace(s) hold the defaulted fields", checked)
+	}
+	return Warnf("%d container(s) predate their namespace LimitRange and lack the defaulted field: %s",
+		len(stale), strings.Join(stale, "; "))
 }
 
 // conditionStatus reads status.conditions[type=condType] from an unstructured object.
