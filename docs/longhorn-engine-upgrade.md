@@ -239,7 +239,7 @@ batch by itself, with nothing else in flight, and confirm Vault is unsealed
 and serving reads/writes immediately after (`vault status` via the existing
 auto-unseal CronJob logs, or `platformctl cluster status` Layer 2).
 
-## Cleaning up the old engine image (clears JDWLABS-196's BestEffort pods)
+## Cleaning up the old engine image (clears the BestEffort engine-image pods)
 
 **Explicit answer: the engine upgrade does not "recreate" the five BestEffort
 `engine-image-ei-75a03ec3-*` pods as Burstable pods. It deletes them
@@ -279,7 +279,7 @@ So the actual path to clearing the five BestEffort pods is:
    longhorn.io/component=engine-image` shows only `ei-a4d05f02-*` pods
    remaining, all `Burstable`.
 
-This means JDWLABS-196's five BestEffort pods are coupled to the *same*
+This means those five BestEffort pods are coupled to the *same*
 orphan-volume dependency as the "reclaim two volumes" deliverable: full
 resolution of both requires the orphan volumes to be dealt with (via the
 Vault raft migration runbook), not just the 12-volume engine batch above.
@@ -300,8 +300,9 @@ timeline, not an open-ended wait.
   on remount (see `docs/OPERATIONS.md` §5) — investigate before continuing.
 - Vault fails to auto-unseal or serve reads within a few minutes of its
   batch → stop immediately; this is the cluster's secret store.
-- `longhorn-manager` pods restart or crash-loop during any batch → stop,
-  this is the JDWLABS-22 cascade-failure signature.
+- `longhorn-manager` pods restart or crash-loop during any batch → stop.
+  This is the instance-manager cascade signature that has taken the storage
+  layer down before; it does not recover by pressing on.
 
 ## Rollback and recovery
 
