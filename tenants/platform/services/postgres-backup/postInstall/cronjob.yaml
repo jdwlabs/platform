@@ -25,6 +25,16 @@ spec:
           initContainers:
             - name: dump
               image: postgres:17
+              # Requests only, no limits: pod QoS is computed across init
+              # containers too, so an unbounded one here drops the whole backup
+              # pod to BestEffort and makes it first to be evicted. A memory
+              # ceiling is the wrong lever — pg_dumpall's footprint scales with
+              # the largest table it streams, and an OOM kill silently costs a
+              # backup rather than capping anything worth capping.
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
               env:
                 - name: PGPASSWORD
                   valueFrom:
@@ -47,6 +57,10 @@ spec:
           containers:
             - name: upload
               image: rclone/rclone:latest
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
               command:
                 - /bin/sh
                 - -c

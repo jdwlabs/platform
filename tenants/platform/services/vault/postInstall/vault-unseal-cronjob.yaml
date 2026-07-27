@@ -36,6 +36,15 @@ spec:
               # Upstream publishes no semver tags; pin by digest so the pull is
               # reproducible and immune to a moving :latest re-tag.
               image: blockloop/vault-unseal@sha256:41bcab66bb0759f8b3887b7b2f22a282d5ff3c6e2fc7829eeb2d1c98e3870c62
+              # Request only, no limit: a request lifts the pod out of
+              # BestEffort so the kubelet stops evicting it first under node
+              # memory pressure. A ceiling here would be the wrong trade — this
+              # is the only thing that unseals Vault after a restart, and an
+              # OOM kill would leave the whole platform without secrets.
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
               env:
                 - name: VAULT_ADDR
                   value: "http://platform-vault.vault.svc:8200"
