@@ -1,0 +1,157 @@
+# Creates the Git Sync connection and repository inside Grafana on sync.
+#
+# Grafana's provisioning resources live in its own API server, so ArgoCD cannot
+# reconcile them and a rebuilt Grafana comes back with Git Sync silently absent.
+# This Job is what makes the connection reproducible from git instead of a
+# remembered click in the UI.
+#
+# It creates but never updates: an existing connection is left alone, because
+# the stored private key is write-once and re-applying would disturb a working
+# sync path. The trade-off is that editing the resource definitions in git does
+# not propagate to a live Grafana -- changing them means deleting the resource
+# first, which is deliberate rather than accidental.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: grafana-gitsync-apply
+  namespace: monitoring
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        # Numeric uid, not a name: runAsNonRoot is enforced by the kubelet
+        # before the image's user database is consulted, so a named user fails
+        # admission. 472 is the grafana image's own uid.
+        runAsUser: 472
+        runAsGroup: 472
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: apply
+          # Reuses the Grafana image purely for its curl: it is already present
+          # on the nodes and version-pinned alongside the chart, which beats
+          # pulling a separate mutable-tagged curl image for one HTTP call.
+          image: docker.io/grafana/grafana:13.1.1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          env:
+            - name: GF_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin-credentials
+                  key: admin-user
+            - name: GF_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin-credentials
+                  key: admin-password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+
+              API="http://platform-grafana.monitoring.svc/apis/provisioning.grafana.app/v0alpha1/namespaces/default"
+
+              status() {
+                curl -sS -o /dev/null -w '%{http_code}' \
+                  -u "$GF_USER:$GF_PASS" "$API/$1/$2"
+              }
+
+              # The hook can start before Grafana finishes booting; a 000/503
+              # here means "not up yet", not "misconfigured".
+              i=0
+              while [ "$i" -lt 30 ]; do
+                code=$(status repositories "" || echo 000)
+                case "$code" in
+                  200|404) break ;;
+                esac
+                i=$((i + 1))
+                sleep 5
+              done
+
+              apply_if_absent() {
+                kind_path="$1"
+                name="$2"
+                body="$3"
+                code=$(status "$kind_path" "$name")
+                case "$code" in
+                  200)
+                    echo "$kind_path/$name already present, leaving untouched"
+                    return 0
+                    ;;
+                  404) ;;
+                  *)
+                    echo "unexpected status $code probing $kind_path/$name"
+                    return 1
+                    ;;
+                esac
+                curl -sS -f -X POST \
+                  -H 'Content-Type: application/json' \
+                  -u "$GF_USER:$GF_PASS" \
+                  --data-binary "@$body" \
+                  "$API/$kind_path" > /dev/null
+                echo "created $kind_path/$name"
+              }
+
+              APP_ID=$(cat /etc/secrets/gitsync/app-id)
+              INSTALL_ID=$(cat /etc/secrets/gitsync/installation-id)
+
+              # The PEM has to become one JSON string. awk folds it to literal
+              # \n escapes; doubling the backslashes afterwards stops sed from
+              # interpreting them back into real newlines and breaking the JSON.
+              KEY=$(awk '{printf "%s\\n", $0}' /etc/secrets/gitsync/private-key \
+                    | sed 's/\\/\\\\/g')
+
+              sed -e "s|__APP_ID__|$APP_ID|" \
+                  -e "s|__INSTALLATION_ID__|$INSTALL_ID|" \
+                  -e "s|__PRIVATE_KEY__|$KEY|" \
+                  /etc/gitsync/connection.json > /tmp/connection.json
+
+              apply_if_absent connections jdwlabs-platform-github /tmp/connection.json
+              apply_if_absent repositories platform-dashboards /etc/gitsync/repository.json
+
+              # An exit 0 must mean Git Sync is actually wired, not merely that
+              # the POSTs returned without error.
+              final=$(status repositories platform-dashboards)
+              if [ "$final" != "200" ]; then
+                echo "repository absent after apply (status $final)"
+                exit 1
+              fi
+              echo "git sync repository present"
+          volumeMounts:
+            - name: resources
+              mountPath: /etc/gitsync
+              readOnly: true
+            - name: gitsync-app
+              mountPath: /etc/secrets/gitsync
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: resources
+          configMap:
+            name: grafana-gitsync-resources
+        - name: gitsync-app
+          secret:
+            secretName: grafana-gitsync-github-app
+        - name: tmp
+          emptyDir: {}

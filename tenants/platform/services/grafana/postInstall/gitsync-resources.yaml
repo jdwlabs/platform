@@ -1,0 +1,66 @@
+# Git Sync resource definitions, applied by the companion apply Job.
+#
+# These are Grafana app-platform resources, not Kubernetes ones: they look like
+# k8s objects and use a k8s-style API, but they live inside Grafana's own API
+# server and are invisible to kubectl and to ArgoCD. Holding them here keeps the
+# definition in git even though the cluster cannot reconcile it directly.
+#
+# The GitHub App private key is deliberately absent -- the Job injects it at
+# apply time from the Vault-backed grafana-gitsync-github-app secret, so the
+# credential never lands in a ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-gitsync-resources
+  namespace: monitoring
+data:
+  connection.json: |
+    {
+      "apiVersion": "provisioning.grafana.app/v0alpha1",
+      "kind": "Connection",
+      "metadata": {
+        "name": "jdwlabs-platform-github",
+        "namespace": "default"
+      },
+      "spec": {
+        "title": "jdwlabs platform",
+        "type": "github",
+        "url": "https://github.com",
+        "github": {
+          "appID": "__APP_ID__",
+          "installationID": "__INSTALLATION_ID__"
+        }
+      },
+      "secure": {
+        "privateKey": {
+          "create": "__PRIVATE_KEY__"
+        }
+      }
+    }
+  repository.json: |
+    {
+      "apiVersion": "provisioning.grafana.app/v0alpha1",
+      "kind": "Repository",
+      "metadata": {
+        "name": "platform-dashboards",
+        "namespace": "default"
+      },
+      "spec": {
+        "title": "Platform dashboards",
+        "type": "github",
+        "sync": {
+          "enabled": true,
+          "intervalSeconds": 60,
+          "target": "folder"
+        },
+        "workflows": ["write", "branch"],
+        "github": {
+          "url": "https://github.com/jdwlabs/platform",
+          "branch": "main",
+          "path": "observability/dashboards/platform"
+        },
+        "connection": {
+          "name": "jdwlabs-platform-github"
+        }
+      }
+    }
