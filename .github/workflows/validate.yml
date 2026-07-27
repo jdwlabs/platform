@@ -75,6 +75,18 @@ jobs:
               -ignore-missing-schemas \
               -summary
 
+  foundation-crds-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.x"
+      - name: Install dependencies
+        run: pip install PyYAML
+      - name: Check vendored monitoring CRDs match the pinned chart revision
+        run: python3 tools/sync-monitoring-crds.py
+
   go-build-test:
     runs-on: ubuntu-latest
     defaults:
