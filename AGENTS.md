@@ -165,6 +165,20 @@ Implementation plans live in `docs/superpowers/plans/` (local scratch,
 gitignored). Both are append-only — never edit a landed record or plan;
 write a new one and reference the old.
 
+## Tooling Traps
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `rtk go build -o <path>` prints `Go build: Success` but the binary is missing (or the real exit code is non-zero) | RTK's success line doesn't reflect the actual Go toolchain result; inside a git worktree, `go build` also fails VCS stamping (`error obtaining VCS status: exit status 128`) that RTK swallows silently | `rtk proxy go build ...` to see the real output/exit code; add `-buildvcs=false` when building `cli/` from a worktree |
+
+## Verify Before You Start
+
+Ticket evidence more than ~a week old (or gathered in a different investigation) is a hypothesis, not ground truth. Before acting on it:
+
+- Re-confirm the ticket's premises against live state — don't build on a stale finding
+- State the scope you searched before claiming something is absent or unowned ("checked all N tenants", "every object in the release") — one sample is not the whole set
+- A disproved premise is a valuable result: record it on the ticket, don't quietly work around it
+
 ## Constraints
 
 - Do not invoke `kubectl`, `vault`, or `helm` directly — use `platformctl`
