@@ -4,6 +4,51 @@ Day-2 operations, troubleshooting, and CI-mode reference. See
 [BOOTSTRAP.md](BOOTSTRAP.md) for first-time bring-up, and
 [ARCHITECTURE.md](ARCHITECTURE.md) for the structural model.
 
+## 0. Installing / upgrading `platformctl`
+
+`platformctl` has no auto-update path: a merge to `main` only reaches an
+operator's workstation once someone rebuilds and reinstalls it there. Always
+check the build identity after installing — a stale binary silently keeps
+running old behavior with no error.
+
+```bash
+cd cli
+make build              # writes ./bin/platformctl (or bin/platformctl.exe on Windows)
+make install            # installs to /usr/local/bin, override with PREFIX
+make install PREFIX=~/bin
+```
+
+`PREFIX` defaults to `/usr/local/bin`; set it to wherever `platformctl` is
+actually on your `PATH` (e.g. `PREFIX=~/bin` for a per-user install with no
+`sudo`).
+
+Verify the install picked up the change you expect:
+
+```bash
+platformctl --version
+# platformctl version <git-describe> (commit <short-sha>, built <UTC timestamp>)
+```
+
+If the commit shown is older than `main`, the install did not take — rerun
+`make install` and re-check, rather than assuming the new behavior is live.
+
+**Windows:** `make`/`install` work if you have both on `PATH` (e.g. via Git
+Bash, which ships `/usr/bin/install`); otherwise build directly and copy the
+binary by hand:
+
+```powershell
+cd cli
+go build -buildvcs=false -o bin\platformctl.exe .\cmd\platformctl
+Copy-Item bin\platformctl.exe C:\Users\<you>\bin\platformctl.exe -Force
+```
+
+Always give the output an explicit `.exe` name. A build written to an
+extensionless path can sit next to an existing `platformctl.exe` on the same
+`PATH` directory — `Get-Command`/`which` will resolve the new extensionless
+file, but Windows still launches the old `.exe` when you type `platformctl`,
+so the stale binary keeps running invisibly. Overwriting `platformctl.exe`
+in place removes the ambiguity.
+
 ## 1. Day-2 access
 
 | Service   | URL                            | Get credentials                                                                                                       |
