@@ -1,0 +1,25 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tempo-rules
+  namespace: monitoring
+spec:
+  groups:
+    - name: tempo
+      rules:
+        # absent() is load-bearing here, not belt-and-braces: a counter that has
+        # never incremented exposes no series at all, so a rate/threshold check
+        # alone stays silent forever when every emitter disappears. The longer
+        # `for` than the Loki equivalent reflects sparse trace traffic — a single
+        # pilot service can legitimately go quiet for minutes.
+        - alert: TempoNoSpansReceived
+          expr: |
+            sum(rate(tempo_distributor_spans_received_total[5m])) == 0
+            or absent(tempo_distributor_spans_received_total)
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Tempo has received no spans"
+            description: "Tempo has ingested zero spans for the last 30 minutes. Either every instrumented service stopped emitting, or the last one was removed and tracing is now unobserved."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
