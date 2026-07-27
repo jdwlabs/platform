@@ -1,0 +1,143 @@
+# Documented exceptions to tools/check-image-pins.py's digest-pin requirement.
+#
+# Every entry MUST carry a non-empty `reason` explaining why the exception is
+# deliberate. An entry that no longer matches an actual unpinned reference is
+# treated as stale and fails the check — remove it once the file is fixed or
+# no longer exists.
+#
+# `path` is repo-relative; `repository` is the bare image name (no tag or
+# digest) as it appears in that file — together they are the unique key,
+# since a single manifest can reference more than one image.
+#
+# Two categories of entry appear below:
+#   - deliberate: the reference is intentionally not digest-pinned, for a
+#     documented reason (e.g. it tracks a vendored chart's own appVersion,
+#     which is itself pinned by the chart revision in tenant.yaml).
+#   - pre-existing: this check is new; these references predate it and were
+#     never pinned. They are recorded here — not silently ignored — so CI is
+#     green without hand-editing any image reference as part of adding the
+#     check. Paying these down is follow-up work, not bundled here.
+exceptions:
+  - path: tenants/platform/services/arc-systems/values.yaml
+    repository: ghcr.io/actions/gha-runner-scale-set-controller
+    reason: >-
+      deliberate: tag is intentionally left empty so the controller image
+      tracks the vendored gha-runner-scale-set-controller chart's own
+      appVersion, which is itself pinned by that chart's `revision` in
+      tenants/platform/tenant.yaml — not a rolling tag.
+
+  - path: tenants/dotablaze-tech/services/arc-runner-set-dotablaze-tech/values.yaml
+    repository: docker.io/jdwlabs/agents
+    reason: >-
+      pre-existing: ARC runner container image predates this check and has
+      never been digest-pinned. Recorded here rather than fixed as part of
+      introducing the check; digest-pinning this reference is follow-up work.
+
+  - path: tenants/jdwlabs/services/arc-runner-set-jdwlabs/values.yaml
+    repository: docker.io/jdwlabs/agents
+    reason: >-
+      pre-existing: ARC runner container image predates this check and has
+      never been digest-pinned. Recorded here rather than fixed as part of
+      introducing the check; digest-pinning this reference is follow-up work.
+
+  - path: tenants/dotablaze-tech/services/dotablaze-tech-schemas/postInstall/flyway-migrate-non.yaml
+    repository: flyway/flyway
+    reason: >-
+      pre-existing: flyway migration Job image predates this check and has
+      never been digest-pinned. Recorded here rather than fixed as part of
+      introducing the check; digest-pinning this reference is follow-up work.
+
+  - path: tenants/dotablaze-tech/services/dotablaze-tech-schemas/postInstall/flyway-migrate-prd.yaml
+    repository: flyway/flyway
+    reason: >-
+      pre-existing: flyway migration Job image predates this check and has
+      never been digest-pinned. Recorded here rather than fixed as part of
+      introducing the check; digest-pinning this reference is follow-up work.
+
+  - path: tenants/jdwlabs/services/jdwlabs-schemas/postInstall/flyway-migrate-non.yaml
+    repository: flyway/flyway
+    reason: >-
+      pre-existing: flyway migration Job image predates this check and has
+      never been digest-pinned. Recorded here rather than fixed as part of
+      introducing the check; digest-pinning this reference is follow-up work.
+
+  - path: tenants/jdwlabs/services/jdwlabs-schemas/postInstall/flyway-migrate-prd.yaml
+    repository: flyway/flyway
+    reason: >-
+      pre-existing: flyway migration Job image predates this check and has
+      never been digest-pinned. Recorded here rather than fixed as part of
+      introducing the check; digest-pinning this reference is follow-up work.
+
+  - path: tenants/platform/services/ai-sre-relay/postInstall/ai-sre-relay.yaml
+    repository: jdwlabs/ai-sre-relay
+    reason: >-
+      pre-existing: ai-sre-relay Deployment image predates this check and
+      has never been digest-pinned. Recorded here rather than fixed as part
+      of introducing the check; digest-pinning this reference is follow-up
+      work.
+
+  - path: tenants/platform/services/holmes/values.yaml
+    repository: curlimages/curl
+    reason: >-
+      pre-existing: the talosctl-install initContainer image predates this
+      check and has never been digest-pinned. Recorded here rather than
+      fixed as part of introducing the check; digest-pinning this reference
+      is follow-up work.
+
+  - path: tenants/platform/services/holmes/postInstall/drift-scan-cronjob.yaml
+    repository: dwdraju/alpine-curl-jq
+    reason: >-
+      pre-existing: this CronJob image predates this check, was never
+      digest-pinned, and additionally uses the `latest` tag. Recorded here
+      rather than fixed as part of introducing the check; digest-pinning
+      this reference is follow-up work.
+
+  - path: tenants/platform/services/litellm-redis/postInstall/redis.yaml
+    repository: redis
+    reason: >-
+      pre-existing: this StatefulSet image predates this check and has
+      never been digest-pinned. Recorded here rather than fixed as part of
+      introducing the check; digest-pinning this reference is follow-up
+      work.
+
+  - path: tenants/platform/services/local-path-provisioner/postInstall/local-path-provisioner.yaml
+    repository: rancher/local-path-provisioner
+    reason: >-
+      pre-existing: the provisioner Deployment image predates this check
+      and has never been digest-pinned. Recorded here rather than fixed as
+      part of introducing the check; digest-pinning this reference is
+      follow-up work.
+
+  - path: tenants/platform/services/local-path-provisioner/postInstall/local-path-provisioner.yaml
+    repository: busybox
+    reason: >-
+      pre-existing: this image is embedded in the operator's helperPod.yaml
+      ConfigMap template (not a Deployment/Job spec this repo owns
+      directly), predates this check, has no tag at all (implicit
+      `latest`), and has never been digest-pinned. Recorded here rather
+      than fixed as part of introducing the check; digest-pinning this
+      reference is follow-up work.
+
+  - path: tenants/platform/services/porkbun-webhook/values.yaml
+    repository: ghcr.io/mdonoughe/porkbun-webhook
+    reason: >-
+      pre-existing: this webhook Deployment image predates this check and
+      has never been digest-pinned. Recorded here rather than fixed as part
+      of introducing the check; digest-pinning this reference is follow-up
+      work.
+
+  - path: tenants/platform/services/postgres-backup/postInstall/cronjob.yaml
+    repository: postgres
+    reason: >-
+      pre-existing: this CronJob image predates this check and has never
+      been digest-pinned. Recorded here rather than fixed as part of
+      introducing the check; digest-pinning this reference is follow-up
+      work.
+
+  - path: tenants/platform/services/postgres-backup/postInstall/cronjob.yaml
+    repository: rclone/rclone
+    reason: >-
+      pre-existing: this CronJob image predates this check, was never
+      digest-pinned, and additionally uses the `latest` tag. Recorded here
+      rather than fixed as part of introducing the check; digest-pinning
+      this reference is follow-up work.
