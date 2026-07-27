@@ -13,6 +13,12 @@ spec:
     path: bootstrap
     directory:
       recurse: true
+      # crds/ is owned exclusively by the platform-crds Application (00-crds.yaml,
+      # wave -1) so CRDs exist before wave-1/2 services that ship ServiceMonitor/
+      # PodMonitor manifests. Without this exclude, this app's recursive sweep
+      # re-applies the same objects under the same field manager as a second,
+      # redundant owner.
+      exclude: crds/**
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
