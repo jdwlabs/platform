@@ -59,14 +59,21 @@ auto-instrumentation agent via an init container + `JAVA_TOOL_OPTIONS` /
 `NODE_OPTIONS` / `PYTHONPATH`, exporting to the same OTLP endpoint. This is the
 fastest way to get spans out of an existing service for the pilot.
 
-## Pilot proposal
+## Pilot
 
-No pilot service is currently selected (the original candidate was
-decommissioned before instrumentation started). When picking the next one,
-prefer a service that is org-owned (SDK instrumentation under our control),
-fans out to multiple backends (latency/error attribution across hops is the
-trace use case), and carries real traffic — `ai-sre-relay` is the leading
-candidate.
+`servicediscovery` is the pilot. It is instrumented with the OTel Go SDK and
+exports over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; with the variable
+unset, tracing is off and the service runs exactly as before.
+
+It was chosen over `ai-sre-relay` — the earlier suggestion here — because it
+owns `/api/remotes` and was the subject of two production investigations where
+request-level traces would have shortened the hunt. `ai-sre-relay` remains the
+better *second* pilot: its multi-hop routing is what exercises context
+propagation across services, which a single instrumented service cannot prove.
+
+An empty Tempo is now alerted on rather than assumed: `TempoNoSpansReceived`
+fires when no spans arrive, because a counter that never increments publishes
+no series and cannot be caught by an ordinary threshold rule.
 
 Pilot exit criteria: spans visible in Grafana Explore (Tempo), service graph
 rendering the pilot -> downstream backends, and one click from a slow span to
