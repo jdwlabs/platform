@@ -295,6 +295,34 @@ gates green.
 **Prometheus alert routes:** alerts route via `kv/alertmanager`
 `slack_webhook`. Verify by inspecting the alertmanager-config ConfigMap.
 
+**Tracing (Tempo) — `TempoNoSpansReceived`:**
+
+Tempo ingesting nothing is invisible by default: a counter that never
+increments publishes no series, so an ordinary threshold alert cannot fire on
+it. That is why the rule pairs a rate check with `absent()`, and why an empty
+query result below is a finding rather than a tooling failure.
+
+1. Distinguish the two failure modes:
+
+   ```
+   sum(tempo_distributor_spans_received_total)
+   ```
+
+   An **empty vector** means the counter has never incremented — no service has
+   ever emitted to this Tempo. A **value of 0** means emitters existed and have
+   now stopped.
+
+2. Rule out a scrape problem before chasing emitters — `up{job="platform-tempo"}`
+   should be `1`. If Tempo itself is down, the alert is a symptom, not the cause.
+
+3. Identify what is supposed to be emitting. Tracing is opt-in per service; the
+   set of instrumented services is small and deliberate, so "nothing is sending"
+   is usually the removal of the one service that was.
+
+4. If the emitting service was decommissioned on purpose, instrument a
+   replacement — do not silence the alert. An empty tracing backend that nobody
+   is told about is the exact condition this rule exists to surface.
+
 **Where to look first when X is broken:**
 
 | Subsystem        | Start here                                           |
@@ -305,6 +333,7 @@ gates green.
 | Postgres         | `kubectl get cluster -n database -o wide` (CNPG plugin) |
 | ARC runners      | Dormant by default — `arc-systems` should be empty; see "Self-hosted CI runners (ARC)" |
 | Gateway (NGF)    | `kubectl get pods -n nginx-gateway`, then check `NginxGatewayFabricDown`/`NginxGatewayFabricReconcileErrorsHigh` alerts (control-plane health only, not request-level) |
+| Tracing (Tempo)  | `sum(tempo_distributor_spans_received_total)` — empty vector means no service has ever emitted; see the `TempoNoSpansReceived` steps above |
 
 ## Self-hosted CI runners (ARC) — dormant
 
