@@ -87,6 +87,18 @@ jobs:
       - name: Check vendored monitoring CRDs match the pinned chart revision
         run: python3 tools/sync-monitoring-crds.py
 
+  image-pin-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.x"
+      - name: Install dependencies
+        run: pip install PyYAML
+      - name: Reject mutable image references
+        run: python3 tools/check-image-pins.py
+
   go-build-test:
     runs-on: ubuntu-latest
     defaults:
