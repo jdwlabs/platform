@@ -23,7 +23,7 @@ Git Sync is GA in Grafana v13: editors save a dashboard change as a commit and
 open a pull request against this repo without leaving the UI. Design + rollout
 plan: `docs/observability/DASHBOARDS-AND-MULTITENANCY.md`.
 
-### One-time setup (manual, before this lands)
+### Credential setup (human, one-time — already done)
 
 1. Create a dedicated **Grafana GitHub App** — repo access limited to
    `jdwlabs/platform`; permissions **Contents: read/write** and **Pull requests:
@@ -45,9 +45,36 @@ plan: `docs/observability/DASHBOARDS-AND-MULTITENANCY.md`.
    > Seed Vault **before** this merges — `extraSecretMounts` makes the Grafana
    > pod depend on the `grafana-gitsync-github-app` secret existing.
 
-3. In Grafana: **Administration > General > Provisioning** → add a GitHub
-   repository connection using the App ID / Installation ID / private key, point
-   it at this repo + target branch, and choose the PR workflow.
+### Connecting the repository (automated)
+
+The connection itself is **not** a manual step. Grafana's provisioning resources
+(`Connection`, `Repository`) live in Grafana's own API server — they look like
+Kubernetes objects but ArgoCD cannot see or reconcile them, so a connection made
+by hand in the UI disappears the moment Grafana is rebuilt, with no drift signal
+anywhere.
+
+Instead:
+
+- `postInstall/gitsync-resources.yaml` holds both resource definitions as the
+  reviewable source of truth. The private key is deliberately absent.
+- `postInstall/gitsync-apply-job.yaml` runs on every ArgoCD sync, injects the key
+  from the `grafana-gitsync-github-app` secret, and creates whichever resource is
+  missing.
+
+The Job **creates but never updates**. An existing connection is left untouched,
+because the stored private key is write-once and re-applying it would disturb a
+live sync path. The consequence is that editing `gitsync-resources.yaml` does not
+propagate to a running Grafana — to change a resource, delete it first, then let
+the next sync recreate it.
+
+Inspect current state:
+
+```sh
+curl -s -u <admin>:<pass> \
+  http://platform-grafana.monitoring.svc/apis/provisioning.grafana.app/v0alpha1/namespaces/default/repositories
+```
+
+An `items: []` response means Git Sync is credentialed but not connected.
 
 ### Workflow
 
