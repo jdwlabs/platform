@@ -680,7 +680,7 @@ func checkLimitRangeAdoption(ctx context.Context, kube kubernetes.Interface) Res
 		return Pass("no LimitRanges found")
 	}
 
-	var stale []string
+	var stale []staleContainer
 	checked := 0
 	for _, lr := range limitRanges.Items {
 		defaults := containerDefaults(lr)
@@ -699,8 +699,13 @@ func checkLimitRangeAdoption(ctx context.Context, kube kubernetes.Interface) Res
 			for _, c := range pod.Spec.Containers {
 				for _, d := range defaults {
 					if !hasResourceField(c.Resources, d) {
-						stale = append(stale, fmt.Sprintf("%s/%s[%s] missing %s.%s (predates limitrange/%s)",
-							pod.Namespace, pod.Name, c.Name, d.field, d.resource, lr.Name))
+						stale = append(stale, staleContainer{
+							namespace:  pod.Namespace,
+							pod:        pod.Name,
+							container:  c.Name,
+							field:      fmt.Sprintf("%s.%s", d.field, d.resource),
+							limitRange: lr.Name,
+						})
 					}
 				}
 			}
@@ -714,7 +719,52 @@ func checkLimitRangeAdoption(ctx context.Context, kube kubernetes.Interface) Res
 		return Passf("all pods in %d LimitRange-governed namespace(s) hold the defaulted fields", checked)
 	}
 	return Warnf("%d container(s) predate their namespace LimitRange and lack the defaulted field: %s",
-		len(stale), strings.Join(stale, "; "))
+		len(stale), summarizeStale(stale))
+}
+
+// staleContainer is one container missing a field its namespace LimitRange
+// would have defaulted had the pod been admitted after it.
+type staleContainer struct {
+	namespace  string
+	pod        string
+	container  string
+	field      string
+	limitRange string
+}
+
+// summarizeStale collapses identically-broken containers into one entry per
+// (namespace, container, field), naming a single example pod and a count.
+// Replicas of the same workload are one remediation, not N, and listing every
+// pod produced a line long enough to swamp the rest of the report — while
+// naming none would leave nothing concrete to act on.
+func summarizeStale(stale []staleContainer) string {
+	type group struct {
+		key   staleContainer
+		count int
+	}
+	var order []string
+	groups := map[string]*group{}
+	for _, s := range stale {
+		k := s.namespace + "|" + s.container + "|" + s.field + "|" + s.limitRange
+		if g, ok := groups[k]; ok {
+			g.count++
+			continue
+		}
+		groups[k] = &group{key: s, count: 1}
+		order = append(order, k)
+	}
+
+	parts := make([]string, 0, len(order))
+	for _, k := range order {
+		g := groups[k]
+		entry := fmt.Sprintf("%s/%s missing %s (predates limitrange/%s, e.g. pod %s",
+			g.key.namespace, g.key.container, g.key.field, g.key.limitRange, g.key.pod)
+		if g.count > 1 {
+			entry += fmt.Sprintf(" and %d more", g.count-1)
+		}
+		parts = append(parts, entry+")")
+	}
+	return strings.Join(parts, "; ")
 }
 
 // conditionStatus reads status.conditions[type=condType] from an unstructured object.
