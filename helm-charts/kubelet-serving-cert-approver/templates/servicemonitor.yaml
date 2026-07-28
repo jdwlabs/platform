@@ -1,0 +1,20 @@
+{{- if .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "kubelet-serving-cert-approver.fullname" . }}-metrics
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "kubelet-serving-cert-approver.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "kubelet-serving-cert-approver.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Values.namespace.name }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+{{- end }}

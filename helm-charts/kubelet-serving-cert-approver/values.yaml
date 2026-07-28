@@ -50,6 +50,14 @@ probes:
     timeoutSeconds: 5
     failureThreshold: 3
 
+metrics:
+  service:
+    enabled: true
+    port: 9090
+  serviceMonitor:
+    enabled: true
+    interval: 60s
+
 priorityClassName: system-cluster-critical
 
 nodeSelector: {}
