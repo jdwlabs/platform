@@ -1,0 +1,24 @@
+{{- if .Values.metrics.service.enabled }}
+{{/*
+The -metrics suffix is load-bearing. A Service named after the chart alone would
+collide with the key Talos still carries in its bootstrap-manifests inventory,
+and the first pruning upgrade-k8s would delete this Helm-owned object out from
+under the release. A name Talos has never seen cannot be pruned.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubelet-serving-cert-approver.fullname" . }}-metrics
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "kubelet-serving-cert-approver.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "kubelet-serving-cert-approver.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.service.port }}
+      targetPort: metrics
+      protocol: TCP
+{{- end }}
