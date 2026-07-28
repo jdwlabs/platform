@@ -5,71 +5,195 @@
 # treated as stale and fails the check — remove it once the file is fixed or
 # no longer exists.
 #
-# `path` is repo-relative; `repository` is the bare image name (no tag or
-# digest) as it appears in that file — together they are the unique key,
-# since a single manifest can reference more than one image.
+# `path` is repo-relative; `ref` is the FULL reference the checker composes
+# for that location, tag included (e.g. `redis:7.4-alpine`) — together they
+# are the unique key. The tag is part of the key on purpose: an exemption is
+# granted to a specific image, so bumping `redis:7.4-alpine` to `redis:latest`
+# re-opens the question instead of silently inheriting the old reason.
+# A reference whose tag lives in a sibling key (`dbReadyImage`/`dbReadyTag`)
+# is composed the same way the chart template joins them.
 #
-# Two categories of entry appear below:
+# Three categories of entry appear below:
 #   - deliberate: the reference is intentionally not digest-pinned, for a
 #     documented reason (e.g. it tracks a vendored chart's own appVersion,
 #     which is itself pinned by the chart revision in tenant.yaml).
+#   - not-rendered: the reference exists in a values file this check reads,
+#     but nothing in the cluster resolves it (a disabled subchart's defaults,
+#     a `helm test` hook, a default shadowed by a tenant overlay). Pinning it
+#     would edit dead configuration.
 #   - pre-existing: this check is new; these references predate it and were
 #     never pinned. They are recorded here — not silently ignored — so CI is
 #     green without hand-editing any image reference as part of adding the
 #     check. Paying these down is follow-up work, not bundled here.
+#
+# A reference is pinned rather than listed here whenever the pin does not
+# change what a running workload resolves to today. That is why the two
+# in-house charts under helm-charts/ (db-ui, kubelet-serving-cert-approver)
+# carry digests: both use fixed version tags, so the digest is exactly what
+# the tag already resolves to.
 exceptions:
   - path: tenants/platform/services/arc-systems/values.yaml
-    repository: ghcr.io/actions/gha-runner-scale-set-controller
+    ref: ghcr.io/actions/gha-runner-scale-set-controller
     reason: >-
       deliberate: tag is intentionally left empty so the controller image
       tracks the vendored gha-runner-scale-set-controller chart's own
       appVersion, which is itself pinned by that chart's `revision` in
       tenants/platform/tenant.yaml — not a rolling tag.
 
+  - path: helm-charts/litellm-helm/values.yaml
+    ref: ghcr.io/berriai/litellm-database
+    reason: >-
+      deliberate: the empty tag makes the deployment template render
+      `main-<appVersion>`, and this chart's appVersion is literally `latest`,
+      so the gateway runs the upstream `main-latest` build. Combined with
+      pullPolicy IfNotPresent, the nodes hold whatever `main-latest` was when
+      they first pulled it — pinning to the digest `main-latest` resolves to
+      today would therefore not freeze the running build, it would UPGRADE
+      it. Choosing a specific LiteLLM build is a version decision for the
+      AI-SRE gateway and is deliberately not made by a CI coverage change.
+
+  - path: helm-charts/litellm-helm/values.yaml
+    ref: docker.io/bitnamilegacy/postgresql
+    reason: >-
+      not-rendered: chart default for the db-ready init container, shadowed
+      by tenants/platform/services/litellm/values.yaml which sets both
+      dbReadyImage and dbReadyTag. The default's `dbReadyTag: ""` also means
+      the effective tag comes from a Go-template `default` in
+      templates/deployment.yaml, which no static scan of values can see, so a
+      digest written here would describe an image this chart never resolves.
+
+  - path: tenants/platform/services/litellm/values.yaml
+    ref: docker.io/bitnamilegacy/postgresql:16.1.0-debian-11-r20
+    reason: >-
+      pre-existing: the db-ready init container image predates this check.
+      The chart splits it across `dbReadyImage` and `dbReadyTag`, which the
+      template joins as `<image>:<tag>`, so a digest can only be expressed by
+      appending it to the tag value. Pinning it restarts the live LiteLLM
+      gateway and is grouped with the litellm image work, not with widening
+      this check's coverage.
+
+  - path: helm-charts/litellm-helm/templates/tests/test-connection.yaml
+    ref: busybox
+    reason: >-
+      not-rendered: this Pod carries the `helm.sh/hook: test` annotation, so
+      it is only created by an explicit `helm test` run. ArgoCD never renders
+      it during a sync, so this reference never reaches the cluster.
+
+  - path: helm-charts/litellm-helm/charts/postgresql/values.yaml
+    ref: docker.io/bitnami/postgresql:16.2.0-debian-12-r8
+    reason: >-
+      not-rendered: vendored Bitnami postgresql subchart, gated in
+      litellm-helm/Chart.yaml by `condition: db.deployStandalone`, which
+      tenants/platform/services/litellm/values.yaml sets to false (litellm
+      uses the CNPG-managed cluster). No template in this subchart renders.
+      Editing vendored upstream values in place would also make the next
+      resync of the subchart a merge conflict.
+
+  - path: helm-charts/litellm-helm/charts/postgresql/values.yaml
+    ref: docker.io/bitnami/os-shell:12-debian-12-r16
+    reason: >-
+      not-rendered: volume-permissions init container of the vendored Bitnami
+      postgresql subchart, which is gated off by
+      `condition: db.deployStandalone` (false in the litellm tenant overlay).
+
+  - path: helm-charts/litellm-helm/charts/postgresql/values.yaml
+    ref: docker.io/bitnami/postgres-exporter:0.15.0-debian-12-r14
+    reason: >-
+      not-rendered: metrics sidecar of the vendored Bitnami postgresql
+      subchart, which is gated off by `condition: db.deployStandalone`
+      (false in the litellm tenant overlay).
+
+  - path: helm-charts/litellm-helm/charts/redis/values.yaml
+    ref: docker.io/bitnami/redis:7.2.4-debian-12-r9
+    reason: >-
+      not-rendered: vendored Bitnami redis subchart, gated in
+      litellm-helm/Chart.yaml by `condition: redis.enabled`, which
+      tenants/platform/services/litellm/values.yaml sets to false (litellm
+      uses the separate litellm-redis service). No template in this subchart
+      renders. Editing vendored upstream values in place would also make the
+      next resync of the subchart a merge conflict.
+
+  - path: helm-charts/litellm-helm/charts/redis/values.yaml
+    ref: docker.io/bitnami/redis-sentinel:7.2.4-debian-12-r7
+    reason: >-
+      not-rendered: sentinel container of the vendored Bitnami redis
+      subchart, which is gated off by `condition: redis.enabled` (false in
+      the litellm tenant overlay).
+
+  - path: helm-charts/litellm-helm/charts/redis/values.yaml
+    ref: docker.io/bitnami/redis-exporter:1.58.0-debian-12-r4
+    reason: >-
+      not-rendered: metrics sidecar of the vendored Bitnami redis subchart,
+      which is gated off by `condition: redis.enabled` (false in the litellm
+      tenant overlay).
+
+  - path: helm-charts/litellm-helm/charts/redis/values.yaml
+    ref: docker.io/bitnami/os-shell:12-debian-12-r16
+    reason: >-
+      not-rendered: volume-permissions and sysctl init containers of the
+      vendored Bitnami redis subchart, which is gated off by
+      `condition: redis.enabled` (false in the litellm tenant overlay).
+
+  - path: helm-charts/litellm-helm/charts/redis/values.yaml
+    ref: docker.io/bitnami/kubectl:1.29.2-debian-12-r3
+    reason: >-
+      not-rendered: kubectl image for the vendored Bitnami redis subchart's
+      pre-upgrade hook, which is gated off by `condition: redis.enabled`
+      (false in the litellm tenant overlay).
+
+  - path: helm-charts/porkbun-webhook/values.yaml
+    ref: ghcr.io/mdonoughe/porkbun-webhook:v0.1.5
+    reason: >-
+      not-rendered: chart default, shadowed by
+      tenants/platform/services/porkbun-webhook/values.yaml which sets the
+      identical repository and tag. That overlay is the reference the cluster
+      resolves and carries its own entry below — the two move together, so
+      this default is not pinned on its own.
+
   - path: tenants/dotablaze-tech/services/arc-runner-set-dotablaze-tech/values.yaml
-    repository: docker.io/jdwlabs/agents
+    ref: docker.io/jdwlabs/agents:1.0.0
     reason: >-
       pre-existing: ARC runner container image predates this check and has
       never been digest-pinned. Recorded here rather than fixed as part of
       introducing the check; digest-pinning this reference is follow-up work.
 
   - path: tenants/jdwlabs/services/arc-runner-set-jdwlabs/values.yaml
-    repository: docker.io/jdwlabs/agents
+    ref: docker.io/jdwlabs/agents:1.0.0
     reason: >-
       pre-existing: ARC runner container image predates this check and has
       never been digest-pinned. Recorded here rather than fixed as part of
       introducing the check; digest-pinning this reference is follow-up work.
 
   - path: tenants/dotablaze-tech/services/dotablaze-tech-schemas/postInstall/flyway-migrate-non.yaml
-    repository: flyway/flyway
+    ref: flyway/flyway:11.2
     reason: >-
       pre-existing: flyway migration Job image predates this check and has
       never been digest-pinned. Recorded here rather than fixed as part of
       introducing the check; digest-pinning this reference is follow-up work.
 
   - path: tenants/dotablaze-tech/services/dotablaze-tech-schemas/postInstall/flyway-migrate-prd.yaml
-    repository: flyway/flyway
+    ref: flyway/flyway:11.2
     reason: >-
       pre-existing: flyway migration Job image predates this check and has
       never been digest-pinned. Recorded here rather than fixed as part of
       introducing the check; digest-pinning this reference is follow-up work.
 
   - path: tenants/jdwlabs/services/jdwlabs-schemas/postInstall/flyway-migrate-non.yaml
-    repository: flyway/flyway
+    ref: flyway/flyway:11.2
     reason: >-
       pre-existing: flyway migration Job image predates this check and has
       never been digest-pinned. Recorded here rather than fixed as part of
       introducing the check; digest-pinning this reference is follow-up work.
 
   - path: tenants/jdwlabs/services/jdwlabs-schemas/postInstall/flyway-migrate-prd.yaml
-    repository: flyway/flyway
+    ref: flyway/flyway:11.2
     reason: >-
       pre-existing: flyway migration Job image predates this check and has
       never been digest-pinned. Recorded here rather than fixed as part of
       introducing the check; digest-pinning this reference is follow-up work.
 
   - path: tenants/platform/services/ai-sre-relay/postInstall/ai-sre-relay.yaml
-    repository: jdwlabs/ai-sre-relay
+    ref: jdwlabs/ai-sre-relay:0.2.0
     reason: >-
       pre-existing: ai-sre-relay Deployment image predates this check and
       has never been digest-pinned. Recorded here rather than fixed as part
@@ -77,7 +201,7 @@ exceptions:
       work.
 
   - path: tenants/platform/services/holmes/values.yaml
-    repository: curlimages/curl
+    ref: curlimages/curl:8.21.0
     reason: >-
       pre-existing: the talosctl-install initContainer image predates this
       check and has never been digest-pinned. Recorded here rather than
@@ -85,7 +209,7 @@ exceptions:
       is follow-up work.
 
   - path: tenants/platform/services/holmes/postInstall/drift-scan-cronjob.yaml
-    repository: dwdraju/alpine-curl-jq
+    ref: dwdraju/alpine-curl-jq:latest
     reason: >-
       pre-existing: this CronJob image predates this check, was never
       digest-pinned, and additionally uses the `latest` tag. Recorded here
@@ -93,7 +217,7 @@ exceptions:
       this reference is follow-up work.
 
   - path: tenants/platform/services/litellm-redis/postInstall/redis.yaml
-    repository: redis
+    ref: redis:7.4-alpine
     reason: >-
       pre-existing: this StatefulSet image predates this check and has
       never been digest-pinned. Recorded here rather than fixed as part of
@@ -101,7 +225,7 @@ exceptions:
       work.
 
   - path: tenants/platform/services/local-path-provisioner/postInstall/local-path-provisioner.yaml
-    repository: rancher/local-path-provisioner
+    ref: rancher/local-path-provisioner:v0.0.31
     reason: >-
       pre-existing: the provisioner Deployment image predates this check
       and has never been digest-pinned. Recorded here rather than fixed as
@@ -109,7 +233,7 @@ exceptions:
       follow-up work.
 
   - path: tenants/platform/services/local-path-provisioner/postInstall/local-path-provisioner.yaml
-    repository: busybox
+    ref: busybox
     reason: >-
       pre-existing: this image is embedded in the operator's helperPod.yaml
       ConfigMap template (not a Deployment/Job spec this repo owns
@@ -119,7 +243,7 @@ exceptions:
       reference is follow-up work.
 
   - path: tenants/platform/services/porkbun-webhook/values.yaml
-    repository: ghcr.io/mdonoughe/porkbun-webhook
+    ref: ghcr.io/mdonoughe/porkbun-webhook:v0.1.5
     reason: >-
       pre-existing: this webhook Deployment image predates this check and
       has never been digest-pinned. Recorded here rather than fixed as part
@@ -127,7 +251,7 @@ exceptions:
       work.
 
   - path: tenants/platform/services/postgres-backup/postInstall/cronjob.yaml
-    repository: postgres
+    ref: postgres:17
     reason: >-
       pre-existing: this CronJob image predates this check and has never
       been digest-pinned. Recorded here rather than fixed as part of
@@ -135,7 +259,7 @@ exceptions:
       work.
 
   - path: tenants/platform/services/postgres-backup/postInstall/cronjob.yaml
-    repository: rclone/rclone
+    ref: rclone/rclone:latest
     reason: >-
       pre-existing: this CronJob image predates this check, was never
       digest-pinned, and additionally uses the `latest` tag. Recorded here

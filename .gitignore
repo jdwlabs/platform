@@ -19,3 +19,6 @@ kubeconfig*
 *.kubeconfig
 # Go sources named kubeconfig*.go (e.g. in cli/) are code, not credentials
 !kubeconfig*.go
+
+# Python bytecode from tools/ scripts and their tests
+__pycache__/

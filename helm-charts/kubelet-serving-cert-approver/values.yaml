@@ -1,6 +1,9 @@
 image:
   repository: ghcr.io/alex1989hu/kubelet-serving-cert-approver
-  tag: "0.11.0"
+  # Digest is the multi-arch manifest-list digest for the tag above, not a
+  # per-arch child manifest — the tag stays for readability, the digest is
+  # what actually gets resolved.
+  tag: "0.11.0@sha256:f17017b53983fe93f5a07ef85b2e448b9e4be848d45f05c325c8f2c77e1171c4"
   pullPolicy: IfNotPresent
 
 replicas: 1
