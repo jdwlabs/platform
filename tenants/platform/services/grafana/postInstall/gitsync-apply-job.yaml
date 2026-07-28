@@ -9,7 +9,10 @@
 # the stored private key is write-once and re-applying would disturb a working
 # sync path. The trade-off is that editing the resource definitions in git does
 # not propagate to a live Grafana -- changing them means deleting the resource
-# first, which is deliberate rather than accidental.
+# first, which is deliberate rather than accidental. A definition change that
+# is not paired with a delete is a no-op, so the gate at the end checks health
+# rather than existence: it is the only thing standing between "the resources
+# are there" and "dashboards are actually syncing".
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -21,6 +24,10 @@ metadata:
     argocd.argoproj.io/sync-wave: "3"
 spec:
   backoffLimit: 2
+  # The health gate polls, and ArgoCD blocks on this hook while it does. A
+  # ceiling keeps a permanently unhealthy connection from holding the sync
+  # open across all three attempts instead of just reporting the failure.
+  activeDeadlineSeconds: 1200
   ttlSecondsAfterFinished: 300
   template:
     spec:
@@ -71,6 +78,12 @@ spec:
 
               API="http://platform-grafana.monitoring.svc/apis/provisioning.grafana.app/v0alpha1/namespaces/default"
 
+              # status() returns only the code, so the body has to be kept
+              # somewhere for the callers that need to explain a failure. An
+              # unexpected status is exactly the case where the code alone says
+              # nothing and the body says everything.
+              LAST_BODY=/tmp/last-response
+
               # An empty name means "probe the collection". Appending it anyway
               # would build a trailing-slash URL that never reaches the
               # provisioning handler, so the readiness loop below would spin
@@ -80,7 +93,7 @@ spec:
                 if [ -n "$2" ]; then
                   path="$path/$2"
                 fi
-                curl -sS -o /dev/null -w '%{http_code}' \
+                curl -sS -o "$LAST_BODY" -w '%{http_code}' \
                   -u "$GF_USER:$GF_PASS" "$path"
               }
 
@@ -108,7 +121,8 @@ spec:
                     ;;
                   404) ;;
                   *)
-                    echo "unexpected status $code probing $kind_path/$name"
+                    echo "unexpected status $code probing $kind_path/$name:"
+                    cat "$LAST_BODY"
                     return 1
                     ;;
                 esac
@@ -151,14 +165,43 @@ spec:
               apply_if_absent connections jdwlabs-platform-github /tmp/connection.json
               apply_if_absent repositories platform-dashboards /etc/gitsync/repository.json
 
-              # An exit 0 must mean Git Sync is actually wired, not merely that
-              # the POSTs returned without error.
-              final=$(status repositories platform-dashboards)
-              if [ "$final" != "200" ]; then
-                echo "repository absent after apply (status $final)"
-                exit 1
-              fi
-              echo "git sync repository present"
+              # An exit 0 must mean Git Sync is actually working, not merely
+              # that the resources exist. Both are reported present the moment
+              # they are accepted, and stay present while failing every sync --
+              # so an existence check reports success over a connection that
+              # cannot authenticate and a repository syncing nothing.
+              #
+              # Health is computed asynchronously (the connection check calls
+              # GitHub), so a freshly created resource is legitimately not
+              # healthy yet. Poll rather than read once.
+              #
+              # There is no jq in this image and no server-side field selector
+              # for status, hence the token match: whitespace is stripped so the
+              # key/value pair is contiguous, and the only other occurrence of
+              # the word is "unhealthy" inside a status message, which cannot
+              # match because of the leading quote.
+              wait_healthy() {
+                kind_path="$1"
+                name="$2"
+                i=0
+                while [ "$i" -lt 18 ]; do
+                  code=$(status "$kind_path" "$name" || echo 000)
+                  if [ "$code" = "200" ] \
+                    && tr -d ' \n' < "$LAST_BODY" | grep -q '"healthy":true'; then
+                    echo "$kind_path/$name is healthy"
+                    return 0
+                  fi
+                  i=$((i + 1))
+                  sleep 5
+                done
+                echo "$kind_path/$name never became healthy (last status $code):"
+                cat "$LAST_BODY"
+                return 1
+              }
+
+              wait_healthy connections jdwlabs-platform-github
+              wait_healthy repositories platform-dashboards
+              echo "git sync is connected and healthy"
           volumeMounts:
             - name: resources
               mountPath: /etc/gitsync
