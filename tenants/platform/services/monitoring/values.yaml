@@ -1,6 +1,5 @@
 cluster:
   name: jdwlabs
-  namespace: monitoring
 
 # Single collection owner: kube-prometheus-stack scrapes all metrics via
 # Prometheus Operator ServiceMonitors/PodMonitors. Alloy previously re-scraped
@@ -14,9 +13,22 @@ clusterMetrics:
 
 clusterEvents:
   enabled: true
+  # v4 no longer auto-assigns a feature to a collector; cluster events run on
+  # the singleton collector alongside (not sharded across) the per-node logs
+  # collector, matching the pre-migration topology.
+  collector: alloy-singleton
 
-podLogs:
+# Replaces the removed v3 `podLogs` feature. Of the three v4 successors,
+# this is the only one that tails pod log files from a mounted hostPath
+# (loki.source.file), matching v3's default collection mechanism exactly;
+# podLogsViaKubernetesApi streams from the kubelet API instead (no hostPath
+# read, but different load characteristics) and podLogsViaOpenTelemetry
+# ships OTLP-formatted logs to a non-Loki destination. Keeping the same
+# hostPath-tailing mechanism means the alloy-logs livenessProbe workaround
+# below is still required post-migration.
+podLogsViaLoki:
   enabled: true
+  collector: alloy-logs
 
 nodeLogs:
   enabled: false
@@ -27,45 +39,91 @@ nodeLogs:
 selfReporting:
   enabled: false
 
-alloy-logs:
-  enabled: true
-  # alloy-logs ran ~175Mi/node unbounded. Cap it: request covers steady state,
-  # limit gives headroom for log bursts while protecting node memory.
-  alloy:
-    resources:
-      requests:
-        cpu: 50m
-        memory: 128Mi
-      limits:
-        memory: 256Mi
-    # The chart only wires a readinessProbe (hardcoded, 1s timeout) with no
-    # livenessProbe, so a wedged Alloy process just sits NotReady forever
-    # instead of being restarted — one replica ran wedged for 9 days,
-    # re-reading its hostPath log mounts the whole time and saturating that
-    # node's disk IO queue. Reuse the same /-/ready endpoint for liveness so
-    # kubelet kills and reschedules a stuck replica.
-    livenessProbe:
-      httpGet:
-        path: /-/ready
-        port: 12345
-      initialDelaySeconds: 30
-      periodSeconds: 10
-      timeoutSeconds: 5
-      failureThreshold: 6
-  # Runs on every node beside the alloy container and shipped with a request but
-  # no limit, so ~44Mi/node was unbounded across the whole DaemonSet — the
-  # largest uncapped footprint left after the primary-container sweep.
-  configReloader:
-    resources:
-      requests:
-        memory: 64Mi
-      limits:
-        memory: 128Mi
+# v4 nests per-collector config under `collectors:`; alloy-operator is the
+# only collector-adjacent component that stays top-level.
+#
+# A key under `collectors:` is now only a name. v3 shipped per-name default
+# files that silently supplied each well-known collector's workload shape;
+# v4 removed them, so a collector that declares no `presets` inherits the
+# upstream Alloy defaults — an untolerated DaemonSet — no matter what it is
+# called. Every collector below therefore states its shape explicitly.
+collectors:
+  alloy-logs:
+    enabled: true
+    # daemonset: one reader per node, plus the blanket NoSchedule toleration
+    # that keeps it scheduled on the tainted control-plane nodes; without it
+    # those nodes' pod logs stop reaching Loki and nothing reports an error.
+    # filesystem-log-reader: mounts /var/log and /var/lib/docker/containers,
+    # which podLogsViaLoki tails directly off the node.
+    presets:
+      - daemonset
+      - filesystem-log-reader
+    alloy:
+      # alloy-logs ran ~175Mi/node unbounded. Cap it: request covers steady state,
+      # limit gives headroom for log bursts while protecting node memory.
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 256Mi
+      # The chart only wires a readinessProbe (hardcoded, 1s timeout) with no
+      # livenessProbe, so a wedged Alloy process just sits NotReady forever
+      # instead of being restarted — one replica ran wedged for 9 days,
+      # re-reading its hostPath log mounts the whole time and saturating that
+      # node's disk IO queue. Reuse the same /-/ready endpoint for liveness so
+      # kubelet kills and reschedules a stuck replica.
+      livenessProbe:
+        httpGet:
+          path: /-/ready
+          port: 12345
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 6
+    # Runs on every node beside the alloy container and shipped with a request but
+    # no limit, so ~44Mi/node was unbounded across the whole DaemonSet — the
+    # largest uncapped footprint left after the primary-container sweep.
+    configReloader:
+      resources:
+        requests:
+          memory: 64Mi
+        limits:
+          memory: 128Mi
 
-# Metrics collection is owned by kube-prometheus-stack; with clusterMetrics
-# disabled there is nothing for this instance to collect.
-alloy-metrics:
-  enabled: false
+  # Metrics collection is owned by kube-prometheus-stack; with clusterMetrics
+  # disabled there is nothing for this instance to collect. v4 errors if a
+  # collector is enabled with no feature assigned to it, so this must stay
+  # explicitly disabled rather than merely absent.
+  alloy-metrics:
+    enabled: false
+
+  alloy-singleton:
+    enabled: true
+    # Cluster events must be read by exactly one replica, and this preset is
+    # the only thing that makes that true in v4 (deployment, replicas: 1).
+    # Without it the collector renders as a DaemonSet, every node re-reads the
+    # same event stream into Loki, and the memory request below is charged once
+    # per node instead of once per cluster.
+    presets:
+      - singleton
+    alloy:
+      # Cluster-events collector ran ~170Mi live against the chart's 50Mi default
+      # request — 120Mi invisible to the scheduler. 192Mi covers observed steady
+      # state with modest headroom.
+      resources:
+        requests:
+          memory: 192Mi
+        # Request without a limit left this Burstable-unbounded; the cap gives
+        # roughly 2x headroom over observed steady state for event bursts.
+        limits:
+          memory: 384Mi
+    configReloader:
+      resources:
+        requests:
+          memory: 64Mi
+        limits:
+          memory: 128Mi
 
 # Operator ran BestEffort (first evicted under node memory pressure,
 # invisible to the scheduler). Observed ~57Mi; request ~1.7x that, limit
@@ -77,27 +135,8 @@ alloy-operator:
     limits:
       memory: 256Mi
 
-alloy-singleton:
-  enabled: true
-  # Cluster-events collector ran ~170Mi live against the chart's 50Mi default
-  # request — 120Mi invisible to the scheduler. 192Mi covers observed steady
-  # state with modest headroom.
-  alloy:
-    resources:
-      requests:
-        memory: 192Mi
-      # Request without a limit left this Burstable-unbounded; the cap gives
-      # roughly 2x headroom over observed steady state for event bursts.
-      limits:
-        memory: 384Mi
-  configReloader:
-    resources:
-      requests:
-        memory: 64Mi
-      limits:
-        memory: 128Mi
-
+# v4 keys destinations by name instead of a list entry's `name:` field.
 destinations:
-  - name: Loki
+  Loki:
     type: loki
     url: "http://platform-loki:3100/loki/api/v1/push"
