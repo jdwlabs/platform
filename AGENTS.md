@@ -102,7 +102,7 @@ See [docs/ONBOARDING.md](docs/ONBOARDING.md) for the full flow.
 
 1. Add a service entry to `tenants/platform/tenant.yaml` (chart, repo, revision, namespace, `syncWave` — see existing entries for wave placement)
 2. Add configuration at `tenants/platform/services/<service>/values.yaml`; extra manifests go in `tenants/platform/services/<service>/postInstall/`
-3. For a custom chart, add it under `helm-charts/` and reference it from the service entry
+3. For a custom chart, add it under `helm-charts/` and reference it from the service entry — every image reference in that chart's values (and in the tenant overlay) must be digest-pinned or carry a documented exception in `tools/image-pin-allowlist.yaml`; `python3 tools/check-image-pins.py` gates this in CI
 4. Ensure required Vault secrets are seeded if needed
 5. Validate: `platformctl tenants validate`
 
