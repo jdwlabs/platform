@@ -71,9 +71,17 @@ spec:
 
               API="http://platform-grafana.monitoring.svc/apis/provisioning.grafana.app/v0alpha1/namespaces/default"
 
+              # An empty name means "probe the collection". Appending it anyway
+              # would build a trailing-slash URL that never reaches the
+              # provisioning handler, so the readiness loop below would spin
+              # against nothing and fall through as if Grafana were up.
               status() {
+                path="$API/$1"
+                if [ -n "$2" ]; then
+                  path="$path/$2"
+                fi
                 curl -sS -o /dev/null -w '%{http_code}' \
-                  -u "$GF_USER:$GF_PASS" "$API/$1/$2"
+                  -u "$GF_USER:$GF_PASS" "$path"
               }
 
               # The hook can start before Grafana finishes booting; a 000/503
@@ -104,22 +112,36 @@ spec:
                     return 1
                     ;;
                 esac
-                curl -sS -f -X POST \
+                # The response body carries the validation error. Discarding it
+                # (curl -f) leaves nothing to diagnose from once ArgoCD deletes
+                # the failed hook pod.
+                resp=$(mktemp)
+                code=$(curl -sS -o "$resp" -w '%{http_code}' -X POST \
                   -H 'Content-Type: application/json' \
                   -u "$GF_USER:$GF_PASS" \
                   --data-binary "@$body" \
-                  "$API/$kind_path" > /dev/null
-                echo "created $kind_path/$name"
+                  "$API/$kind_path")
+                case "$code" in
+                  2*)
+                    echo "created $kind_path/$name"
+                    ;;
+                  *)
+                    echo "POST $kind_path returned $code:"
+                    cat "$resp"
+                    return 1
+                    ;;
+                esac
               }
 
               APP_ID=$(cat /etc/secrets/gitsync/app-id)
               INSTALL_ID=$(cat /etc/secrets/gitsync/installation-id)
 
-              # The PEM has to become one JSON string. awk folds it to literal
-              # \n escapes; doubling the backslashes afterwards stops sed from
-              # interpreting them back into real newlines and breaking the JSON.
-              KEY=$(awk '{printf "%s\\n", $0}' /etc/secrets/gitsync/private-key \
-                    | sed 's/\\/\\\\/g')
+              # Grafana base64-decodes secure.privateKey.create before parsing
+              # it, so the raw PEM is rejected at admission with a 422. Encoding
+              # also removes the escaping problem entirely: the base64 alphabet
+              # contains no backslash or delimiter, so it substitutes verbatim.
+              # busybox base64 has no -w0, hence the explicit newline strip.
+              KEY=$(base64 /etc/secrets/gitsync/private-key | tr -d '\n')
 
               sed -e "s|__APP_ID__|$APP_ID|" \
                   -e "s|__INSTALLATION_ID__|$INSTALL_ID|" \
