@@ -8,6 +8,14 @@
 # The GitHub App private key is deliberately absent -- the Job injects it at
 # apply time from the Vault-backed grafana-gitsync-github-app secret, so the
 # credential never lands in a ConfigMap.
+#
+# Webhooks are disabled on both resources. Grafana otherwise demands the App
+# hold webhooks:write and rejects the connection outright when it does not, and
+# a registered webhook is only useful if GitHub can reach this instance inbound
+# -- which is not something a homelab should have to guarantee for a latency
+# optimisation. With webhooks off Grafana polls instead, so the repository's
+# sync.intervalSeconds below is what actually drives sync; the only cost is
+# that a merged commit lands within that interval rather than within seconds.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -29,6 +37,9 @@ data:
         "github": {
           "appID": "__APP_ID__",
           "installationID": "__INSTALLATION_ID__"
+        },
+        "webhook": {
+          "disabled": true
         }
       },
       "secure": {
@@ -54,6 +65,9 @@ data:
           "target": "folder"
         },
         "workflows": ["write", "branch"],
+        "webhook": {
+          "disabled": true
+        },
         "github": {
           "url": "https://github.com/jdwlabs/platform",
           "branch": "main",

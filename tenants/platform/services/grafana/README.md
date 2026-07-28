@@ -29,6 +29,12 @@ plan: `docs/observability/DASHBOARDS-AND-MULTITENANCY.md`.
    `jdwlabs/platform`; permissions **Contents: read/write** and **Pull requests:
    read/write**. Install it on the repo; record the **App ID** and
    **Installation ID**; generate a **private key** (PEM).
+
+   **Webhooks: read/write is deliberately *not* granted.** Both resources set
+   `spec.webhook.disabled: true`, which is the supported way to tell Grafana the
+   App will not hold that permission and that it should poll instead. Granting
+   it would only pay off if GitHub could reach this instance inbound, which is
+   not something this cluster guarantees.
 2. Seed the credential into Vault (mirrors the ARC `<tenant>-github-app` flow):
 
    ```sh
@@ -67,7 +73,34 @@ live sync path. The consequence is that editing `gitsync-resources.yaml` does no
 propagate to a running Grafana — to change a resource, delete it first, then let
 the next sync recreate it.
 
-Inspect current state:
+#### Changing a resource definition (manual, attended)
+
+Merging an edit to `gitsync-resources.yaml` on its own changes nothing: the next
+Job run finds both resources present and skips them. ArgoCD cannot help here —
+these live in Grafana's API server, so `prune`/`selfHeal` on `platform-grafana`
+neither manages nor removes them. Delete them by hand, then let the sync
+recreate them, and watch the result:
+
+```sh
+BASE=http://platform-grafana.monitoring.svc/apis/provisioning.grafana.app/v0alpha1/namespaces/default
+curl -sS -u <admin>:<pass> -X DELETE "$BASE/repositories/platform-dashboards"
+curl -sS -u <admin>:<pass> -X DELETE "$BASE/connections/jdwlabs-platform-github"
+```
+
+Delete the repository **before** the connection — the repository references it.
+Deleting is safe only while no dashboard is owned by `platform-dashboards`;
+check first, because the repository's remove-orphan-resources finalizer collects
+whatever it owns:
+
+```sh
+curl -sS -u <admin>:<pass> \
+  http://platform-grafana.monitoring.svc/apis/dashboard.grafana.app/v1beta1/namespaces/default/dashboards
+```
+
+Dashboards annotated `grafana.app/managedBy: classic-file-provisioning` belong
+to the ConfigMap sidecar and are unaffected.
+
+#### Inspecting current state
 
 ```sh
 curl -s -u <admin>:<pass> \
@@ -75,6 +108,11 @@ curl -s -u <admin>:<pass> \
 ```
 
 An `items: []` response means Git Sync is credentialed but not connected.
+Present is not the same as working — read `status.health.healthy` and
+`status.sync.state`, since a resource that fails every sync still lists fine.
+That is what the Job's final gate asserts, so a red `platform-grafana` sync with
+`never became healthy` in the hook log is Git Sync reporting itself broken
+rather than the deploy being broken.
 
 ### Workflow
 
