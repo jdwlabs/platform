@@ -9,13 +9,19 @@
 # apply time from the Vault-backed grafana-gitsync-github-app secret, so the
 # credential never lands in a ConfigMap.
 #
-# Webhooks are disabled on both resources. Grafana otherwise demands the App
-# hold webhooks:write and rejects the connection outright when it does not, and
-# a registered webhook is only useful if GitHub can reach this instance inbound
-# -- which is not something a homelab should have to guarantee for a latency
-# optimisation. With webhooks off Grafana polls instead, so the repository's
-# sync.intervalSeconds below is what actually drives sync; the only cost is
-# that a merged commit lands within that interval rather than within seconds.
+# Webhooks are disabled on both resources so Grafana registers no inbound hook
+# and polls on the repository's sync.intervalSeconds instead -- a hook is only
+# useful if GitHub can reach this instance inbound, which this cluster does not
+# guarantee. Disabling it does NOT waive the permission: Grafana 13.1.1 checks
+# the App for webhooks:write on any type:github connection regardless, and
+# reports the connection unhealthy ("requires 'write', has ''") without it. The
+# App therefore has to hold a permission it never exercises here.
+#
+# The repository offers only the "branch" workflow. "write" means committing
+# straight to the configured branch, and main is a merge target only -- a
+# ruleset requires a pull request. Grafana validates that up front and marks
+# the whole repository spec invalid when the two disagree, so offering "write"
+# here does not degrade to a pull request, it breaks provisioning outright.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -64,7 +70,7 @@ data:
           "intervalSeconds": 60,
           "target": "folder"
         },
-        "workflows": ["write", "branch"],
+        "workflows": ["branch"],
         "webhook": {
           "disabled": true
         },
