@@ -12,16 +12,18 @@
 # Webhooks are disabled on both resources so Grafana registers no inbound hook
 # and polls on the repository's sync.intervalSeconds instead -- a hook is only
 # useful if GitHub can reach this instance inbound, which this cluster does not
-# guarantee. Disabling it does NOT waive the permission: Grafana 13.1.1 checks
-# the App for webhooks:write on any type:github connection regardless, and
-# reports the connection unhealthy ("requires 'write', has ''") without it. The
-# App therefore has to hold a permission it never exercises here.
+# guarantee.
 #
-# The repository offers only the "branch" workflow. "write" means committing
-# straight to the configured branch, and main is a merge target only -- a
-# ruleset requires a pull request. Grafana validates that up front and marks
-# the whole repository spec invalid when the two disagree, so offering "write"
-# here does not degrade to a pull request, it breaks provisioning outright.
+# The repository offers only the "branch" workflow, and that single choice is
+# load-bearing twice over. "write" commits straight to the configured branch,
+# and main is a merge target only -- a ruleset requires a pull request. Grafana
+# validates that up front rather than degrading to a pull request, so offering
+# "write" marks the whole repository spec invalid. It also drags in a webhooks
+# requirement: required permissions are derived from the bound repositories'
+# workflows, so a "write" repository makes its connection demand webhooks:write
+# and report unhealthy without it. Neither failure names the workflow as the
+# cause, and the connection error in particular reads as a connection-level
+# permission problem. The App holds no webhooks grant and needs none.
 apiVersion: v1
 kind: ConfigMap
 metadata:

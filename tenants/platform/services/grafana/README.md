@@ -26,25 +26,26 @@ plan: `docs/observability/DASHBOARDS-AND-MULTITENANCY.md`.
 ### Credential setup (human, one-time — already done)
 
 1. Create a dedicated **Grafana GitHub App** — repo access limited to
-   `jdwlabs/platform`; permissions **Contents: read/write**, **Pull requests:
-   read/write** and **Webhooks: read/write**. Install it on the repo; record the
-   **App ID** and **Installation ID**; generate a **private key** (PEM).
+   `jdwlabs/platform`; permissions **Contents: read/write** and **Pull requests:
+   read/write**. Install it on the repo; record the **App ID** and
+   **Installation ID**; generate a **private key** (PEM).
 
-   **Webhooks: read/write is required even though no webhook is ever
-   registered.** Both resources set `spec.webhook.disabled: true`, which stops
-   Grafana registering an inbound hook — correctly, since GitHub cannot reach
-   this cluster inbound — but it does *not* waive the permission check. Grafana
-   13.1.1 validates the App's webhooks grant on every `type: github` connection
-   and holds the connection unhealthy without it:
+   **Webhooks: read/write is not needed.** Grafana derives a connection's
+   required permissions from the workflows of the repositories bound to it, not
+   from the connection alone. The `write` workflow pushes directly and pulls in
+   a webhooks requirement; `branch` does not. While the repository offered
+   `write`, the connection failed with:
 
    ```text
    GitHub App lacks required 'webhooks' permission: requires 'write', has ''
    ```
 
-   Verified against the live connection: the failure persists with
-   `webhook.disabled: true` present in the stored spec. After changing the App's
-   permissions, the installation must **accept** the update before Grafana sees
-   it.
+   which reads like a connection-level demand and is not one. Recreating the
+   repository with `workflows: ["branch"]` cleared it against an App still
+   holding only `contents:write`, `metadata:read` and `pull_requests:write` —
+   the grant was never changed. `spec.webhook.disabled: true` remains set on
+   both resources so no inbound hook is registered, which is what this cluster
+   needs regardless.
 2. Seed the credential into Vault (mirrors the ARC `<tenant>-github-app` flow):
 
    ```sh
