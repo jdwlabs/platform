@@ -1,12 +1,16 @@
 # observability/
 
-Proposed home for dashboards-as-code, managed by Grafana **Git Sync** (Grafana
-v13+). See [docs/observability/DASHBOARDS-AND-MULTITENANCY.md](../docs/observability/DASHBOARDS-AND-MULTITENANCY.md)
+Home for dashboards-as-code, managed by Grafana **Git Sync** (Grafana v13+).
+See [docs/observability/DASHBOARDS-AND-MULTITENANCY.md](../docs/observability/DASHBOARDS-AND-MULTITENANCY.md)
 for the full design, rationale, and migration path.
 
-> Status: illustrative scaffold. The files here are **examples** to show the
-> target layout — they are not yet wired into Git Sync and do not replace the
-> existing ConfigMap-sidecar dashboards.
+> Status: wired and syncing. `dashboards/platform/` is the live Git Sync
+> repository path — the connection and repository resources are healthy and
+> polling this directory. The dashboards committed here are still examples
+> showing the target layout, and they do not replace the existing
+> ConfigMap-sidecar dashboards; those migrate one at a time, deleting each
+> ConfigMap in the same change that adds its dashboard here, so the two paths
+> never own the same dashboard.
 
 ## Layout
 
