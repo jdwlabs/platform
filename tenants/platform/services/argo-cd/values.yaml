@@ -76,12 +76,17 @@ configs:
       # SSO login via the Dex staticPasswords admin (admin@jdwlabs.com);
       # separate identity from the built-in local `admin` account.
       g, admin@jdwlabs.com, role:admin
-      # Social-connector logins (GitHub and Google) both resolve to this
-      # verified email. This grant is the ONLY thing authorizing the Google
-      # connector — Google authenticates any Google account, so every other
-      # Google identity lands here with no role at all (no policy.default is
-      # set — fail closed).
+      # Social-connector logins (GitHub and Google) resolve to a verified
+      # email, and the grants below are the ONLY thing authorizing them.
+      # Google authenticates ANY Google account, so an identity without a
+      # grant here lands with no role at all. That is the whole access
+      # control: keep policy.default unset, or every Google account on the
+      # internet inherits whatever it is set to.
       g, jdwillmsen@gmail.com, role:admin
+      g, jdwlabs00@gmail.com, role:admin
+      # Read-only: role:readonly above denies exec, so this cannot open a
+      # shell into a workload.
+      g, dotablazegaming@gmail.com, role:readonly
 
 controller:
   metrics:
