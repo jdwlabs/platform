@@ -90,6 +90,10 @@ var staticSeedSpecs = map[string]seedSpec{
 		{"jira_email", "PLATFORMCTL_HOLMES_JIRA_EMAIL", false, false},
 		{"jira_api_token", "PLATFORMCTL_HOLMES_JIRA_API_TOKEN", true, false},
 		{"github_token", "PLATFORMCTL_HOLMES_GITHUB_TOKEN", true, false},
+		// Bearer token the Alertmanager receiver presents to the relay's
+		// /webhook. Both sides read this one property, so they cannot drift
+		// apart into a permanent 401.
+		{"webhook_token", "PLATFORMCTL_HOLMES_WEBHOOK_TOKEN", true, false},
 		// Read-only (os:reader) talosconfig file content for the talos
 		// toolset. Optional: seeded separately from the relay creds, so a
 		// partial re-seed must not prompt for it.
