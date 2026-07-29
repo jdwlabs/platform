@@ -26,15 +26,25 @@ plan: `docs/observability/DASHBOARDS-AND-MULTITENANCY.md`.
 ### Credential setup (human, one-time — already done)
 
 1. Create a dedicated **Grafana GitHub App** — repo access limited to
-   `jdwlabs/platform`; permissions **Contents: read/write** and **Pull requests:
-   read/write**. Install it on the repo; record the **App ID** and
-   **Installation ID**; generate a **private key** (PEM).
+   `jdwlabs/platform`; permissions **Contents: read/write**, **Pull requests:
+   read/write** and **Webhooks: read/write**. Install it on the repo; record the
+   **App ID** and **Installation ID**; generate a **private key** (PEM).
 
-   **Webhooks: read/write is deliberately *not* granted.** Both resources set
-   `spec.webhook.disabled: true`, which is the supported way to tell Grafana the
-   App will not hold that permission and that it should poll instead. Granting
-   it would only pay off if GitHub could reach this instance inbound, which is
-   not something this cluster guarantees.
+   **Webhooks: read/write is required even though no webhook is ever
+   registered.** Both resources set `spec.webhook.disabled: true`, which stops
+   Grafana registering an inbound hook — correctly, since GitHub cannot reach
+   this cluster inbound — but it does *not* waive the permission check. Grafana
+   13.1.1 validates the App's webhooks grant on every `type: github` connection
+   and holds the connection unhealthy without it:
+
+   ```text
+   GitHub App lacks required 'webhooks' permission: requires 'write', has ''
+   ```
+
+   Verified against the live connection: the failure persists with
+   `webhook.disabled: true` present in the stored spec. After changing the App's
+   permissions, the installation must **accept** the update before Grafana sees
+   it.
 2. Seed the credential into Vault (mirrors the ARC `<tenant>-github-app` flow):
 
    ```sh
