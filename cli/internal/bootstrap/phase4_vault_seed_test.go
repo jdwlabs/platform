@@ -141,6 +141,7 @@ func TestStaticSeedSpecs_Holmes(t *testing.T) {
 		"jira_email":          "PLATFORMCTL_HOLMES_JIRA_EMAIL",
 		"jira_api_token":      "PLATFORMCTL_HOLMES_JIRA_API_TOKEN",
 		"github_token":        "PLATFORMCTL_HOLMES_GITHUB_TOKEN",
+		"webhook_token":       "PLATFORMCTL_HOLMES_WEBHOOK_TOKEN",
 		"talosconfig":         "PLATFORMCTL_HOLMES_TALOSCONFIG",
 	}
 	got := map[string]string{}
@@ -206,6 +207,7 @@ func TestVaultSeedPhase_MergePreservesExistingFields(t *testing.T) {
 	t.Setenv("PLATFORMCTL_HOLMES_JIRA_EMAIL", "ops@example.com")
 	t.Setenv("PLATFORMCTL_HOLMES_JIRA_API_TOKEN", "jira-tok")
 	t.Setenv("PLATFORMCTL_HOLMES_GITHUB_TOKEN", "gh-tok")
+	t.Setenv("PLATFORMCTL_HOLMES_WEBHOOK_TOKEN", "hook-tok")
 
 	p := NewVaultSeedPhase(NewVaultAddrResolver(srv.URL, nil, nil), true, "secret", nil, []string{"holmes"})
 	if err := p.Apply(context.Background()); err != nil {
