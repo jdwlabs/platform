@@ -192,14 +192,6 @@ exceptions:
       never been digest-pinned. Recorded here rather than fixed as part of
       introducing the check; digest-pinning this reference is follow-up work.
 
-  - path: tenants/platform/services/ai-sre-relay/postInstall/ai-sre-relay.yaml
-    ref: jdwlabs/ai-sre-relay:0.2.0
-    reason: >-
-      pre-existing: ai-sre-relay Deployment image predates this check and
-      has never been digest-pinned. Recorded here rather than fixed as part
-      of introducing the check; digest-pinning this reference is follow-up
-      work.
-
   - path: tenants/platform/services/holmes/values.yaml
     ref: curlimages/curl:8.21.0
     reason: >-
