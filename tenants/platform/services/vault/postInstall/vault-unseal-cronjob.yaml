@@ -68,12 +68,19 @@ spec:
               # Only 0 means there is nothing to do; an unreachable member falls
               # through to the unseal attempt and fails the container, so it
               # surfaces as a failed job instead of being silently skipped.
-              # The key goes in on stdin ("-") rather than as an argument so it
-              # never appears in the container's process list.
+              # The key is passed as an argument. Reading it from stdin via
+              # `unseal -` was tried first and does not work against this Vault:
+              # every attempt is rejected with "'key' must be a valid hex or
+              # base64 string", with or without a trailing newline, while the
+              # identical key succeeds as an argument. A sealed member is left
+              # sealed forever, so the stdin form silently disables auto-unseal.
+              # The argument is visible in the container's process list, which
+              # costs nothing here: the same key is already in this container's
+              # environment, so anything able to read /proc can read it either way.
               args:
                 - |
                   if vault status >/dev/null 2>&1; then exit 0; fi
-                  printf '%s\n' "$VAULT_UNSEAL_KEY_1" | vault operator unseal -
+                  vault operator unseal "$VAULT_UNSEAL_KEY_1"
               env:
                 - name: VAULT_ADDR
                   value: "http://platform-vault-0.platform-vault-internal.vault.svc:8200"
@@ -105,7 +112,7 @@ spec:
               args:
                 - |
                   if vault status >/dev/null 2>&1; then exit 0; fi
-                  printf '%s\n' "$VAULT_UNSEAL_KEY_1" | vault operator unseal -
+                  vault operator unseal "$VAULT_UNSEAL_KEY_1"
               env:
                 - name: VAULT_ADDR
                   value: "http://platform-vault-1.platform-vault-internal.vault.svc:8200"
@@ -134,7 +141,7 @@ spec:
               args:
                 - |
                   if vault status >/dev/null 2>&1; then exit 0; fi
-                  printf '%s\n' "$VAULT_UNSEAL_KEY_1" | vault operator unseal -
+                  vault operator unseal "$VAULT_UNSEAL_KEY_1"
               env:
                 - name: VAULT_ADDR
                   value: "http://platform-vault-2.platform-vault-internal.vault.svc:8200"
