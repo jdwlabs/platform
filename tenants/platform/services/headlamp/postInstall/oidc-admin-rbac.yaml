@@ -19,3 +19,11 @@ subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: User
     name: oidc:jdwillmsen@gmail.com
+  # Second operator identity, via the Google connector. Every name in this
+  # list holds cluster-admin — read/write on every resource in every
+  # namespace, secrets included — so an identity belongs here only when it
+  # needs the whole cluster. ArgoCD-only access is a policy.csv grant and
+  # does not require a subject here.
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: oidc:jdwlabs00@gmail.com
