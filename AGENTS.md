@@ -31,7 +31,7 @@ jdwlabs `platform` is the GitOps source of truth for the jdwlabs Kubernetes clus
 
 - Validate all YAML files: `yamllint tenants/ bootstrap/`
 - Validate tenant.yaml files: `platformctl tenants validate`
-- Verify ExternalSecret references resolve in Vault: `platformctl tenants verify-secrets`
+- Verify ExternalSecret references resolve in Vault: `platformctl tenants verify-secrets` — scans the `tenants/` tree by default, so it checks refs on an unmerged branch; add `--source cluster` to scan applied state instead. Refs it does not check (service absent from `tenant.yaml`, non-vault store, `dataFrom` pattern) are named with counts in the summary — read that line, a "0 issues" over a narrowed scan is not full coverage
 - Validate Kubernetes manifests: `kubeconform` (used in CI)
 - Build/test the binary: `cd cli && go build ./... && go test ./...`
 

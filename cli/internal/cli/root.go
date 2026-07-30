@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jdwlabs/platform/internal/display"
+	"github.com/jdwlabs/platform/internal/vault"
 )
 
 // Globals holds persistent flags wired by NewRoot.
@@ -88,4 +89,5 @@ func NewRootForTest(k kubernetes.Interface, d dynamic.Interface) *cobra.Command 
 var (
 	testKubeClient    kubernetes.Interface
 	testDynamicClient dynamic.Interface
+	testVaultClient   *vault.Client
 )
