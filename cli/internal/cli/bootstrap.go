@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -412,7 +413,8 @@ func newBootstrapHealCmd(g *Globals) *cobra.Command {
 }
 
 func newBootstrapSeedCmd(g *Globals) *cobra.Command {
-	return &cobra.Command{
+	var fields []string
+	cmd := &cobra.Command{
 		Use:   "seed [spec-key...]",
 		Short: "Seed Vault kv paths, bypassing phase detection",
 		Long: `Seed one or more Vault kv paths directly. Useful for seeding optional paths
@@ -420,13 +422,37 @@ that were skipped during bootstrap, or re-seeding after field name corrections.
 Values merge over any existing fields at the path, so a partial re-seed never
 wipes fields owned by other services. With no arguments, all specs are seeded.
 Spec keys match tenant names and static paths: porkbun, grafana, longhorn,
-alertmanager, usersrole, argocd-dex, grafana-gitsync, truenas-csi, holmes,
-<tenant>-github-app, <tenant>-ai-keys, <tenant>-discord-bot-token.`,
+alertmanager, usersrole, argocd-dex, grafana-gitsync, truenas-csi, litellm,
+holmes, <tenant>-github-app, <tenant>-ai-keys, <tenant>-discord-bot-token.
+
+--field seeds individual properties of one spec, so a single new field can be
+written without re-supplying — or being prompted for — the credentials already
+at that path. It requires exactly one spec argument, and a field named
+explicitly is written even where the spec marks it optional.
+
+An unknown spec key or field name is an error, not a narrower seed: selecting a
+spec this binary does not know would otherwise write nothing and still report
+success, which is how a binary older than the spec it was asked to seed skips
+the field silently.`,
+		Example: `  platformctl bootstrap seed holmes --field webhook_token
+  platformctl bootstrap seed grafana-gitsync
+  platformctl bootstrap seed`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			em := NewEmitter(os.Stdout, g.JSON)
 			if g.Session != nil {
 				em.SetSession(g.Session)
+			}
+
+			// Selection is validated before any Vault connection, so a typo costs
+			// one error instead of a port-forward and a partial write.
+			tenantNamesForValidation, err := collectTenantNames("tenants")
+			if err != nil {
+				return fmt.Errorf("collect tenants: %w", err)
+			}
+			if err := bootstrap.ValidateSeedSelection(tenantNamesForValidation, args, fields); err != nil {
+				em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: "failed", Message: err.Error()})
+				return err
 			}
 
 			vaultAddr := os.Getenv("PLATFORMCTL_VAULT_ADDR")
@@ -454,6 +480,7 @@ alertmanager, usersrole, argocd-dex, grafana-gitsync, truenas-csi, holmes,
 			}
 
 			phase := bootstrap.NewVaultSeedPhase(resolver, g.NonInteractive, "kv", tenantNames, args)
+			phase.SelectFields(fields)
 			phase.SetOnEvent(func(status, msg string) {
 				em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: status, Message: msg})
 			})
@@ -462,9 +489,23 @@ alertmanager, usersrole, argocd-dex, grafana-gitsync, truenas-csi, holmes,
 				em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: "failed", Message: err.Error()})
 				return err
 			}
-			em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: "ok", Message: "seeded"})
+			em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: "ok", Message: seedSummary(args, fields)})
 			return nil
 		},
+	}
+	cmd.Flags().StringArrayVar(&fields, "field", nil,
+		"seed only this field of the single named spec, repeatable")
+	return cmd
+}
+
+func seedSummary(specs, fields []string) string {
+	switch {
+	case len(fields) > 0:
+		return fmt.Sprintf("seeded %d field(s) of %s: %s", len(fields), specs[0], strings.Join(fields, " "))
+	case len(specs) > 0:
+		return fmt.Sprintf("seeded %d spec(s): %s", len(specs), strings.Join(specs, " "))
+	default:
+		return "seeded every spec"
 	}
 }
 
