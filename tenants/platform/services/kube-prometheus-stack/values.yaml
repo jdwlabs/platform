@@ -58,6 +58,7 @@ prometheus:
     podMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
     probeSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
     # Peaked at ~2.9Gi with no limits; explicit bounds stop the request from
     # crowding smaller workers. Replaces the earlier 3Gi-request/no-limit shape:
     # WAL-replay spikes shrink with the 60s scrape + cardinality drops above,
@@ -205,19 +206,54 @@ defaultRules:
     nodeExporterRecording: true
     prometheus: true
     prometheusOperator: true
-    # Disabled - not accessible in this cluster
-    etcd: false
-    kubeControllerManager: false
+    etcd: true
+    kubeControllerManager: true
+    kubeSchedulerAlerting: true
+    kubeSchedulerRecording: true
+    # No kube-proxy scrape target (see kubeProxy below), so these would never
+    # evaluate against data.
     kubeProxy: false
-    kubeSchedulerAlerting: false
-    kubeSchedulerRecording: false
 
-# Disabled - control plane components not scrape-accessible
-kubeEtcd:
-  enabled: false
+# Scheduler and controller-manager run as hostNetwork static pods in kube-system
+# carrying component=kube-scheduler / component=kube-controller-manager, which
+# is exactly what the chart's default headless-Service selector matches — no
+# endpoint addresses have to be written down. Their pod IP is the node IP, so
+# the scrape lands on the node's own :10259 / :10257. Both serve HTTPS with a
+# self-signed serving cert generated at process start, so the chart's default
+# insecureSkipVerify (on Kubernetes >= 1.23) is required, not incidental.
+#
+# Prerequisite: both components must be started with --bind-address=0.0.0.0.
+# They default to 127.0.0.1 on Talos, which is reachable only from their own
+# node, so these targets stay down until the machine config carrying the wider
+# bind address is applied.
 kubeControllerManager:
-  enabled: false
+  enabled: true
 kubeScheduler:
-  enabled: false
+  enabled: true
+
+# etcd on Talos is a host-level service, not a pod, so there is nothing in the
+# cluster for the chart's selector (component=etcd) to match and its only
+# fallback is a literal list of control-plane addresses. Those addresses are
+# DHCP-assigned here, and a scrape config that stops resolving the moment an
+# address moves is worst-useless precisely during the incident class these
+# metrics exist to diagnose. Discovery is therefore done with a ScrapeConfig
+# using node service discovery — see postInstall/scrapeconfig-kube-etcd.yaml.
+#
+# enabled stays true because the bundled etcd alert/recording rules are gated on
+# it as well as on defaultRules.rules.etcd — turning it off renders no etcd rules
+# at all, so the metrics would arrive with nothing watching them. Only the
+# exporter's own Service and ServiceMonitor are switched off; they are the
+# objects that cannot work without a pod to select.
+kubeEtcd:
+  enabled: true
+  service:
+    enabled: false
+  serviceMonitor:
+    enabled: false
+
+# kube-proxy serves /metrics on 127.0.0.1:10249 and is started with no
+# metrics-bind-address override, so it is unreachable from Prometheus for the
+# same reason the scheduler and controller-manager were — and fixing it needs
+# the same kind of machine-config change, which is not in scope here.
 kubeProxy:
   enabled: false
