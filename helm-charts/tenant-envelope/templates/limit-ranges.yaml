@@ -1,5 +1,5 @@
 {{- range .Values.namespaces }}
-{{- if hasKey $.Values._limitRangeTiers .quotaTier }}
+{{- if and (hasKey $.Values._limitRangeTiers .quotaTier) (not .noLimitRange) }}
 {{- $tier := index $.Values._limitRangeTiers .quotaTier }}
 ---
 apiVersion: v1
@@ -9,18 +9,40 @@ metadata:
   namespace: {{ .name }}
 spec:
   limits:
+    # Each block renders only if its tier defines it, so a tier can ship a
+    # request floor without also imposing a ceiling.
     - type: Container
+      {{- if or $tier.defaultCpu $tier.defaultMemory }}
       default:
-        cpu: {{ $tier.defaultCpu | quote }}
-        memory: {{ $tier.defaultMemory | quote }}
+        {{- with $tier.defaultCpu }}
+        cpu: {{ . | quote }}
+        {{- end }}
+        {{- with $tier.defaultMemory }}
+        memory: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      {{- if or $tier.defaultRequestCpu $tier.defaultRequestMemory }}
       defaultRequest:
-        cpu: {{ $tier.defaultRequestCpu | quote }}
-        memory: {{ $tier.defaultRequestMemory | quote }}
+        {{- with $tier.defaultRequestCpu }}
+        cpu: {{ . | quote }}
+        {{- end }}
+        {{- with $tier.defaultRequestMemory }}
+        memory: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      {{- if or $tier.maxCpu $tier.maxMemory }}
       max:
-        cpu: {{ $tier.maxCpu | quote }}
-        memory: {{ $tier.maxMemory | quote }}
+        {{- with $tier.maxCpu }}
+        cpu: {{ . | quote }}
+        {{- end }}
+        {{- with $tier.maxMemory }}
+        memory: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+    {{- with $tier.maxStorage }}
     - type: PersistentVolumeClaim
       max:
-        storage: {{ $tier.maxStorage | quote }}
+        storage: {{ . | quote }}
+    {{- end }}
 {{- end }}
 {{- end }}

@@ -48,6 +48,15 @@ namespaces:
   - name: kube-system
     quotaTier: platform
     networkPolicy: platform
+    # No LimitRange here: the unbounded containers left in this namespace
+    # (kube-proxy, the flannel install-config init) come from Talos machine
+    # config, not from anything this repo renders. Defaulting their requests
+    # would change the admitted spec of components owned by the infrastructure
+    # repo, and the cluster's static control-plane pods bypass admission
+    # anyway, so the change would be both out-of-band and partial. The trade is
+    # live: these are the only genuinely BestEffort pods left, and a request
+    # carries no OOM risk — revisit alongside the machine config, not here.
+    noLimitRange: true
   - name: nginx-gateway
     quotaTier: platform
     networkPolicy: platform
