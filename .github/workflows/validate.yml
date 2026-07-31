@@ -26,7 +26,6 @@ jobs:
             extends: default
             ignore: |
               bootstrap/crds/foundation-crds.yaml
-              tenants/platform/services/*/postInstall/dashboard-*.yaml
             rules:
               line-length:
                 max: 300
