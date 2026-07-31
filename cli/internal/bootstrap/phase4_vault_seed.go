@@ -115,6 +115,7 @@ type VaultSeedPhase struct {
 	mount          string
 	tenants        []string
 	selected       []string // if non-empty, run only these spec keys
+	fields         []string // if non-empty, seed only these fields of the single selected spec
 	onEvent        func(status, msg string)
 }
 
@@ -123,6 +124,81 @@ func NewVaultSeedPhase(resolver *VaultAddrResolver, nonInteractive bool, mount s
 }
 
 func (p *VaultSeedPhase) SetOnEvent(f func(status, msg string)) { p.onEvent = f }
+
+// SelectFields narrows the seed to individual fields of the one selected spec,
+// so a single property can be written without re-supplying — or being prompted
+// for — every other field at that path.
+func (p *VaultSeedPhase) SelectFields(fields []string) { p.fields = fields }
+
+// SeedSpecKeys lists every spec key this binary knows, given the tenant list.
+func SeedSpecKeys(tenants []string) []string {
+	specs := buildSeedSpecs(tenants)
+	keys := make([]string, 0, len(specs))
+	for k := range specs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// SeedFieldNames lists the fields of one spec.
+func SeedFieldNames(tenants []string, spec string) ([]string, error) {
+	s, ok := buildSeedSpecs(tenants)[spec]
+	if !ok {
+		return nil, unknownSpecError(tenants, spec)
+	}
+	names := make([]string, 0, len(s.Fields))
+	for _, f := range s.Fields {
+		names = append(names, f.Name)
+	}
+	return names, nil
+}
+
+// ValidateSeedSelection rejects a spec key or field name this binary does not
+// know, before any Vault connection is made.
+//
+// The alternative is worse than an error: an unknown key selects an empty spec,
+// which writes nothing and still reports success, so a binary older than the
+// seed spec it was asked to write silently skips the very field the operator
+// came for.
+func ValidateSeedSelection(tenants, selected, fields []string) error {
+	specs := buildSeedSpecs(tenants)
+	for _, key := range selected {
+		if _, ok := specs[key]; !ok {
+			return unknownSpecError(tenants, key)
+		}
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	if len(selected) != 1 {
+		return fmt.Errorf("--field needs exactly one spec argument, got %d", len(selected))
+	}
+	known, err := SeedFieldNames(tenants, selected[0])
+	if err != nil {
+		return err
+	}
+	for _, f := range fields {
+		if !contains(known, f) {
+			return fmt.Errorf("spec %s has no field %s; valid: %s",
+				selected[0], f, strings.Join(known, ", "))
+		}
+	}
+	return nil
+}
+
+func unknownSpecError(tenants []string, key string) error {
+	return fmt.Errorf("unknown seed spec %s; valid: %s", key, strings.Join(SeedSpecKeys(tenants), ", "))
+}
+
+func contains(haystack []string, needle string) bool {
+	for _, h := range haystack {
+		if h == needle {
+			return true
+		}
+	}
+	return false
+}
 
 func (p *VaultSeedPhase) warn(msg string) {
 	if p.onEvent != nil {
@@ -162,10 +238,17 @@ func (p *VaultSeedPhase) Apply(ctx context.Context) error {
 	specs := p.buildSpecs()
 	keys := p.keysToRun(specs)
 	sort.Strings(keys)
+	if err := ValidateSeedSelection(p.tenants, p.selected, p.fields); err != nil {
+		return err
+	}
 	for _, name := range keys {
 		spec := specs[name]
+		fields := spec.Fields
+		if len(p.fields) > 0 {
+			fields = filterFields(fields, p.fields)
+		}
 		values := map[string]any{}
-		for _, f := range spec.Fields {
+		for _, f := range fields {
 			v, err := promptField(f, name, p.nonInteractive)
 			if err != nil {
 				return fmt.Errorf("seed %s/%s: %w", spec.Path, f.Name, err)
@@ -175,12 +258,17 @@ func (p *VaultSeedPhase) Apply(ctx context.Context) error {
 			}
 		}
 		if len(values) == 0 {
-			continue // all optional fields absent — skip this path
+			// Only reachable when every selected field is Optional and unset. It
+			// is reported rather than skipped quietly, because "nothing to write"
+			// and "wrote what you asked for" are indistinguishable otherwise.
+			p.warn(fmt.Sprintf("kv/%s/%s: no values supplied, nothing written", p.mount, spec.Path))
+			continue
 		}
 		// KV-v2 Put replaces the whole secret; merge over any existing fields
 		// so partial re-seeds (e.g. adding relay creds to an already-seeded
 		// path) don't wipe fields owned by other services.
-		if existing, err := c.GetKV(ctx, p.mount, spec.Path); err == nil {
+		existing, err := c.GetKV(ctx, p.mount, spec.Path)
+		if err == nil {
 			for k, v := range existing {
 				if _, set := values[k]; !set {
 					values[k] = v
@@ -190,8 +278,41 @@ func (p *VaultSeedPhase) Apply(ctx context.Context) error {
 		if err := c.PutKV(ctx, p.mount, spec.Path, values); err != nil {
 			return fmt.Errorf("put kv %s: %w", spec.Path, err)
 		}
+		p.reportWrites(spec.Path, fields, values, existing)
 	}
 	return nil
+}
+
+// reportWrites names every field written and whether it replaced an existing
+// value. Overwriting a live credential and creating a new one look identical in
+// a bare success message, and only one of the two is safe to repeat blindly.
+func (p *VaultSeedPhase) reportWrites(path string, fields []seedField, values map[string]any, existing map[string]any) {
+	if p.onEvent == nil {
+		return
+	}
+	for _, f := range fields {
+		if _, written := values[f.Name]; !written {
+			continue
+		}
+		verb := "created"
+		if _, had := existing[f.Name]; had {
+			verb = "updated"
+		}
+		p.onEvent("ok", fmt.Sprintf("kv/%s/%s %s %s", p.mount, path, f.Name, verb))
+	}
+}
+
+func filterFields(all []seedField, wanted []string) []seedField {
+	out := make([]seedField, 0, len(wanted))
+	for _, f := range all {
+		if contains(wanted, f.Name) {
+			// A field named explicitly is wanted whether or not the spec marks it
+			// Optional, so the Optional skip must not swallow it.
+			f.Optional = false
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func (p *VaultSeedPhase) Verify(ctx context.Context) error {
@@ -205,12 +326,14 @@ func (p *VaultSeedPhase) Verify(ctx context.Context) error {
 	return nil
 }
 
-func (p *VaultSeedPhase) buildSpecs() map[string]seedSpec {
+func (p *VaultSeedPhase) buildSpecs() map[string]seedSpec { return buildSeedSpecs(p.tenants) }
+
+func buildSeedSpecs(tenants []string) map[string]seedSpec {
 	out := map[string]seedSpec{}
 	for k, v := range staticSeedSpecs {
 		out[k] = v
 	}
-	for _, t := range p.tenants {
+	for _, t := range tenants {
 		u := toEnvKey(t)
 		out[t+"-github-app"] = seedSpec{Path: t + "-github-app", Fields: []seedField{
 			{"github_app_id", "PLATFORMCTL_" + u + "_GITHUB_APP_ID", false, false},
