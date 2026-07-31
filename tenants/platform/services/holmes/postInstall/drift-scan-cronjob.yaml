@@ -29,7 +29,10 @@ spec:
             - name: scan
               # curlimages/curl has no jq and runs as non-root (apk install
               # fails with Permission denied); this image ships both preinstalled.
-              image: dwdraju/alpine-curl-jq:latest
+              # It publishes no version tags at all, so the digest is the only
+              # thing pinning it — `latest` alone would let an upstream push
+              # change what this CronJob runs with nothing in git to show it.
+              image: dwdraju/alpine-curl-jq:latest@sha256:eb00b3d4864c03814885a1c15ed1f5b2b569ca102ad4d02c27d582affb4fd6b1
               # Without these the pod is BestEffort and is killed first when a
               # node comes under memory pressure. It is a curl+jq shell holding
               # one JSON response, so the floor is small; the limit only needs
