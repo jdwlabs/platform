@@ -30,6 +30,27 @@ nginx:
         memory: 128Mi
       limits:
         memory: 256Mi
+  # container.resources reaches the nginx container only — the provisioner that
+  # builds the data-plane DaemonSet renders nothing for the init container
+  # beside it, so a namespace defaultRequest was the only thing keeping the pod
+  # off BestEffort and nothing capped it. A StrategicMerge patch is the sole
+  # supported way in to that container. The init copies config and exits, so the
+  # ceiling is generous relative to need: an init OOM takes the data plane down
+  # on every node at once.
+  patches:
+    - type: StrategicMerge
+      value:
+        spec:
+          template:
+            spec:
+              initContainers:
+                - name: init
+                  resources:
+                    requests:
+                      cpu: 10m
+                      memory: 32Mi
+                    limits:
+                      memory: 128Mi
   config:
     ipFamily: ipv4
   # The gateway DaemonSet has no business running on control-plane nodes.
