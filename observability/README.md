@@ -4,13 +4,21 @@ Home for dashboards-as-code, managed by Grafana **Git Sync** (Grafana v13+).
 See [docs/observability/DASHBOARDS-AND-MULTITENANCY.md](../docs/observability/DASHBOARDS-AND-MULTITENANCY.md)
 for the full design, rationale, and migration path.
 
-> Status: wired and syncing. `dashboards/platform/` is the live Git Sync
-> repository path — the connection and repository resources are healthy and
-> polling this directory. The dashboards committed here are still examples
-> showing the target layout, and they do not replace the existing
-> ConfigMap-sidecar dashboards; those migrate one at a time, deleting each
-> ConfigMap in the same change that adds its dashboard here, so the two paths
-> never own the same dashboard.
+> Status: wired and syncing, and Git Sync now owns every platform dashboard.
+> `dashboards/platform/` is the live Git Sync repository path — the connection
+> and repository resources are healthy and polling this directory. The seven
+> dashboards that used to ship as ConfigMaps in each service's `postInstall/`
+> directory live here as plain JSON, each keeping the `uid` it already had, and
+> their ConfigMap manifests are gone. No dashboard is owned by both paths.
+>
+> `slo-error-budget.json` here and `jdwlabs-services-red.json` under
+> `jdwlabs/` remain illustrative examples, tagged `generated-example`. Their
+> panel queries do not match any recording rule this cluster actually emits, so
+> they render empty and are not yet real dashboards.
+>
+> The dashboard sidecar is still enabled in the Grafana values. It now has no
+> ConfigMaps to pick up; removing it is a separate cleanup so that this change
+> stays reversible.
 
 ## Layout
 
