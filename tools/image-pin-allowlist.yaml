@@ -200,14 +200,6 @@ exceptions:
       fixed as part of introducing the check; digest-pinning this reference
       is follow-up work.
 
-  - path: tenants/platform/services/holmes/postInstall/drift-scan-cronjob.yaml
-    ref: dwdraju/alpine-curl-jq:latest
-    reason: >-
-      pre-existing: this CronJob image predates this check, was never
-      digest-pinned, and additionally uses the `latest` tag. Recorded here
-      rather than fixed as part of introducing the check; digest-pinning
-      this reference is follow-up work.
-
   - path: tenants/platform/services/litellm-redis/postInstall/redis.yaml
     ref: redis:7.4-alpine
     reason: >-
@@ -249,11 +241,3 @@ exceptions:
       been digest-pinned. Recorded here rather than fixed as part of
       introducing the check; digest-pinning this reference is follow-up
       work.
-
-  - path: tenants/platform/services/postgres-backup/postInstall/cronjob.yaml
-    ref: rclone/rclone:latest
-    reason: >-
-      pre-existing: this CronJob image predates this check, was never
-      digest-pinned, and additionally uses the `latest` tag. Recorded here
-      rather than fixed as part of introducing the check; digest-pinning
-      this reference is follow-up work.
