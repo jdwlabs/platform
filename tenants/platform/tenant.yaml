@@ -211,7 +211,10 @@ services:
     repo: https://grafana.github.io/helm-charts
     revision: 7.1.0
     namespace: monitoring
-    postInstall: true
+    # No postInstall directory: its only manifest was the Loki dashboard, now
+    # owned by Git Sync. Leaving this true would point an ArgoCD source at a
+    # path that no longer exists in the repo.
+    postInstall: false
     syncWave: 2
 
   - name: kube-prometheus-stack
