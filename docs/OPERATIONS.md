@@ -358,15 +358,30 @@ increments publishes no series, so an ordinary threshold alert cannot fire on
 it. That is why the rule pairs a rate check with `absent()`, and why an empty
 query result below is a finding rather than a tooling failure.
 
+The metric to use is `tempo_distributor_traces_per_batch_count`. Do not reach
+for a spans-received counter — this Tempo publishes no metric containing
+"received" or "span", so querying one returns empty no matter how many spans
+are flowing, and any alert keyed on it can never clear. Confirm the name
+against the running version before trusting it; it has changed across Tempo
+releases:
+
+```
+kubectl -n monitoring exec deploy/platform-grafana -c grafana -- curl -sG \
+  "http://platform-kube-prometheus-s-prometheus.monitoring.svc:9090/api/v1/label/__name__/values" \
+  | tr ',' '\n' | grep tempo_distributor
+```
+
 1. Distinguish the two failure modes:
 
    ```
-   sum(tempo_distributor_spans_received_total)
+   sum(tempo_distributor_traces_per_batch_count)
    ```
 
-   An **empty vector** means the counter has never incremented — no service has
-   ever emitted to this Tempo. A **value of 0** means emitters existed and have
-   now stopped.
+   A **value of 0** means Tempo is up and scraped but nothing is emitting — an
+   emitter problem, which is the common case. An **empty vector** means the
+   metric itself is gone: either Tempo is not being scraped, or the name moved
+   in an upgrade. That is a Tempo/monitoring problem, not an emitter one, so
+   check step 2 before hunting for services.
 
 2. Rule out a scrape problem before chasing emitters — `up{job="platform-tempo"}`
    should be `1`. If Tempo itself is down, the alert is a symptom, not the cause.
@@ -389,7 +404,7 @@ query result below is a finding rather than a tooling failure.
 | Postgres         | `kubectl get cluster -n database -o wide` (CNPG plugin) |
 | ARC runners      | Dormant by default — `arc-systems` should be empty; see "Self-hosted CI runners (ARC)" |
 | Gateway (NGF)    | `kubectl get pods -n nginx-gateway`, then check `NginxGatewayFabricDown`/`NginxGatewayFabricReconcileErrorsHigh` alerts (control-plane health only, not request-level) |
-| Tracing (Tempo)  | `sum(tempo_distributor_spans_received_total)` — empty vector means no service has ever emitted; see the `TempoNoSpansReceived` steps above |
+| Tracing (Tempo)  | `sum(tempo_distributor_traces_per_batch_count)` — 0 means nothing is emitting, empty vector means the metric itself is gone; see the `TempoNoSpansReceived` steps above |
 
 ## Self-hosted CI runners (ARC) — dormant
 

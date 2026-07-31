@@ -12,10 +12,20 @@ spec:
         # alone stays silent forever when every emitter disappears. The longer
         # `for` than the Loki equivalent reflects sparse trace traffic — a single
         # pilot service can legitimately go quiet for minutes.
+        #
+        # The metric is the traces-per-batch histogram count, not the more
+        # obvious-sounding spans-received counter: this Tempo exports no metric
+        # with "received" or "span" in the name at all, so keying on one makes
+        # absent() permanently true and the alert unclearable — it would keep
+        # firing after spans start arriving, which is worse than silence because
+        # it survives the fix. This histogram's _count increments once per batch
+        # pushed to the distributor, so it is present while Tempo is scraped and
+        # rises as soon as anything emits. Verify against the running version
+        # before changing it; the name has moved between Tempo releases.
         - alert: TempoNoSpansReceived
           expr: |
-            sum(rate(tempo_distributor_spans_received_total[5m])) == 0
-            or absent(tempo_distributor_spans_received_total)
+            sum(rate(tempo_distributor_traces_per_batch_count[5m])) == 0
+            or absent(tempo_distributor_traces_per_batch_count)
           for: 30m
           labels:
             severity: warning
