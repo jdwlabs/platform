@@ -1,0 +1,56 @@
+# Trivy misconfiguration checks suppressed repo-wide.
+#
+# Trivy auto-detects this file (it is the default --ignorefile); the
+# org-shared security-scan workflow passes no ignore path, so anything
+# recorded here must live at the repo root under this exact name. The
+# `.trivyignore.yaml` variant is NOT auto-detected and would silently do
+# nothing.
+#
+# Only checks that cannot produce signal against this repository belong
+# here. A check that is merely inconvenient to satisfy stays enabled and is
+# tracked as work instead — suppressing it would hide the finding rather
+# than answer it.
+
+# limit range usage
+#
+# The check requires a LimitRange object in the SAME scanned file as the
+# namespaced resource it is judging. It has no view of the namespace, so it
+# can never observe the LimitRange that actually applies. Two proofs that
+# this is a file-scope artefact rather than a coverage gap: it fires on the
+# limit-range.yaml manifests that themselves define a LimitRange, and it
+# fires on HTTPRoutes, ExternalSecrets, ServiceMonitors and PrometheusRules,
+# none of which consume resource limits at all.
+#
+# The real control is the per-namespace LimitRange applied by the tenant
+# envelope. Every namespace defined by a tenant.yaml carries one; kube-system
+# is excluded deliberately via `noLimitRange`, and default/kube-public/
+# kube-node-lease hold no workloads.
+KSV-0039
+
+# Workloads in the default namespace
+#
+# Fires only on chart templates under helm-charts/ and on postInstall
+# manifests, neither of which sets metadata.namespace — correct in both
+# cases, because the namespace comes from the Helm release or the ArgoCD
+# Application destination declared in tenant.yaml. Trivy renders templates
+# with no release namespace, so the absent field reads as "default". No
+# workload in this repo is deployed to the default namespace.
+KSV-0110
+
+# Restrict container images to trusted registries
+#
+# The check ships with no registry allowlist and takes one only through Rego
+# data supplied at invocation. The org-shared workflow passes none, so the
+# trusted set is empty and every image fails regardless of origin —
+# including images already pinned by digest and images from ghcr.io. A
+# result that is identical for every input carries no signal.
+#
+# Image provenance in this repo is enforced instead by
+# tools/check-image-pins.py, which requires a digest anchor on every
+# reference under tenants/ and helm-charts/ and admits exceptions only with
+# a written reason. Pinning by digest is a strictly stronger guarantee than
+# allowlisting the registry a mutable tag is served from.
+#
+# Remove this entry if the shared workflow is ever given a populated
+# trusted-registry set, at which point the check starts discriminating.
+KSV-0125
