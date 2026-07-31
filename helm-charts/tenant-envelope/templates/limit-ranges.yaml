@@ -9,8 +9,10 @@ metadata:
   namespace: {{ .name }}
 spec:
   limits:
-    # Each block renders only if its tier defines it, so a tier can ship a
-    # request floor without also imposing a ceiling.
+    {{- /* Each block renders only if its tier defines it, so a tier can ship a
+    request floor without also imposing a ceiling. Kept as a template comment:
+    a YAML one would land in every rendered LimitRange and show up as a diff on
+    objects that are otherwise unchanged. */}}
     - type: Container
       {{- if or $tier.defaultCpu $tier.defaultMemory }}
       default:
