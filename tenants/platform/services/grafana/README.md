@@ -89,39 +89,38 @@ the next sync recreate it.
 Merging an edit to `gitsync-resources.yaml` on its own changes nothing: the next
 Job run finds both resources present and skips them. ArgoCD cannot help here —
 these live in Grafana's API server, so `prune`/`selfHeal` on `platform-grafana`
-neither manages nor removes them. Delete them by hand, then let the sync
-recreate them, and watch the result:
+neither manages nor removes them. Delete them, then let the sync recreate them:
 
 ```sh
-BASE=http://platform-grafana.monitoring.svc/apis/provisioning.grafana.app/v0alpha1/namespaces/default
-curl -sS -u <admin>:<pass> -X DELETE "$BASE/repositories/platform-dashboards"
-curl -sS -u <admin>:<pass> -X DELETE "$BASE/connections/jdwlabs-platform-github"
+platformctl gitsync recreate --dry-run   # prints the delete order, mutates nothing
+platformctl gitsync recreate --confirm
+platformctl gitsync status               # after the sync: both healthy again?
 ```
 
-Delete the repository **before** the connection — the repository references it.
-Deleting is safe only while no dashboard is owned by `platform-dashboards`;
-check first, because the repository's remove-orphan-resources finalizer collects
-whatever it owns:
+`recreate` deletes the repository **before** the connection, because the
+repository references it, and then asks ArgoCD to refresh `platform-grafana` so
+the apply Job re-runs. To reset one resource on its own use
+`platformctl gitsync delete --kind repository --name platform-dashboards --confirm`.
 
-```sh
-curl -sS -u <admin>:<pass> \
-  http://platform-grafana.monitoring.svc/apis/dashboard.grafana.app/v1beta1/namespaces/default/dashboards
-```
-
-Dashboards annotated `grafana.app/managedBy: classic-file-provisioning` belong
-to the ConfigMap sidecar and are unaffected.
+Both paths refuse while a dashboard is owned by `platform-dashboards`, because
+the repository's remove-orphan-resources finalizer collects whatever it owns;
+the refusal names the dashboards at risk. `--allow-owned-dashboards` proceeds
+anyway and is only correct when losing them is intended. Dashboards annotated
+`grafana.app/managedBy: classic-file-provisioning` belong to the ConfigMap
+sidecar, are never owned by the repository, and are unaffected.
 
 #### Inspecting current state
 
 ```sh
-curl -s -u <admin>:<pass> \
-  http://platform-grafana.monitoring.svc/apis/provisioning.grafana.app/v0alpha1/namespaces/default/repositories
+platformctl gitsync status         # health + sync state per resource
+platformctl gitsync status --full  # plus the whole health message
 ```
 
-An `items: []` response means Git Sync is credentialed but not connected.
-Present is not the same as working — read `status.health.healthy` and
-`status.sync.state`, since a resource that fails every sync still lists fine.
-That is what the Job's final gate asserts, so a red `platform-grafana` sync with
+`0 resources` means Git Sync is credentialed but not connected. Present is not
+the same as working, so the command reads `status.health.healthy` and
+`status.sync.state` rather than existence, and exits non-zero when anything is
+unhealthy — a resource that fails every sync still lists fine. That is also what
+the Job's final gate asserts, so a red `platform-grafana` sync with
 `never became healthy` in the hook log is Git Sync reporting itself broken
 rather than the deploy being broken.
 

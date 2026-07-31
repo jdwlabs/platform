@@ -46,6 +46,21 @@ Run `platformctl bootstrap` from the repo root. See [docs/BOOTSTRAP.md](docs/BOO
 - Delete: `platformctl cluster volumes reclaim --all-orphaned --confirm`, or `--name <volume>` (repeatable) for specific ones. Reclaim refuses to run without `--confirm` or `--dry-run`, never reads stdin, and refuses any volume still claimed by a PVC or by a `Bound` PersistentVolume — a refusal is reported as a `refused` row and exits non-zero rather than being skipped quietly
 - `--class` is the tool's verdict, not Longhorn's `state`. A claim is resolved from the PersistentVolumeClaim's `spec.volumeName`; the volume's own `status.kubernetesStatus.pvcName` is historical and repeats across generations of the same StatefulSet, so it never proves a volume is live. The `longhorn-single` class uses `Retain`, so detached volumes never age out on their own
 
+### Grafana Git Sync
+
+Connection and Repository live in Grafana's own API server — invisible to `kubectl` and to ArgoCD — so `platformctl gitsync` is the only sanctioned way to read or reset them.
+
+- Diagnose: `platformctl gitsync status` — TOON output, four default fields (`kind,name,healthy,syncState`); the full health message is printed for anything not healthy, and `--full` adds it for everything. Exits non-zero when any resource is unhealthy, when a resource reports no health at all, or when no resources exist (credentialed but not connected)
+- Change a definition: merging an edit to `gitsync-resources.yaml` alone does nothing, because the apply Job creates but never updates. `platformctl gitsync recreate --dry-run` then `--confirm` deletes the repository **before** the connection and asks ArgoCD to re-run the apply Job
+- Single resource: `platformctl gitsync delete --kind repository|connection --name <n> --confirm`
+- Both delete paths refuse a repository that still owns dashboards (its remove-orphan-resources finalizer would collect them; override with `--allow-owned-dashboards`) and refuse a connection a repository still references
+- A health message never names its own cause: a connection reporting `GitHub App lacks required 'webhooks' permission` is describing a requirement derived from a bound repository's `write` workflow, not a missing grant on the App
+
+### Seeding one Vault field
+
+- `platformctl bootstrap seed <spec> --field <name>` writes individual properties of one spec, so a new field can be added without re-supplying or being prompted for the credentials already at that path. Repeatable; requires exactly one spec argument; a field named explicitly is written even where the spec marks it optional
+- An unknown spec key or field name is now an error listing the valid set. Previously an unrecognised key selected an empty spec, wrote nothing, and still reported success — which is how a binary older than the seed spec it is asked to write skips the field silently
+
 ## Architecture Overview
 
 ### GitOps Flow

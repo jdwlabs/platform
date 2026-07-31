@@ -104,6 +104,15 @@ func (r *VaultAddrResolver) vaultTokenFromSecret(ctx context.Context) (string, e
 	return result.RootToken, nil
 }
 
+// StartPortForward opens a tunnel to a running pod matching labelSelector and
+// returns its local http://localhost:PORT address plus a cleanup func. Exported
+// for commands that talk to an in-cluster HTTP API from a workstation, where the
+// service DNS name does not resolve.
+func StartPortForward(ctx context.Context, restCfg *rest.Config, kube kubernetes.Interface,
+	namespace, labelSelector string, remotePort int) (string, func(), error) {
+	return startPodPortForward(ctx, restCfg, kube, namespace, labelSelector, remotePort)
+}
+
 // startPodPortForward finds a running pod in namespace matching labelSelector,
 // opens a 0→remotePort tunnel via SPDY, and returns the bound local
 // http://localhost:PORT address plus a cleanup func.
