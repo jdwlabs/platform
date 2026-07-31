@@ -1,0 +1,40 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: kube-etcd
+  namespace: monitoring
+spec:
+  # The chart's kubeEtcd exporter cannot be used: etcd here is a host-level
+  # service with no pod, so the default component=etcd Service selector matches
+  # nothing and the only fallback is a hardcoded address list. Node service
+  # discovery re-resolves control-plane addresses from the API on every
+  # discovery cycle, so a DHCP address change is followed instead of silently
+  # ending the scrape.
+  #
+  # The job name must contain "etcd": every rule in the bundled etcd group
+  # selects on job=~".*etcd.*", so a different name loads the rules but leaves
+  # them permanently without data.
+  jobName: kube-etcd
+  # Port 2381 is etcd's dedicated metrics listener, which serves only /metrics
+  # and /health over plain HTTP. The client port (2379) also serves metrics but
+  # demands client certificates; 2381 exposes no client API at all, so no
+  # scrape-side TLS or credentials are involved.
+  scheme: HTTP
+  kubernetesSDConfigs:
+    - role: Node
+  relabelings:
+    # The control-plane role label is set with an EMPTY value, so matching on
+    # the label's value keeps nothing. labelpresent is the only reliable test.
+    - action: keep
+      sourceLabels: [__meta_kubernetes_node_labelpresent_node_role_kubernetes_io_control_plane]
+      regex: "true"
+    # Node discovery addresses the kubelet by default; retarget to the node's
+    # InternalIP on the etcd metrics port.
+    - action: replace
+      sourceLabels: [__meta_kubernetes_node_address_InternalIP]
+      regex: (.+)
+      targetLabel: __address__
+      replacement: $1:2381
+    - action: replace
+      sourceLabels: [__meta_kubernetes_node_name]
+      targetLabel: node
