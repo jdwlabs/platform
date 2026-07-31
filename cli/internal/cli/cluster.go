@@ -16,6 +16,7 @@ func newClusterCmd(g *Globals) *cobra.Command {
 		Short: "Cluster health and status commands",
 	}
 	cmd.AddCommand(newClusterStatusCmd(g))
+	cmd.AddCommand(newClusterVolumesCmd(g))
 	return cmd
 }
 
