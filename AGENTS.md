@@ -39,6 +39,13 @@ jdwlabs `platform` is the GitOps source of truth for the jdwlabs Kubernetes clus
 
 Run `platformctl bootstrap` from the repo root. See [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md) for the phase summary and manual-touch points.
 
+### Storage (Longhorn volumes)
+
+- List volumes with their reclaim classification: `platformctl cluster volumes list` — TOON output, four default fields (`name,state,class,size`), widened by `--fields <csv>` or `--full` and narrowed by `--class orphaned|claimed|attached|other`
+- Preview a reclaim: `platformctl cluster volumes reclaim --all-orphaned --dry-run` — lists exactly what would be deleted and mutates nothing
+- Delete: `platformctl cluster volumes reclaim --all-orphaned --confirm`, or `--name <volume>` (repeatable) for specific ones. Reclaim refuses to run without `--confirm` or `--dry-run`, never reads stdin, and refuses any volume still claimed by a PVC or by a `Bound` PersistentVolume — a refusal is reported as a `refused` row and exits non-zero rather than being skipped quietly
+- `--class` is the tool's verdict, not Longhorn's `state`. A claim is resolved from the PersistentVolumeClaim's `spec.volumeName`; the volume's own `status.kubernetesStatus.pvcName` is historical and repeats across generations of the same StatefulSet, so it never proves a volume is live. The `longhorn-single` class uses `Retain`, so detached volumes never age out on their own
+
 ## Architecture Overview
 
 ### GitOps Flow
