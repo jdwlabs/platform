@@ -56,6 +56,32 @@ _quotaTiers:
     services.loadbalancers: "0"
 
 _limitRangeTiers:
+  # The platform tier is deliberately defaultRequest-only, and memory-only.
+  #
+  # A `default` (limit) would put a memory ceiling on platform components whose
+  # footprint tracks cluster activity rather than their own load — storage
+  # instance managers, the gateway data plane, the monitoring stack. An OOM kill
+  # there is a worse failure than the unbounded growth a ceiling would prevent,
+  # and it would land the moment the controller recreates the pod, which for
+  # storage is plausibly mid-rebuild. Workload tiers below can afford a ceiling;
+  # the layer everything else depends on cannot.
+  #
+  # `max` is omitted for the same reason: it rejects pods outright rather than
+  # capping them, so a chart upgrade that raises a request would stop the
+  # platform from scheduling at all.
+  #
+  # Only memory is defaulted because only memory drives eviction. A container
+  # with no memory request makes its whole pod BestEffort — first evicted under
+  # node pressure — which has already cost this cluster an outage. CPU is
+  # compressible and its absence throttles rather than kills, so a CPU default
+  # would reserve capacity on every node to prevent a failure mode that does not
+  # exist here.
+  #
+  # This defaults only containers that set nothing themselves; a container with
+  # its own request keeps it, even if lower. The tier is a floor for containers
+  # whose chart renders no resources at all, not a correction for sized ones.
+  platform:
+    defaultRequestMemory: "64Mi"
   small:
     defaultCpu: "200m"
     defaultMemory: "256Mi"
