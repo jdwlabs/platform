@@ -17,6 +17,26 @@ image:
   tag: v0.1.5
   pullPolicy: IfNotPresent
 
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+# The webhook serves the ACME DNS-01 solver API on 443, which is why root and
+# NET_BIND_SERVICE both stay. A non-root uid would not help: an added capability
+# only reaches a non-root process through ambient capabilities, which the
+# container runtime does not grant, so the bind would fail instead. The port is
+# not freely movable either -- the Service and the APIService that front this
+# webhook both name it, and a solver that cannot answer a challenge stops
+# certificate issuance for every domain in the cluster.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+    add:
+      - NET_BIND_SERVICE
+
 nameOverride: ""
 fullnameOverride: ""
 

@@ -22,6 +22,19 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          # 999 is the postgres account baked into the postgres image; a uid
+          # above 10000 would not own the paths that image expects to own.
+          # Both images declare no user, so the uid has to be numeric for
+          # runAsNonRoot to be enforceable at admission. fsGroup is what makes
+          # the shared backup volume writable by the dump container and
+          # readable by the upload container that follows it.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+            seccompProfile:
+              type: RuntimeDefault
           initContainers:
             - name: dump
               image: postgres:17
@@ -51,6 +64,14 @@ spec:
                     -U postgres \
                     --clean --if-exists \
                   | gzip > /backup/prd-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
+              # The dump is streamed straight to the backup volume and the
+              # password arrives by environment, so nothing needs the image's
+              # own filesystem to be writable.
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
               volumeMounts:
                 - mountPath: /backup
                   name: backup
@@ -61,23 +82,40 @@ spec:
                 requests:
                   cpu: 50m
                   memory: 128Mi
+              env:
+                # rclone rewrites its config in place whenever it refreshes the
+                # Drive access token, so the config cannot be read straight off
+                # the secret mount -- that mount is read-only. Copying it to a
+                # scratch path keeps the write target valid while leaving the
+                # rest of the filesystem sealed. The default location is under
+                # the home directory, which no longer exists for this uid.
+                - name: RCLONE_CONFIG
+                  value: /tmp/rclone.conf
               command:
                 - /bin/sh
                 - -c
                 - |
                   set -euo pipefail
-                  mkdir -p /root/.config/rclone
-                  cp /rclone-config/rclone.conf /root/.config/rclone/rclone.conf
+                  cp /rclone-config/rclone.conf "$RCLONE_CONFIG"
                   rclone copy /backup gdrive:postgres-backups
                   rclone delete gdrive:postgres-backups --min-age 7d || true
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
               volumeMounts:
                 - mountPath: /backup
                   name: backup
                 - mountPath: /rclone-config
                   name: rclone-config
                   readOnly: true
+                - mountPath: /tmp
+                  name: tmp
           volumes:
             - name: backup
+              emptyDir: {}
+            - name: tmp
               emptyDir: {}
             - name: rclone-config
               secret:

@@ -32,14 +32,22 @@ podLabels: {}
 
 # At the time of writing, the litellm docker image requires write access to the
 #  filesystem on startup so that prisma can install some dependencies.
-podSecurityContext: {}
-securityContext: {}
-  # capabilities:
-  #   drop:
-  #     - ALL
-  # readOnlyRootFilesystem: false
-  # runAsNonRoot: true
-  # runAsUser: 1000
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+# Applied to the gateway container and to the db-ready init container alike, so
+# it has to hold for both images. Neither a uid nor a sealed root filesystem is
+# set: the gateway image declares USER root and its entrypoint runs prisma
+# against its own application directory, so overriding either would leave the
+# container unable to start. Capability and privilege-escalation limits carry no
+# such dependency, and the gateway listens on 4000, well clear of the privileged
+# port range that would need NET_BIND_SERVICE back.
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
 
 # A list of Kubernetes Secret objects that will be exported to the LiteLLM proxy
 #  pod as environment variables.  These secrets can then be referenced in the

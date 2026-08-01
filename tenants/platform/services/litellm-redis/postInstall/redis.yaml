@@ -13,12 +13,30 @@ spec:
     metadata:
       labels: {app: litellm-redis}
     spec:
+      # Starting as 999 rather than letting the image get there on its own: the
+      # redis entrypoint drops root to uid 999 with gosu, and gosu needs
+      # CAP_SETUID/CAP_SETGID, which the dropped capability set below removes.
+      # Entering as 999 skips that path instead of breaking it. The uid is the
+      # image's own redis account and cannot be raised above 10000 without
+      # losing ownership of the paths redis expects to own.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: redis
           image: redis:7.4-alpine
           args: ["--save", "", "--appendonly", "no"]
           ports:
             - containerPort: 6379
+          # Persistence is off (--save "" --appendonly no), so nothing is
+          # written outside the log stream and the root filesystem can be
+          # sealed without a scratch volume.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
           resources:
             requests: {cpu: 25m, memory: 64Mi}
             limits: {memory: 128Mi}
