@@ -3,7 +3,7 @@ module github.com/jdwlabs/platform
 go 1.26.0
 
 require (
-	github.com/charmbracelet/huh v1.0.0
+	github.com/charmbracelet/huh/v2 v2.0.3
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/spf13/cobra v1.10.2
 	go.uber.org/zap v1.28.0
