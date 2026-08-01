@@ -25,6 +25,17 @@ spec:
       template:
         spec:
           restartPolicy: Never
+          # The image declares no user, so runAsNonRoot needs a numeric uid to
+          # be enforceable — kubelet cannot verify a name against the image's
+          # user database before the container starts. Nothing here owns files
+          # in the image, so the uid is free to sit above the 10000 boundary
+          # that keeps it clear of host-mapped system accounts.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: scan
               # curlimages/curl has no jq and runs as non-root (apk install
@@ -42,6 +53,16 @@ spec:
                   memory: 16Mi
                 limits:
                   memory: 64Mi
+              # The response body is the only thing this writes, and it goes to
+              # the scratch volume below, so the image itself can stay sealed.
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
               command:
                 - sh
                 - -ec
@@ -89,3 +110,6 @@ spec:
                         startsAt: (now | strftime("%Y-%m-%dT%H:%M:%SZ"))
                       }]
                     }')"
+          volumes:
+            - name: tmp
+              emptyDir: {}

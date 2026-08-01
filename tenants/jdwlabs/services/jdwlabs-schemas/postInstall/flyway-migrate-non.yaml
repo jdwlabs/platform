@@ -12,9 +12,21 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      # Capability and seccomp restrictions only, deliberately. The image
+      # declares no user and its JVM owns paths under /flyway, so pinning a uid
+      # or sealing the root filesystem risks a container that never starts --
+      # and this Job is a sync hook against a production database, where that
+      # failure blocks the sync rather than degrading quietly.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: flyway
           image: flyway/flyway:11.2
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           env:
             - name: FLYWAY_URL
               value: "jdbc:postgresql://platform-postgresql-cluster-non-rw.database.svc:5432/jdwlabs_non"

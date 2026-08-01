@@ -20,8 +20,12 @@ spec:
         release: {{ .Release.Name }}
     spec:
       serviceAccountName: {{ include "porkbun-webhook.fullname" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
@@ -48,12 +52,18 @@ spec:
             - name: certs
               mountPath: /tls
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
           resources:
 {{ toYaml .Values.resources | indent 12 }}
       volumes:
         - name: certs
           secret:
             secretName: {{ include "porkbun-webhook.servingCertificate" . }}
+        # Scratch space so the apiserver machinery this webhook is built on
+        # keeps a writable temp directory once the root filesystem is sealed.
+        - name: tmp
+          emptyDir: {}
     {{- with .Values.nodeSelector }}
       nodeSelector:
 {{ toYaml . | indent 8 }}

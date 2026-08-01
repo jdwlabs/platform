@@ -84,10 +84,25 @@ spec:
     spec:
       priorityClassName: system-cluster-critical
       serviceAccountName: local-path-provisioner-service-account
+      # The provisioner never touches the node filesystem itself -- it schedules
+      # a helper pod per volume to do that -- so it needs neither root nor a
+      # host-mapped account. The image declares no user, so the uid has to be
+      # numeric for runAsNonRoot to be enforceable at admission.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: local-path-provisioner
           image: rancher/local-path-provisioner:v0.0.31
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           command:
             - local-path-provisioner
             - --debug
