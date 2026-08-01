@@ -99,7 +99,7 @@ services:
   - name: argo-cd
     chart: argo-cd
     repo: https://argoproj.github.io/argo-helm
-    revision: 10.2.1
+    revision: 10.2.2
     namespace: argocd
     postInstall: true
     syncWave: 0
@@ -108,7 +108,7 @@ services:
   - name: cert-manager
     chart: cert-manager
     repo: https://charts.jetstack.io
-    revision: v1.21.0
+    revision: v1.21.1
     namespace: cert-manager
     postInstall: true
     syncWave: 1
@@ -202,7 +202,7 @@ services:
   - name: monitoring
     chart: k8s-monitoring
     repo: https://grafana.github.io/helm-charts
-    revision: 4.3.1
+    revision: 4.3.2
     namespace: monitoring
     postInstall: false
     syncWave: 2
@@ -210,7 +210,7 @@ services:
   - name: grafana
     chart: grafana
     repo: https://grafana-community.github.io/helm-charts
-    revision: 12.8.0
+    revision: 12.10.1
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -218,7 +218,7 @@ services:
   - name: loki
     chart: loki
     repo: https://grafana.github.io/helm-charts
-    revision: 7.1.0
+    revision: 7.2.0
     namespace: monitoring
     # No postInstall directory: its only manifest was the Loki dashboard, now
     # owned by Git Sync. Leaving this true would point an ArgoCD source at a
@@ -229,7 +229,7 @@ services:
   - name: kube-prometheus-stack
     chart: kube-prometheus-stack
     repo: https://prometheus-community.github.io/helm-charts
-    revision: "87.19.1"
+    revision: "87.21.0"
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -247,7 +247,7 @@ services:
   - name: headlamp
     chart: headlamp
     repo: https://kubernetes-sigs.github.io/headlamp/
-    revision: 0.43.0
+    revision: 0.44.0
     namespace: headlamp
     postInstall: true
     syncWave: 2
@@ -342,7 +342,7 @@ services:
   - name: holmes
     chart: holmes
     repo: https://robusta-charts.storage.googleapis.com
-    revision: 0.36.0
+    revision: 0.38.0
     namespace: ai-sre
     postInstall: true
     syncWave: 5
