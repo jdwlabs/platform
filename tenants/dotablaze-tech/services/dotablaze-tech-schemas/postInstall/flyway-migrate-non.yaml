@@ -27,6 +27,16 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+          # The ceiling is well above what a schema migration needs so the
+          # JVM is bounded without risking an OOM kill mid-migration -- this
+          # Job is a sync hook against a live database, where a killed
+          # container leaves the schema half-applied and blocks the sync.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
           env:
             - name: FLYWAY_URL
               value: "jdbc:postgresql://platform-postgresql-cluster-non-rw.database.svc:5432/dotablazetech_non"
