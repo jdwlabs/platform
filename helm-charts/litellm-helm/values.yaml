@@ -95,17 +95,18 @@ proxy_config:
   general_settings:
     master_key: os.environ/PROXY_MASTER_KEY
 
-resources: {}
-  # We usually recommend not to specify default resources and to leave this as a conscious
-  # choice for the user. This also increases chances charts run on environments with little
-  # resources, such as Minikube. If you do want to specify resources, uncomment the following
-  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
-  # limits:
-  #   cpu: 100m
-  #   memory: 128Mi
-  # requests:
-  #   cpu: 100m
-  #   memory: 128Mi
+# Defaulted rather than left empty: an unset block makes the pod BestEffort,
+# which is invisible to the scheduler and evicted first under node memory
+# pressure. The gateway loads its model config and provider clients at start
+# and holds them resident, so the floor is high and the ceiling matches it --
+# a lower limit would OOM-kill on the first request rather than cap anything.
+# Memory only; a CPU quota would throttle request fan-out on an idle node.
+resources:
+  requests:
+    cpu: 100m
+    memory: 2Gi
+  limits:
+    memory: 2Gi
 
 autoscaling:
   enabled: false
@@ -148,9 +149,16 @@ db:
   dbReadyImage: docker.io/bitnamilegacy/postgresql
   dbReadyTag: ""
 
-  # Resources for the db-ready wait init container. Empty renders no resources
-  # block, preserving upstream behaviour for anyone using chart defaults.
-  dbReadyResources: {}
+  # Resources for the db-ready wait init container. Pod QoS is computed across
+  # init containers too, so leaving this empty -- as upstream does -- drops the
+  # whole pod to BestEffort however the gateway container beside it is sized.
+  # It polls the database until it answers and then exits, so the floor is tiny.
+  dbReadyResources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 64Mi
 
   # How to connect to the existing postgres server/cluster
   endpoint: localhost

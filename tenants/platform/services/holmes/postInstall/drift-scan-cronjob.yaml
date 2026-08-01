@@ -50,6 +50,7 @@ spec:
               # to bound a runaway response body.
               resources:
                 requests:
+                  cpu: 10m
                   memory: 16Mi
                 limits:
                   memory: 64Mi

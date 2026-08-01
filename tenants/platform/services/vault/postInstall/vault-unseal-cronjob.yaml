@@ -103,6 +103,8 @@ spec:
                 requests:
                   cpu: 10m
                   memory: 32Mi
+                limits:
+                  memory: 128Mi
               volumeMounts:
                 - name: tmp
                   mountPath: /tmp
@@ -132,6 +134,8 @@ spec:
                 requests:
                   cpu: 10m
                   memory: 32Mi
+                limits:
+                  memory: 128Mi
               volumeMounts:
                 - name: tmp
                   mountPath: /tmp
@@ -161,6 +165,8 @@ spec:
                 requests:
                   cpu: 10m
                   memory: 32Mi
+                limits:
+                  memory: 128Mi
               volumeMounts:
                 - name: tmp
                   mountPath: /tmp
