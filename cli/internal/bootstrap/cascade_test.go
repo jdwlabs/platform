@@ -17,11 +17,11 @@ type stubPhase struct {
 	verifyErr error
 }
 
-func (s *stubPhase) Name() string                              { return s.name }
-func (s *stubPhase) Number() int                               { return s.num }
-func (s *stubPhase) Detect(_ context.Context) (State, error)  { return s.state, s.stateErr }
-func (s *stubPhase) Apply(_ context.Context) error            { s.applied = true; return s.applyErr }
-func (s *stubPhase) Verify(_ context.Context) error           { s.verified = true; return s.verifyErr }
+func (s *stubPhase) Name() string                            { return s.name }
+func (s *stubPhase) Number() int                             { return s.num }
+func (s *stubPhase) Detect(_ context.Context) (State, error) { return s.state, s.stateErr }
+func (s *stubPhase) Apply(_ context.Context) error           { s.applied = true; return s.applyErr }
+func (s *stubPhase) Verify(_ context.Context) error          { s.verified = true; return s.verifyErr }
 
 var noopEvent EventFunc = func(_, _, _, _ string) {}
 

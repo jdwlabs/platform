@@ -27,8 +27,8 @@ func NewArgocdInstallPhase(kube kubernetes.Interface, runner helm.Runner, values
 	return &ArgocdInstallPhase{kube: kube, runner: runner, valuesPath: valuesPath}
 }
 
-func (p *ArgocdInstallPhase) Name() string  { return "argocd-install" }
-func (p *ArgocdInstallPhase) Number() int   { return 1 }
+func (p *ArgocdInstallPhase) Name() string { return "argocd-install" }
+func (p *ArgocdInstallPhase) Number() int  { return 1 }
 
 func (p *ArgocdInstallPhase) Detect(ctx context.Context) (State, error) {
 	d, err := p.kube.AppsV1().Deployments("argocd").Get(ctx, "argocd-server", metav1.GetOptions{})

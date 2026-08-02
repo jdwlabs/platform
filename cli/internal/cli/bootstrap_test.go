@@ -75,8 +75,8 @@ func TestBootstrapVerify_AllGatesPass(t *testing.T) {
 	scheme := runtime.NewScheme()
 	dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 		map[schema.GroupVersionResource]string{
-			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applicationsets"}:  "ApplicationSetList",
-			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}:     "ApplicationList",
+			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applicationsets"}:   "ApplicationSetList",
+			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}:      "ApplicationList",
 			{Group: "external-secrets.io", Version: "v1", Resource: "externalsecrets"}: "ExternalSecretList",
 			{Group: "cert-manager.io", Version: "v1", Resource: "certificates"}:        "CertificateList",
 		},
@@ -105,7 +105,7 @@ func TestBootstrapVerify_EmptyDynamic_Errors(t *testing.T) {
 			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applicationsets"}:   "ApplicationSetList",
 			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}:      "ApplicationList",
 			{Group: "external-secrets.io", Version: "v1", Resource: "externalsecrets"}: "ExternalSecretList",
-			{Group: "cert-manager.io", Version: "v1", Resource: "certificates"}:         "CertificateList",
+			{Group: "cert-manager.io", Version: "v1", Resource: "certificates"}:        "CertificateList",
 		},
 		// no objects → gate 2 (applicationset/platform-services not found) fails
 	)

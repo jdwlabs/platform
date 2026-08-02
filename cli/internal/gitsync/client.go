@@ -229,9 +229,9 @@ func (c *Client) do(ctx context.Context, method, url string) ([]byte, error) {
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, &notFoundError{url: url}
 	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden:
-		return nil, fmt.Errorf("Grafana rejected the admin credentials (HTTP %d)", resp.StatusCode)
+		return nil, fmt.Errorf("admin credentials rejected by Grafana (HTTP %d)", resp.StatusCode)
 	case resp.StatusCode >= 300:
-		return nil, fmt.Errorf("Grafana returned HTTP %d: %s", resp.StatusCode, trimBody(body))
+		return nil, fmt.Errorf("unexpected response from Grafana: HTTP %d: %s", resp.StatusCode, trimBody(body))
 	}
 	if readErr != nil {
 		return nil, fmt.Errorf("read response from %s: %w", url, readErr)

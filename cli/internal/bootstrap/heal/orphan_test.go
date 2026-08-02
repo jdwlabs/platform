@@ -19,8 +19,8 @@ func ns(name string, labels map[string]string) *corev1.Namespace {
 func TestDeleteOrphanNamespaces_DeletesOrphans(t *testing.T) {
 	tenantLabel := map[string]string{"jdwlabs.io/tenant": "demo"}
 	c := fake.NewSimpleClientset([]runtime.Object{
-		ns("demo-app", tenantLabel),   // orphan: in cluster, not in allowed set
-		ns("demo-keep", tenantLabel),  // allowed
+		ns("demo-app", tenantLabel),    // orphan: in cluster, not in allowed set
+		ns("demo-keep", tenantLabel),   // allowed
 		ns("kube-system", tenantLabel), // system: protected
 	}...)
 

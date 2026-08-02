@@ -29,7 +29,7 @@ type RootApplyPhase struct {
 	dyn      dynamic.Interface
 	branch   string
 	manifest string
-	lastMsg  string                  // set by Detect; read by ProgressMessage
+	lastMsg  string                   // set by Detect; read by ProgressMessage
 	onEvent  func(status, msg string) // optional; emits progress during Verify
 }
 
