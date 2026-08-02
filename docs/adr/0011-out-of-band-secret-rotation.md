@@ -105,13 +105,40 @@ ClusterRole grants `get`/`list`/`watch` on every Secret and ConfigMap in the
 cluster and `update`/`patch` on every Deployment, DaemonSet and StatefulSet,
 plus `create`/`delete` on Jobs. A component holding both halves can read any
 ServiceAccount token and repoint any workload's image, which makes it a
-cluster-admin-equivalent escalation path. `watchGlobally=false` does not
-help — the affected workloads span seven namespaces. The mitigation is to
-replace the ClusterRole and ClusterRoleBinding with namespaced Roles and
-RoleBindings in exactly those namespaces, accepting that new namespaces then
-need an explicit grant. This is the one part of the decision that is a
-judgement call rather than a measurement, and it should be made
-deliberately.
+cluster-admin-equivalent escalation path.
+
+The obvious mitigation — keep one global release and hand-substitute
+namespaced Roles in the seven namespaces — does not work, and is worth
+stating explicitly because it is what a reader reaches for first. Watch
+scope is set by `KUBERNETES_NAMESPACE`, not by what RBAC permits.
+`watchGlobally=false` is what sets it, from the pod's own namespace via
+`fieldRef`, and it swaps the ClusterRole and ClusterRoleBinding for a Role
+and RoleBinding carrying the same rules in that one namespace. There is no
+way to hand a single release a *set* of namespaces: the released chart has
+no `namespaces` value and the `v1.4.19` binary has no `--namespaces` flag.
+A globally-watching Reloader therefore issues a cluster-scoped LIST/WATCH
+that seven namespaced Roles can never satisfy, so its informer fails its
+initial list. The predictable end of that is someone restoring the
+ClusterRole to make the controller work, with this ADR's stated safeguard
+now silently absent.
+
+The real options are narrower and each carries a cost:
+
+- **Seven releases, one per namespace, each `watchGlobally=false`.** The
+  only way to get namespaced RBAC out of the released chart. Multiplies the
+  standing footprint and the upgrade surface by seven.
+- **Track unreleased `master` for both chart and image.** The per-namespace
+  Role loop is a master-only feature added 2026-06-26, and confusingly
+  carries the same chart version number as the release that lacks it — so
+  "chart 2.2.14" is not a sufficient description of what you installed.
+  Means running unreleased code for a security control.
+- **Accept the ClusterRole**, with cluster-wide Secret read plus workload
+  patch as a stated, registered cost.
+
+This is the one part of the decision that is a judgement call rather than a
+measurement. It is also narrower than it first appears, and it should be
+made deliberately with these three options in view rather than by reaching
+for a fourth that does not exist.
 
 **2. `--reload-strategy=annotations`, never the default.** The default
 `env-vars` strategy injects a hash-bearing environment variable into every
@@ -144,6 +171,43 @@ Burstable and memory-unbounded — which fails the memory epic's own
 Reloader specifically, because the chart derives `GOMEMLIMIT` from
 `limits.memory`; with no limit the Go runtime is handed a ceiling the size
 of the node and never collects under pressure.
+
+## Prerequisite the install cannot supply
+
+Reloader's opt-in annotation goes on the **Deployment object**, not the pod
+template — upstream's README and the chart's own `NOTES.txt` both place
+`secret.reloader.stakater.com/reload` in the Deployment's `metadata`. The
+controller does also look at the pod template, but upstream documents that
+dual path as a precedence edge case with unpredictable ordering, which is
+not something to build an adoption on.
+
+Five of the nine workloads render from a template with no object-level
+annotation hook at all. Their charts expose `podAnnotations`, which lands in
+`.spec.template.metadata.annotations`, and nothing that reaches the
+Deployment's own metadata. They cannot be annotated until that changes, and
+three of the five sit outside this repository:
+
+| Workloads | Template | Repository |
+|---|---|---|
+| `jdwlabs-usersrole-non`, `jdwlabs-usersrole-prd` | `charts/common/templates/_deployment.yaml` | `jdwlabs/deployments` |
+| `dotablaze-tech-meowbot-non`, `-prd` | `charts/meowbot/templates/deployment.yaml` | `dotablaze-tech/deployments` |
+| `platform-litellm` | `helm-charts/litellm-helm/templates/deployment.yaml` | this repository |
+
+The two are not the same size of change. The `jdwlabs/deployments` one is a
+library chart, so a single edit reaches both `usersrole` environments and
+every future chart built on it — but it needs a `common` version bump and a
+`Chart.lock` regeneration across all six app charts that depend on it. The
+`dotablaze-tech/deployments` one is a standalone chart template; that
+repository has no `common` library to fix centrally.
+
+The remaining four need nothing: `ai-sre-relay` is raw manifests and is
+edited directly, and `platform-headlamp`, `platform-holmes-holmes` and
+`platform-grafana` come from upstream charts whose `deploymentAnnotations`,
+`commonAnnotations` and `annotations` values respectively were each
+confirmed by render to reach the Deployment object.
+
+An adoption planned without this stalls at five of nine workloads after the
+controller is already installed and holding its RBAC.
 
 ## The memory objection no longer decides this
 
@@ -179,8 +243,10 @@ A blanket auto-reload would take the RBAC concern above and make every
 workload in the cluster a target of it, and would roll workloads on Secret
 changes that do not need a roll.
 
-Nine workloads gain rotation that takes effect. One of them — the relay —
-has no other mechanism available at all: it is deployed as raw manifests
+Nine workloads gain rotation that takes effect, but not at the same time:
+four on the day the controller lands, and the other five only once the chart
+work in the prerequisite above is done. One of the nine — the relay — has
+no other mechanism available at all: it is deployed as raw manifests
 with no Helm or kustomize render step, so there is no render in which a
 checksum could be computed, and every one of its values originates in Vault.
 That workload is the reason this is a decision and not a preference.
