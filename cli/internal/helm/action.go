@@ -5,13 +5,6 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-
-	// Helm v4 versions the chart packages by chart apiVersion rather than by SDK
-	// major, so the concrete chart type lives under .../chart/v2 and imports as
-	// package "v2". The top-level .../pkg/chart loader returns chart.Charter,
-	// which is an alias for any — it would erase the type at every call site.
-	chart "helm.sh/helm/v4/pkg/chart/v2"
-	"helm.sh/helm/v4/pkg/chart/v2/loader"
 )
 
 // InstallOpts holds all options for helm upgrade --install.
@@ -72,13 +65,4 @@ func (f *FakeRunner) EnsureRepo(_ context.Context, name, _ string) error {
 func (f *FakeRunner) UpgradeInstall(_ context.Context, release, chartRef string, _ InstallOpts) error {
 	f.Calls = append(f.Calls, release+"/"+chartRef)
 	return f.Err
-}
-
-// LoadChart loads a Helm chart from a directory or .tgz path.
-func LoadChart(path string) (*chart.Chart, error) {
-	c, err := loader.Load(path)
-	if err != nil {
-		return nil, fmt.Errorf("load chart %s: %w", path, err)
-	}
-	return c, nil
 }
