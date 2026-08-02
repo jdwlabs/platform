@@ -21,9 +21,9 @@ func mockVault(t *testing.T) (*httptest.Server, *Client) {
 	// PUT /v1/sys/init
 	mux.HandleFunc("PUT /v1/sys/init", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
-			"keys":         []string{"key1"},
-			"keys_base64":  []string{"a2V5MQ=="},
-			"root_token":   "test-root-token",
+			"keys":        []string{"key1"},
+			"keys_base64": []string{"a2V5MQ=="},
+			"root_token":  "test-root-token",
 		})
 	})
 

@@ -25,8 +25,8 @@ type VaultInitPhase struct {
 	kube      kubernetes.Interface
 	dc        dynamic.Interface // nil in tests; skips ClusterSecretStore apply
 	resolver  *VaultAddrResolver
-	backupDir string                  // directory for vault-init.json backup; defaults to .secrets/
-	lastMsg   string                  // set by vaultPodReady; read by ProgressMessage
+	backupDir string                   // directory for vault-init.json backup; defaults to .secrets/
+	lastMsg   string                   // set by vaultPodReady; read by ProgressMessage
 	onEvent   func(status, msg string) // wired by bootstrap.go so non-fatal warns appear in the event stream
 }
 

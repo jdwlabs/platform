@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -82,7 +81,14 @@ func (e *kvEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field) (*b
 				buf.AppendString(time.Duration(f.Integer).String())
 			case zapcore.ErrorType:
 				if f.Interface != nil {
-					buf.AppendString(f.Interface.(error).Error())
+					// Asserted rather than forced: a field carrying the error
+					// type but holding something else would otherwise panic
+					// inside the logger, losing the very message being written.
+					if err, ok := f.Interface.(error); ok {
+						buf.AppendString(err.Error())
+					} else {
+						buf.AppendString(fmt.Sprintf("%v", f.Interface))
+					}
 				}
 			default:
 				if f.Interface != nil {
@@ -103,9 +109,11 @@ func (e *kvEncoder) AddObject(key string, v zapcore.ObjectMarshaler) error {
 	e.fields = append(e.fields, zap.Object(key, v))
 	return nil
 }
-func (e *kvEncoder) AddBinary(key string, v []byte)     { e.fields = append(e.fields, zap.Binary(key, v)) }
-func (e *kvEncoder) AddByteString(key string, v []byte) { e.fields = append(e.fields, zap.ByteString(key, v)) }
-func (e *kvEncoder) AddBool(key string, v bool)         { e.fields = append(e.fields, zap.Bool(key, v)) }
+func (e *kvEncoder) AddBinary(key string, v []byte) { e.fields = append(e.fields, zap.Binary(key, v)) }
+func (e *kvEncoder) AddByteString(key string, v []byte) {
+	e.fields = append(e.fields, zap.ByteString(key, v))
+}
+func (e *kvEncoder) AddBool(key string, v bool) { e.fields = append(e.fields, zap.Bool(key, v)) }
 func (e *kvEncoder) AddComplex128(key string, v complex128) {
 	e.fields = append(e.fields, zap.Complex128(key, v))
 }
@@ -115,20 +123,24 @@ func (e *kvEncoder) AddComplex64(key string, v complex64) {
 func (e *kvEncoder) AddDuration(key string, v time.Duration) {
 	e.fields = append(e.fields, zap.Duration(key, v))
 }
-func (e *kvEncoder) AddFloat64(key string, v float64) { e.fields = append(e.fields, zap.Float64(key, v)) }
-func (e *kvEncoder) AddFloat32(key string, v float32) { e.fields = append(e.fields, zap.Float32(key, v)) }
-func (e *kvEncoder) AddInt(key string, v int)         { e.fields = append(e.fields, zap.Int(key, v)) }
-func (e *kvEncoder) AddInt64(key string, v int64)     { e.fields = append(e.fields, zap.Int64(key, v)) }
-func (e *kvEncoder) AddInt32(key string, v int32)     { e.fields = append(e.fields, zap.Int32(key, v)) }
-func (e *kvEncoder) AddInt16(key string, v int16)     { e.fields = append(e.fields, zap.Int16(key, v)) }
-func (e *kvEncoder) AddInt8(key string, v int8)       { e.fields = append(e.fields, zap.Int8(key, v)) }
-func (e *kvEncoder) AddString(key string, v string)   { e.fields = append(e.fields, zap.String(key, v)) }
-func (e *kvEncoder) AddTime(key string, v time.Time)  { e.fields = append(e.fields, zap.Time(key, v)) }
-func (e *kvEncoder) AddUint(key string, v uint)       { e.fields = append(e.fields, zap.Uint(key, v)) }
-func (e *kvEncoder) AddUint64(key string, v uint64)   { e.fields = append(e.fields, zap.Uint64(key, v)) }
-func (e *kvEncoder) AddUint32(key string, v uint32)   { e.fields = append(e.fields, zap.Uint32(key, v)) }
-func (e *kvEncoder) AddUint16(key string, v uint16)   { e.fields = append(e.fields, zap.Uint16(key, v)) }
-func (e *kvEncoder) AddUint8(key string, v uint8)     { e.fields = append(e.fields, zap.Uint8(key, v)) }
+func (e *kvEncoder) AddFloat64(key string, v float64) {
+	e.fields = append(e.fields, zap.Float64(key, v))
+}
+func (e *kvEncoder) AddFloat32(key string, v float32) {
+	e.fields = append(e.fields, zap.Float32(key, v))
+}
+func (e *kvEncoder) AddInt(key string, v int)        { e.fields = append(e.fields, zap.Int(key, v)) }
+func (e *kvEncoder) AddInt64(key string, v int64)    { e.fields = append(e.fields, zap.Int64(key, v)) }
+func (e *kvEncoder) AddInt32(key string, v int32)    { e.fields = append(e.fields, zap.Int32(key, v)) }
+func (e *kvEncoder) AddInt16(key string, v int16)    { e.fields = append(e.fields, zap.Int16(key, v)) }
+func (e *kvEncoder) AddInt8(key string, v int8)      { e.fields = append(e.fields, zap.Int8(key, v)) }
+func (e *kvEncoder) AddString(key string, v string)  { e.fields = append(e.fields, zap.String(key, v)) }
+func (e *kvEncoder) AddTime(key string, v time.Time) { e.fields = append(e.fields, zap.Time(key, v)) }
+func (e *kvEncoder) AddUint(key string, v uint)      { e.fields = append(e.fields, zap.Uint(key, v)) }
+func (e *kvEncoder) AddUint64(key string, v uint64)  { e.fields = append(e.fields, zap.Uint64(key, v)) }
+func (e *kvEncoder) AddUint32(key string, v uint32)  { e.fields = append(e.fields, zap.Uint32(key, v)) }
+func (e *kvEncoder) AddUint16(key string, v uint16)  { e.fields = append(e.fields, zap.Uint16(key, v)) }
+func (e *kvEncoder) AddUint8(key string, v uint8)    { e.fields = append(e.fields, zap.Uint8(key, v)) }
 func (e *kvEncoder) AddUintptr(key string, v uintptr) {
 	e.fields = append(e.fields, zap.Uintptr(key, v))
 }
@@ -185,17 +197,4 @@ func colorLevelEncoder(l zapcore.Level, enc zapcore.PrimitiveArrayEncoder) {
 		color = colorGreen
 	}
 	enc.AppendString(color + fmt.Sprintf("%-5s", l.CapitalString()) + colorReset)
-}
-
-func parseZapLevel(s string) zapcore.Level {
-	switch strings.ToLower(s) {
-	case "debug", "trace":
-		return zap.DebugLevel
-	case "warn", "warning":
-		return zap.WarnLevel
-	case "error":
-		return zap.ErrorLevel
-	default:
-		return zap.InfoLevel
-	}
 }
