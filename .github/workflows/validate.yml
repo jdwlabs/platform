@@ -127,9 +127,10 @@ jobs:
       - uses: golangci/golangci-lint-action@v9.3.0
         with:
           # Pinned rather than "latest" so a linter release cannot turn this
-          # job red without a commit changing it. Matches the version the
-          # Makefile target expects.
-          version: v2.12.2
+          # job red without a commit changing it. Read from a file so the
+          # Makefile target can check the local binary against the same pin
+          # instead of the two drifting apart unnoticed.
+          version-file: .golangci-lint-version
           working-directory: cli
 
   helm-lint:

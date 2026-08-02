@@ -29,7 +29,15 @@ build:
 test:
 	go test ./... -race -count=1
 
+# CI resolves the linter from this same file, so a local verdict that cannot
+# match CI's is reported here rather than discovered as a surprise red gate.
+GOLANGCI_VERSION := $(shell cat .golangci-lint-version)
+
 lint:
+	@installed=$$(golangci-lint version --short 2>/dev/null); \
+	if [ "v$$installed" != "$(GOLANGCI_VERSION)" ]; then \
+		echo "warning: golangci-lint v$$installed installed, CI pins $(GOLANGCI_VERSION)" >&2; \
+	fi
 	golangci-lint run
 
 # gofmt moved under `formatters` in golangci-lint v2: `run` reports formatting

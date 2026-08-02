@@ -1,2 +1,6 @@
 *.yaml text eol=lf
 *.yml text eol=lf
+
+# gofmt treats a CRLF file as unformatted, so a CRLF checkout makes every Go
+# file fail a lint gate that is clean on the LF-only CI runner.
+*.go text eol=lf
