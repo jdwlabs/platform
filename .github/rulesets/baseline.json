@@ -55,6 +55,7 @@
           { "context": "foundation-crds-freshness", "integration_id": 15368 },
           { "context": "image-pin-check", "integration_id": 15368 },
           { "context": "go-build-test", "integration_id": 15368 },
+          { "context": "go-lint", "integration_id": 15368 },
           { "context": "helm-lint", "integration_id": 15368 },
           { "context": "scan / scan", "integration_id": 15368 },
           { "context": "scan / gitleaks", "integration_id": 15368 },
