@@ -116,6 +116,22 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+  go-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: cli/go.mod
+          cache: true
+      - uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          # Pinned rather than "latest" so a linter release cannot turn this
+          # job red without a commit changing it. Matches the version the
+          # Makefile target expects.
+          version: v2.12.2
+          working-directory: cli
+
   helm-lint:
     runs-on: ubuntu-latest
     steps:

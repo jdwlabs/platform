@@ -1,4 +1,4 @@
-.PHONY: build test lint snapshot release install clean
+.PHONY: build test lint fmt snapshot release install clean
 
 VERSION := $(shell git describe --tags --always --dirty)
 COMMIT  := $(shell git rev-parse --short HEAD)
@@ -31,6 +31,11 @@ test:
 
 lint:
 	golangci-lint run
+
+# gofmt moved under `formatters` in golangci-lint v2: `run` reports formatting
+# problems but will not rewrite them, so fixing them needs this separate target.
+fmt:
+	golangci-lint fmt
 
 # Requires goreleaser installed locally.
 snapshot:
