@@ -1,7 +1,7 @@
 # ADR: Chained Cilium — sizing, the breakage set, and how enforcement gets proven
 
 Status: accepted, not yet implemented. Extends
-[networkpolicy-enforcement-via-chained-cilium](0011-networkpolicy-enforcement-via-chained-cilium.md);
+[networkpolicy-enforcement-via-chained-cilium](0012-networkpolicy-enforcement-via-chained-cilium.md);
 supersedes neither. That record is referenced by slug rather than by number
 throughout, because a renumber of it is in flight — see the numbering note
 under Decision. The choice of chained Cilium is settled there and is not
