@@ -1,30 +1,32 @@
 # ADR: Chained Cilium — sizing, the breakage set, and how enforcement gets proven
 
 Status: accepted, not yet implemented. Extends
-[0011](0011-networkpolicy-enforcement-via-chained-cilium.md); supersedes
-neither. The choice of chained Cilium is settled there and is not reopened
-here.
+[networkpolicy-enforcement-via-chained-cilium](0011-networkpolicy-enforcement-via-chained-cilium.md);
+supersedes neither. That record is referenced by slug rather than by number
+throughout, because a renumber of it is in flight — see the numbering note
+under Decision. The choice of chained Cilium is settled there and is not
+reopened here.
 
 ## Problem
 
-ADR 0011 chose Cilium in `generic-veth` chaining mode and sketched a
+The chained-Cilium record chose `generic-veth` chaining mode and sketched a
 five-step rollout. Re-deriving its premises against live state on 2026-08-04
 confirmed every one of them — 115 `NetworkPolicy` objects across 24
 namespaces, `kube-flannel` 8/8 as the only CNI, no policy engine of any kind
 present. That decision stands.
 
-But 0011 stops at the point where the rollout becomes dangerous. Three
+But it stops at the point where the rollout becomes dangerous. Three
 things it leaves open each independently determine whether the rollout is
 safe to run, and none of them can be answered by reading the decision:
 
-1. **Whether the agent fits.** 0011 does not mention memory. Cilium's chart
-   ships `resources: {}`, and there is no `LimitRange` in `kube-system` to
-   backfill it.
-2. **What enforcement actually breaks.** 0011 correctly says the 91
+1. **Whether the agent fits.** That record does not mention memory. Cilium's
+   chart ships `resources: {}`, and there is no `LimitRange` in `kube-system`
+   to backfill it.
+2. **What enforcement actually breaks.** It correctly says the 91
    allow-policies are untested and that the audit log is the specification.
    It does not say that part of the answer is already knowable statically —
    and the part that is knowable is severe.
-3. **How isolation gets proven.** 0011's step 5 flips audit mode off. It
+3. **How isolation gets proven.** Its step 5 flips audit mode off. It
    states no test that distinguishes "enforcement is working" from "the
    engine is loaded and still enforcing nothing", which is the failure this
    whole ticket exists to correct.
@@ -109,20 +111,36 @@ resources:
 ```
 
 192Mi fits inside 323Mi with margin on the worst node. The limit is set and
-the request is set, so the QoS class is Burstable, not BestEffort. These
-belong in the tenant values file, never in a live patch — ArgoCD prunes and
-self-heals all 49 Applications, so a patched DaemonSet reverts within
-seconds.
+the request is set, so the QoS class is Burstable, not BestEffort.
+
+These belong in the tenant values file rather than a live patch, and it is
+worth being exact about why, because the usual shorthand — "ArgoCD reverts
+anything not in Git" — is not true and leads people to the right action for
+the wrong reason. Applications sync with `ServerSideApply=true` plus
+`selfHeal`, so reversion is decided by server-side-apply **field ownership**,
+not by whether a value appears in Git. A field absent from the rendered
+manifest is owned by nobody and survives indefinitely: on this cluster
+`kubectl.kubernetes.io/restartedAt` has persisted on a tenant Deployment
+since 2026-05-23 under prune and selfHeal, because `argocd-controller` holds
+`Apply` while `kubectl-rollout` holds `Update` over a disjoint field set, and
+the two never contend.
+
+`resources` is the opposite case. The chart renders it, so it is inside
+ArgoCD's applied field set, ArgoCD owns it, and a live patch to it is
+genuinely reverted on the next sync. The conclusion holds — set it in values
+— but only for fields the chart actually emits. Anyone reasoning about
+whether some other out-of-band change will stick should check field ownership
+in `metadata.managedFields` rather than assume selfHeal settles it.
 
 ## What enforcement would actually break
 
-0011 groups the 115 objects by shape and concludes the allow-set is untested.
-That is right, but it understates what is already provable without the audit
-log. The 18 `platform`-tier namespaces pair their `default-deny-all` with
-both `allow-all-ingress` and `allow-all-egress`; because policies are
-additive, enforcement there changes nothing. The exposure is entirely in the
-six namespaces with no allow-all companion — the ones the tenant model
-claims are isolated.
+The chained-Cilium record groups the 115 objects by shape and concludes the
+allow-set is untested. That is right, but it understates what is already
+provable without the audit log. The 18 `platform`-tier namespaces pair their
+`default-deny-all` with both `allow-all-ingress` and `allow-all-egress`;
+because policies are additive, enforcement there changes nothing. The
+exposure is entirely in the six namespaces with no allow-all companion —
+the ones the tenant model claims are isolated.
 
 For those six, the allow-set is knowable statically, because the tenant
 envelope generates it. `helm-charts/tenant-envelope/templates/network-policies.yaml`
@@ -176,7 +194,7 @@ namespaces enforce first because their allow-all pair makes enforcement a
 no-op there, which proves the engine works without risking anything. The
 four tenant workload namespaces enforce last, after the template gap above
 is closed and their audit logs are silent. `kube-system` enforces on its own,
-after everything else, as 0011 already requires.
+after everything else, as the chained-Cilium record already requires.
 
 **2. Audit mode is the default state, not a phase.** Cilium is installed with
 `policyAuditMode=true` and stays there. Enforcement is enabled per namespace
@@ -187,13 +205,24 @@ the rollback is one flag.
 512Mi limit, set in `tenants/platform/services/cilium/values.yaml`. Envoy
 disabled. Not patched live.
 
-**4. This ADR is numbered 0012 despite 0011 being occupied twice.**
-`0011-networkpolicy-enforcement-via-chained-cilium.md` and
-`0011-out-of-band-secret-rotation.md` both landed on `main` under the same
-number, from concurrent branches. Records are append-only here, so neither is
-renamed by this change; 0012 is taken and the collision is left documented
-rather than silently corrected. Nothing enforces uniqueness at commit time,
-which is why it happened and why it will happen again.
+**4. This ADR takes 0014, and the reason is itself the finding.** At the time
+of writing, `main` carries two records numbered 0011 — the chained-Cilium one
+this extends, and the out-of-band-secret-rotation one — both landed from
+concurrent branches. Three separate open branches then claimed **0012**: one
+renaming the chained-Cilium record into it, one adding a new record at it, and
+this one. Those first two collide with each other independently of this
+change, so whichever lands second recreates the exact collision the rename
+exists to resolve, and 0013 is the natural landing spot for whichever record
+is displaced.
+
+0014 is therefore the first number not already contested. A gap in the
+sequence is harmless; a second record at the same number is the actual
+defect. The underlying cause is that ADR numbers are allocated by whoever
+writes the file, and nothing checks uniqueness at commit or in CI — so the
+allocation races whenever more than one record is in flight, which is now the
+normal condition rather than the exception. Renumbering by hand resolves an
+instance and not the mechanism. A CI check rejecting a duplicate numeric
+prefix would; that is worth more than any individual renumber.
 
 ## Runbook
 
@@ -432,14 +461,14 @@ That claim is wrong today and remains wrong throughout the audit period,
 which is the longest phase of this plan. It should be corrected to state that
 enforcement is in progress, rather than left to become true eventually.
 
-**The VXLAN fault is untouched**, as 0011 already recorded. Chaining leaves
+**The VXLAN fault is untouched**, as already recorded there. Chaining leaves
 Flannel's datapath exactly as it is, so the recurring cross-node blackhole
 and its reboot workaround remain. Anything that fixes it is a separate
 datapath decision.
 
 ## Non-goals
 
-- **Re-deciding the engine.** 0011 chose chained Cilium; this record
+- **Re-deciding the engine.** That record chose chained Cilium; this one
   implements it. The Calico rejection there is additionally supported by two
   facts it did not need: kube-proxy runs in `nftables` mode on this cluster,
   which Calico's OSS iptables dataplane conflicts with, and the `canal`
