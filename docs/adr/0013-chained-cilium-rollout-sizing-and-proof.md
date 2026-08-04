@@ -205,24 +205,29 @@ the rollback is one flag.
 512Mi limit, set in `tenants/platform/services/cilium/values.yaml`. Envoy
 disabled. Not patched live.
 
-**4. This ADR takes 0014, and the reason is itself the finding.** At the time
-of writing, `main` carries two records numbered 0011 — the chained-Cilium one
-this extends, and the out-of-band-secret-rotation one — both landed from
-concurrent branches. Three separate open branches then claimed **0012**: one
-renaming the chained-Cilium record into it, one adding a new record at it, and
-this one. Those first two collide with each other independently of this
-change, so whichever lands second recreates the exact collision the rename
-exists to resolve, and 0013 is the natural landing spot for whichever record
-is displaced.
+**4. This ADR takes 0013, and how that number was arrived at is itself the
+finding.** `main` currently carries two records numbered 0011 — the
+chained-Cilium one this extends, and the out-of-band-secret-rotation one —
+both landed from concurrent branches. A separate branch is renaming the
+chained-Cilium record to 0012, which puts this record immediately after the
+decision it extends. That adjacency is deliberate and worth preserving.
 
-0014 is therefore the first number not already contested. A gap in the
-sequence is harmless; a second record at the same number is the actual
-defect. The underlying cause is that ADR numbers are allocated by whoever
-writes the file, and nothing checks uniqueness at commit or in CI — so the
-allocation races whenever more than one record is in flight, which is now the
-normal condition rather than the exception. Renumbering by hand resolves an
-instance and not the mechanism. A CI check rejecting a duplicate numeric
-prefix would; that is worth more than any individual renumber.
+Getting here took three attempts, because the number was contested twice
+while this record was being written: 0012 first, then 0014, each time by a
+branch that had claimed it in the interval. That is not carelessness by
+anyone involved. It is what happens when ADR numbers are allocated by
+whoever writes the file and nothing checks uniqueness at commit or in CI, so
+allocation races whenever more than one record is in flight — which is now
+the normal condition rather than the exception.
+
+A gap in the sequence is harmless; two records at one number is the actual
+defect, and it is the one already on `main`. Renumbering by hand resolves an
+instance and not the mechanism — a CI check rejecting a duplicate numeric
+prefix under `docs/adr/` would, and is worth more than any individual
+renumber.
+
+The record this extends is referenced by slug rather than number throughout,
+so those references survive its pending renumber without further edits.
 
 ## Runbook
 
