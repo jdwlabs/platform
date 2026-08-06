@@ -16,6 +16,18 @@ project:
 
 services: []
 
+# Per-tenant observability footprint (Grafana folder/team/RBAC). Absent
+# (tenantId empty) renders nothing — the platform tenant's own "Platform"
+# folder predates this model and stays sidecar/ConfigMap-provisioned rather
+# than being retrofitted here. See docs/observability/DASHBOARDS-AND-MULTITENANCY.md
+# §5.5 for the design this schema implements.
+observability:
+  tenantId: ""
+  grafana:
+    folder: ""
+    team: ""
+    access: view
+
 _platform:
   repoURL: https://github.com/jdwlabs/platform.git
   revision: main

@@ -75,6 +75,28 @@ func validateTenant(path string, t *Tenant) error {
 			return fmt.Errorf(`%s: service %s must have either "chart" or "chartPath"`, path, svc.Name)
 		}
 	}
+	if t.Observability != nil {
+		var missing []string
+		if t.Observability.TenantID == "" {
+			missing = append(missing, "observability.tenantId")
+		}
+		if t.Observability.Grafana.Folder == "" {
+			missing = append(missing, "observability.grafana.folder")
+		}
+		if t.Observability.Grafana.Team == "" {
+			missing = append(missing, "observability.grafana.team")
+		}
+		switch t.Observability.Grafana.Access {
+		case "view", "edit":
+			// valid
+		default:
+			return fmt.Errorf(`%s: observability.grafana.access must be "view" or "edit", got %q`,
+				path, t.Observability.Grafana.Access)
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("%s: observability missing fields: %s", path, strings.Join(missing, ","))
+		}
+	}
 	return nil
 }
 

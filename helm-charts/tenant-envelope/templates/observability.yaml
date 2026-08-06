@@ -1,0 +1,227 @@
+# Per-tenant Grafana folder + team + folder-RBAC, driven by the
+# `observability` block in tenant.yaml. See
+# docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.1/§5.5: tenancy is
+# folders + folder-RBAC + teams, never Grafana organizations, and it rides
+# tenant.yaml so onboarding stays a single-file change.
+#
+# Grafana's folder/team/permission objects live in Grafana's own store, not
+# as Kubernetes resources, so ArgoCD cannot reconcile them directly (the same
+# constraint the Git Sync Connection/Repository objects have — see the
+# grafana service's gitsync-apply-job.yaml). This Job is the same pattern
+# applied to folders/teams/RBAC instead of Git Sync resources.
+#
+# It renders into the `monitoring` namespace (where Grafana and its admin
+# credentials live), which the governance ApplicationSet can reach because it
+# deploys tenant-envelope under the elevated `bootstrap` AppProject — this
+# tenant's own restricted AppProject (rendered by appproject.yaml) is not
+# what governs this Job.
+#
+# Ordering caveat: this Job's own sync-wave only orders it against the other
+# resources this chart renders for the same tenant; it does not order it
+# against the separate `platform-grafana` Application. The readiness wait
+# below is deliberately generous to absorb that, rather than assuming
+# cross-Application sequencing.
+{{- if .Values.observability.tenantId }}
+{{- $folderUID := .Values.observability.grafana.folder }}
+{{- $teamName := .Values.observability.grafana.team }}
+{{- $permLevel := include "tenant-envelope.grafanaPermissionLevel" .Values.observability.grafana.access }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tenant-{{ .Values.name }}-grafana-observability
+  namespace: monitoring
+data:
+  folder.json: |
+    {"uid": {{ $folderUID | quote }}, "title": {{ .Values.displayName | default $folderUID | quote }}}
+  team.json: |
+    {"name": {{ $teamName | quote }}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tenant-{{ .Values.name }}-grafana-observability-apply
+  namespace: monitoring
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 1500
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        # Numeric uid, not a name: runAsNonRoot is enforced by the kubelet
+        # before the image's user database is consulted, so a named user
+        # fails admission. 472 is the grafana image's own uid.
+        runAsUser: 472
+        runAsGroup: 472
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: apply
+          # Reuses the Grafana image purely for its curl, matching the
+          # gitsync-apply-job precedent: already present on the nodes and
+          # version-pinned alongside the chart.
+          image: docker.io/grafana/grafana:13.1.1@sha256:7cb8c64c4d57a57e734073f3cc94620adb24a0acb929bd80ba9f14017e3a975b
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          env:
+            - name: GF_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin-credentials
+                  key: admin-user
+            - name: GF_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin-credentials
+                  key: admin-password
+            - name: FOLDER_UID
+              value: {{ $folderUID | quote }}
+            - name: TEAM_NAME
+              value: {{ $teamName | quote }}
+            - name: PERM_LEVEL
+              value: {{ $permLevel | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+
+              API="http://platform-grafana.monitoring.svc/api"
+              LAST_BODY=/tmp/last-response
+
+              # Cross-Application ordering isn't guaranteed (see the template
+              # comment), so this loop tolerates Grafana not existing yet, not
+              # just "still booting". Up to ~12 minutes before giving up.
+              i=0
+              while [ "$i" -lt 150 ]; do
+                code=$(curl -sS -o /dev/null -w '%{http_code}' "$API/health" || echo 000)
+                [ "$code" = "200" ] && break
+                i=$((i + 1))
+                sleep 5
+              done
+              if [ "$i" -ge 150 ]; then
+                echo "grafana never became healthy at $API/health"
+                exit 1
+              fi
+
+              # ensure_folder: create-if-absent, matching the write-once
+              # posture of the gitsync job -- an existing folder (dashboards
+              # may already live in it) is left untouched rather than
+              # re-titled.
+              code=$(curl -sS -o "$LAST_BODY" -w '%{http_code}' \
+                -u "$GF_USER:$GF_PASS" "$API/folders/$FOLDER_UID")
+              case "$code" in
+                200)
+                  echo "folder $FOLDER_UID already present, leaving untouched"
+                  ;;
+                404)
+                  code=$(curl -sS -o "$LAST_BODY" -w '%{http_code}' -X POST \
+                    -H 'Content-Type: application/json' \
+                    -u "$GF_USER:$GF_PASS" \
+                    --data-binary "@/etc/observability/folder.json" \
+                    "$API/folders")
+                  case "$code" in
+                    2*) echo "created folder $FOLDER_UID" ;;
+                    *)
+                      echo "POST /api/folders returned $code:"
+                      cat "$LAST_BODY"
+                      exit 1
+                      ;;
+                  esac
+                  ;;
+                *)
+                  echo "unexpected status $code probing folder $FOLDER_UID:"
+                  cat "$LAST_BODY"
+                  exit 1
+                  ;;
+              esac
+
+              # ensure_team: the search endpoint does substring matching, so
+              # totalCount must come back exactly 1 before this trusts the
+              # response as "the" team -- anything else (0 or >1) is handled
+              # explicitly rather than guessed at.
+              code=$(curl -sS -o "$LAST_BODY" -w '%{http_code}' \
+                -u "$GF_USER:$GF_PASS" "$API/teams/search?query=$TEAM_NAME")
+              if [ "$code" != "200" ]; then
+                echo "GET /api/teams/search returned $code:"
+                cat "$LAST_BODY"
+                exit 1
+              fi
+              if grep -q '"totalCount":0' "$LAST_BODY"; then
+                code=$(curl -sS -o "$LAST_BODY" -w '%{http_code}' -X POST \
+                  -H 'Content-Type: application/json' \
+                  -u "$GF_USER:$GF_PASS" \
+                  --data-binary "@/etc/observability/team.json" \
+                  "$API/teams")
+                case "$code" in
+                  2*) echo "created team $TEAM_NAME" ;;
+                  *)
+                    echo "POST /api/teams returned $code:"
+                    cat "$LAST_BODY"
+                    exit 1
+                    ;;
+                esac
+                TEAM_ID=$(grep -oE '"teamId":[0-9]+' "$LAST_BODY" | head -1 | cut -d: -f2)
+              elif grep -q '"totalCount":1' "$LAST_BODY" \
+                && [ "$(grep -o "\"name\":\"$TEAM_NAME\"" "$LAST_BODY" | wc -l)" -eq 1 ]; then
+                echo "team $TEAM_NAME already present, leaving untouched"
+                TEAM_ID=$(grep -oE '"id":[0-9]+' "$LAST_BODY" | head -1 | cut -d: -f2)
+              else
+                echo "ambiguous team search for '$TEAM_NAME' (expected exactly one exact-name match):"
+                cat "$LAST_BODY"
+                exit 1
+              fi
+              if [ -z "${TEAM_ID:-}" ]; then
+                echo "could not resolve a team id for $TEAM_NAME from:"
+                cat "$LAST_BODY"
+                exit 1
+              fi
+
+              # Folder permissions are a full replace, not additive, so this
+              # is safe to reconcile on every sync (unlike the create-only
+              # folder/team steps above) -- it always ends in exactly the
+              # tenant team holding $PERM_LEVEL on its own folder, regardless
+              # of what was set by hand in between.
+              code=$(curl -sS -o "$LAST_BODY" -w '%{http_code}' -X POST \
+                -H 'Content-Type: application/json' \
+                -u "$GF_USER:$GF_PASS" \
+                --data-binary "{\"items\":[{\"teamId\":$TEAM_ID,\"permission\":$PERM_LEVEL}]}" \
+                "$API/folders/$FOLDER_UID/permissions")
+              case "$code" in
+                200) echo "folder $FOLDER_UID permissions set: team $TEAM_NAME ($TEAM_ID) -> level $PERM_LEVEL" ;;
+                *)
+                  echo "POST /api/folders/$FOLDER_UID/permissions returned $code:"
+                  cat "$LAST_BODY"
+                  exit 1
+                  ;;
+              esac
+          volumeMounts:
+            - name: resources
+              mountPath: /etc/observability
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: resources
+          configMap:
+            name: tenant-{{ .Values.name }}-grafana-observability
+        - name: tmp
+          emptyDir: {}
+{{- end }}

@@ -17,6 +17,8 @@ func TestValidate(t *testing.T) {
 		{"missing name", "missing-name.yaml", true, "missing field: name"},
 		{"service missing fields", "service-missing-fields.yaml", true, "missing fields"},
 		{"service no chart", "service-no-chart.yaml", true, `must have either "chart" or "chartPath"`},
+		{"observability valid", "observability-valid.yaml", false, ""},
+		{"observability bad access", "observability-bad-access.yaml", true, `access must be "view" or "edit"`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
