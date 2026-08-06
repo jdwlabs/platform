@@ -387,6 +387,48 @@ query result below is a finding rather than a tooling failure.
 | Gateway (NGF)    | `kubectl get pods -n nginx-gateway`, then check `NginxGatewayFabricDown`/`NginxGatewayFabricReconcileErrorsHigh` alerts (control-plane health only, not request-level) |
 | Tracing (Tempo)  | `sum(tempo_distributor_spans_received_total)` — empty vector means no service has ever emitted; see the `TempoNoSpansReceived` steps above |
 
+**Control-plane metrics — etcd, kube-scheduler, kube-controller-manager:**
+
+These three ship with no telemetry by default: etcd's metrics live only
+behind its mTLS client port, and both scheduler and controller-manager bind
+their metrics port to loopback. The Talos machine config widens all three
+(etcd gains a dedicated metrics-only listener; the other two move off
+`127.0.0.1`), and this chart's `kubeEtcd` / `kubeScheduler` /
+`kubeControllerManager` blocks scrape them. This is a two-repo, ordered
+rollout — the machine-config side is human-applied, and the scrape config
+here must not merge until it has been, or Prometheus records `up == 0` and
+the newly-enabled alert rules fire on a fault that does not exist. See that
+PR's description for the current status of the apply.
+
+Endpoints, once the machine-config side is applied — reachable from the node
+network only, not from outside the cluster:
+
+```
+http://<control-plane-ip>:2381/metrics   # etcd — plain HTTP, no client API
+https://<control-plane-ip>:10259/metrics # kube-scheduler — self-signed cert
+https://<control-plane-ip>:10257/metrics # kube-controller-manager — self-signed cert
+```
+
+Prometheus discovers all three via Kubernetes service/node discovery — no
+addresses are committed to git. Job names: `kube-etcd`, `kube-scheduler`,
+`kube-controller-manager`.
+
+Verification queries, run via the Prometheus API (e.g.
+`kubectl port-forward -n monitoring svc/platform-kube-prometheus-s-prometheus 9090:9090`):
+
+```
+count by (job) (up)
+# expect kube-etcd, kube-scheduler, kube-controller-manager present, 3 targets each
+
+etcd_server_leader_changes_seen_total
+histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m]))
+# both should return data, not an empty vector
+```
+
+Then confirm the alert rules loaded rather than merely being absent:
+`/api/v1/rules`, filter for `etcd`, `KubeScheduler`, `KubeControllerManager`
+— every one should read `inactive`, never `firing` on a healthy cluster.
+
 ## Self-hosted CI runners (ARC) — dormant
 
 All CI runs exclusively on GitHub-hosted runners (`ubuntu-latest`). The ARC
