@@ -3,6 +3,16 @@
 # ArgoCD holds prior manifests in git history; no need for k8s to keep old
 # ReplicaSets around too.
 revisionHistoryLimit: 0
+
+# Opt-in for Reloader (installed via the platform GitOps path, not yet
+# live): rolls this Deployment when holmes-llm above is rotated.
+# commonAnnotations (confirmed by render to reach the Deployment's own
+# metadata) is this chart's hook, but it also lands on every other
+# chart-rendered object (ServiceAccount, HPA, ...) -- harmless, since
+# Reloader only acts on Deployments/StatefulSets/DaemonSets.
+commonAnnotations:
+  secret.reloader.stakater.com/reload: "holmes-llm"
+
 additionalEnvVars:
   - name: OPENAI_API_KEY
     valueFrom:

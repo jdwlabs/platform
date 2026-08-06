@@ -40,6 +40,12 @@ redis:
 environmentSecrets:
   - litellm-secrets
 
+# Opt-in for Reloader (installed via the platform GitOps path, not yet live):
+# rolls this Deployment when litellm-secrets above is rotated. Inert until
+# Reloader is installed.
+deploymentAnnotations:
+  secret.reloader.stakater.com/reload: "litellm-secrets"
+
 proxy_config:
   model_list:
     # Zero-cost tier only — no paid API credits on any provider. Alias is

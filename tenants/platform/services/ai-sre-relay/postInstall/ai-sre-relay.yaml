@@ -6,6 +6,13 @@ metadata:
   name: ai-sre-relay
   namespace: ai-sre
   labels: {app: ai-sre-relay}
+  # Opt-in for Reloader (installed via the platform GitOps path, not yet
+  # live): rolls this Deployment when the ai-sre-relay Secret is rotated.
+  # This is raw manifests with no Helm render, so the annotation goes
+  # straight on the object rather than through a values hook. Inert until
+  # Reloader is installed.
+  annotations:
+    secret.reloader.stakater.com/reload: "ai-sre-relay"
 spec:
   replicas: 1
   selector:
