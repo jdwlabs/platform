@@ -12,9 +12,11 @@ namespaces:
   - name: dotablaze-tech-non
     quotaTier: standard
     networkPolicy: default
+    externalEgress: true
   - name: dotablaze-tech-prd
     quotaTier: standard
     networkPolicy: default
+    externalEgress: true
   - name: dotablaze-tech-runners
     quotaTier: ci
     networkPolicy: ci
