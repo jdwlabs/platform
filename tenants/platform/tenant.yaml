@@ -72,6 +72,9 @@ namespaces:
   - name: ai-sre
     quotaTier: platform
     networkPolicy: platform
+  - name: reloader
+    quotaTier: platform
+    networkPolicy: platform
 
 project:
   elevated: true
@@ -93,6 +96,7 @@ project:
     - 'ghcr.io/nginx/charts'
     - 'https://democratic-csi.github.io/charts/'
     - 'docker.litellm.ai/berriai'
+    - 'https://stakater.github.io/stakater-charts'
 
 services:
   # Wave 0: Management plane self-hosting
@@ -250,6 +254,19 @@ services:
     revision: 0.44.0
     namespace: headlamp
     postInstall: true
+    syncWave: 2
+
+  # Watches Secrets/ConfigMaps cluster-wide and rolls the Deployments that
+  # consume them on change (see docs/adr/0016). The RBAC grant this needs
+  # (cluster-wide Secret read, cluster-wide workload patch) is why this entry
+  # is not synced without a deliberate go-ahead: ArgoCD's root App tracks this
+  # tenant.yaml, so merging alone would apply it.
+  - name: reloader
+    chart: reloader
+    repo: https://stakater.github.io/stakater-charts
+    revision: 2.2.14
+    namespace: reloader
+    postInstall: false
     syncWave: 2
 
   # Wave 3: Operators

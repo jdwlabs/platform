@@ -1,0 +1,40 @@
+# See docs/adr/0011-out-of-band-secret-rotation.md and
+# docs/adr/0016-reloader-adoption-ssa-evidence-and-rbac.md for the decision
+# and the conditions below.
+
+reloader:
+  # Default 'default' strategy patches containers[].env[], a list field --
+  # ArgoCD's ignore-stripping drops entries out of lists under
+  # RespectIgnoreDifferences+ServerSideApply. 'annotations' writes a single
+  # scalar annotation instead, and (per ADR 0016) never needs an
+  # ignoreDifferences entry at all: ArgoCD's SSA apply only reverts a field
+  # it renders and claims ownership of, and this annotation is never in any
+  # git-rendered manifest.
+  reloadStrategy: annotations
+
+  # Cluster-wide watch, one release. The alternative (one release per
+  # namespace with watchGlobally=false) needs a namespaced-Role feature that
+  # only exists on unreleased chart `master`, and multiplies the standing
+  # footprint sevenfold for a chart-versioning scheme that already conflates
+  # release and master under the same version string. See ADR 0016's RBAC
+  # section for the full reasoning and the registered cost.
+  watchGlobally: true
+
+  # Opt-in per workload via secret.reloader.stakater.com/reload, not a
+  # blanket watch: autoReloadAll would put every Secret change in the
+  # cluster in scope, including workloads that don't need a roll.
+  autoReloadAll: false
+
+  deployment:
+    # tenant-limits LimitRange supplies a 64Mi memory defaultRequest but no
+    # default limit, which would leave this Burstable and memory-unbounded.
+    # 128Mi covers the measured cluster-wide watch cache (~1.3MB of Secret +
+    # ConfigMap data) many times over; the chart derives GOMEMLIMIT from
+    # this limit, so an explicit value also keeps the Go runtime from being
+    # handed a ceiling the size of the node.
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
