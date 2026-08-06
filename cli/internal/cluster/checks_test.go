@@ -572,3 +572,135 @@ func TestCheckLimitRangeAdoption_PodScopedLimitRangeIsNotContainerDefault(t *tes
 		t.Fatalf("expected pass, pod-scoped LimitRange has no container defaults to check, got %s: %s", r.Status, r.Message)
 	}
 }
+
+// --- checkLonghornEngineVersionSkew ---
+
+func newLonghornSetting(value string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "longhorn.io/v1beta2",
+			"kind":       "Setting",
+			"metadata": map[string]interface{}{
+				"name":      "current-longhorn-version",
+				"namespace": "longhorn-system",
+			},
+			"value": value,
+		},
+	}
+}
+
+func newLonghornEngineImage(name, image string, refCount int64) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "longhorn.io/v1beta2",
+			"kind":       "EngineImage",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": "longhorn-system",
+			},
+			"spec": map[string]interface{}{
+				"image": image,
+			},
+			"status": map[string]interface{}{
+				"refCount": refCount,
+			},
+		},
+	}
+}
+
+// newDynamicLonghorn builds a fake dynamic client seeded with the given
+// Setting (nil to simulate it being absent) and EngineImage objects.
+func newDynamicLonghorn(setting *unstructured.Unstructured, images ...*unstructured.Unstructured) dynamic.Interface {
+	var objs []runtime.Object
+	if setting != nil {
+		objs = append(objs, setting)
+	}
+	for _, img := range images {
+		objs = append(objs, img)
+	}
+	scheme := runtime.NewScheme()
+	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			gvrLonghornSetting:     "SettingList",
+			gvrLonghornEngineImage: "EngineImageList",
+		},
+		objs...,
+	)
+}
+
+func TestCheckLonghornEngineVersionSkew_UnusedOlderImagePasses(t *testing.T) {
+	dyn := newDynamicLonghorn(
+		newLonghornSetting("v1.12.0"),
+		newLonghornEngineImage("ei-a4d05f02", "docker.io/longhornio/longhorn-engine:v1.12.0", 9),
+		newLonghornEngineImage("ei-75a03ec3", "docker.io/longhornio/longhorn-engine:v1.11.1", 0),
+	)
+	r := checkLonghornEngineVersionSkew(context.Background(), dyn)
+	if r.Status != StatusPass {
+		t.Fatalf("expected pass, the v1.11.1 image has zero refCount so nothing is actually running it, got %s: %s", r.Status, r.Message)
+	}
+}
+
+// This is the exact JDWLABS-212 signature: manager already bumped, the data
+// plane hasn't moved, and concurrentAutomaticEngineUpgradePerNodeLimit=0
+// means nothing ever will on its own. One minor behind is supported, so this
+// is a warning, not a failure.
+func TestCheckLonghornEngineVersionSkew_OneMinorBehindWarns(t *testing.T) {
+	dyn := newDynamicLonghorn(
+		newLonghornSetting("v1.12.0"),
+		newLonghornEngineImage("ei-75a03ec3", "docker.io/longhornio/longhorn-engine:v1.11.1", 55),
+		newLonghornEngineImage("ei-a4d05f02", "docker.io/longhornio/longhorn-engine:v1.12.0", 9),
+	)
+	r := checkLonghornEngineVersionSkew(context.Background(), dyn)
+	if r.Status != StatusWarn {
+		t.Fatalf("expected warn for one-minor gap, got %s: %s", r.Status, r.Message)
+	}
+	for _, want := range []string{"v1.12", "ei-75a03ec3", "v1.11", "refCount=55"} {
+		if !strings.Contains(r.Message, want) {
+			t.Fatalf("expected %q in message, got: %s", want, r.Message)
+		}
+	}
+}
+
+// A two-minor gap is the unsupported case the ticket's own history exists to
+// prevent: a second chart bump landing before the first engine upgrade did.
+func TestCheckLonghornEngineVersionSkew_TwoMinorsBehindFails(t *testing.T) {
+	dyn := newDynamicLonghorn(
+		newLonghornSetting("v1.13.0"),
+		newLonghornEngineImage("ei-75a03ec3", "docker.io/longhornio/longhorn-engine:v1.11.1", 55),
+	)
+	r := checkLonghornEngineVersionSkew(context.Background(), dyn)
+	if r.Status != StatusFail {
+		t.Fatalf("expected fail for two-minor gap, got %s: %s", r.Status, r.Message)
+	}
+}
+
+func TestCheckLonghornEngineVersionSkew_SettingMissingWarns(t *testing.T) {
+	dyn := newDynamicLonghorn(nil,
+		newLonghornEngineImage("ei-75a03ec3", "docker.io/longhornio/longhorn-engine:v1.11.1", 55),
+	)
+	r := checkLonghornEngineVersionSkew(context.Background(), dyn)
+	if r.Status != StatusWarn {
+		t.Fatalf("expected warn when the control-plane setting is absent, got %s: %s", r.Status, r.Message)
+	}
+}
+
+func TestParseMajorMinor(t *testing.T) {
+	cases := []struct {
+		in        string
+		wantMajor int
+		wantMinor int
+		wantOK    bool
+	}{
+		{"v1.12.0", 1, 12, true},
+		{"docker.io/longhornio/longhorn-engine:v1.11.1", 1, 11, true},
+		{"", 0, 0, false},
+		{"garbage", 0, 0, false},
+	}
+	for _, c := range cases {
+		major, minor, ok := parseMajorMinor(c.in)
+		if ok != c.wantOK || major != c.wantMajor || minor != c.wantMinor {
+			t.Fatalf("parseMajorMinor(%q) = (%d, %d, %v), want (%d, %d, %v)",
+				c.in, major, minor, ok, c.wantMajor, c.wantMinor, c.wantOK)
+		}
+	}
+}

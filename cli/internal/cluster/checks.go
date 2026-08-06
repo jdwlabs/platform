@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -17,13 +18,15 @@ import (
 )
 
 var (
-	gvrGatewayClass       = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gatewayclasses"}
-	gvrGateway            = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gateways"}
-	gvrHTTPRoute          = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
-	gvrClusterSecretStore = schema.GroupVersionResource{Group: "external-secrets.io", Version: "v1", Resource: "clustersecretstores"}
-	gvrExternalSecret     = schema.GroupVersionResource{Group: "external-secrets.io", Version: "v1", Resource: "externalsecrets"}
-	gvrCertificate        = schema.GroupVersionResource{Group: "cert-manager.io", Version: "v1", Resource: "certificates"}
-	gvrApplication        = schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
+	gvrGatewayClass        = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gatewayclasses"}
+	gvrGateway             = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gateways"}
+	gvrHTTPRoute           = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
+	gvrClusterSecretStore  = schema.GroupVersionResource{Group: "external-secrets.io", Version: "v1", Resource: "clustersecretstores"}
+	gvrExternalSecret      = schema.GroupVersionResource{Group: "external-secrets.io", Version: "v1", Resource: "externalsecrets"}
+	gvrCertificate         = schema.GroupVersionResource{Group: "cert-manager.io", Version: "v1", Resource: "certificates"}
+	gvrApplication         = schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
+	gvrLonghornEngineImage = schema.GroupVersionResource{Group: "longhorn.io", Version: "v1beta2", Resource: "engineimages"}
+	gvrLonghornSetting     = schema.GroupVersionResource{Group: "longhorn.io", Version: "v1beta2", Resource: "settings"}
 )
 
 // AllChecks returns the full ordered health check list for the platform cluster.
@@ -56,6 +59,9 @@ func operatorChecks(kube kubernetes.Interface, dyn dynamic.Interface) []Check {
 		}},
 		{Layer: 1, Group: "Operators", Name: "longhorn", Run: func(ctx context.Context) Result {
 			return checkStorageClassExists(ctx, kube, "longhorn")
+		}},
+		{Layer: 1, Group: "Operators", Name: "longhorn-engine-skew", Run: func(ctx context.Context) Result {
+			return checkLonghornEngineVersionSkew(ctx, dyn)
 		}},
 		{Layer: 1, Group: "Operators", Name: "vault-pod", Run: func(ctx context.Context) Result {
 			return checkVaultPodReady(ctx, kube)
@@ -202,6 +208,91 @@ func checkStorageClassExists(ctx context.Context, kube kubernetes.Interface, nam
 		return Failf("get error: %v", err)
 	}
 	return Pass("StorageClass present")
+}
+
+// checkLonghornEngineVersionSkew flags data-plane engine images running a
+// minor version behind the Longhorn control plane.
+//
+// concurrentAutomaticEngineUpgradePerNodeLimit defaults to (and here is
+// pinned to) 0, so a chart bump that advances current-longhorn-version never
+// carries the data plane along with it — engines stay on whatever
+// EngineImage they were attached to until someone runs a manual spec.image
+// patch per volume. A one-minor manager-ahead-of-engine gap is supported;
+// nothing catches it drifting to two minors before the next chart bump lands,
+// which is unsupported and breaks volume attachment. Comparing EngineImages
+// actually in use (status.refCount > 0) against the control-plane setting is
+// that missing signal — the StorageClass-presence check above only proves
+// Longhorn is installed, not that its data plane matches its control plane.
+func checkLonghornEngineVersionSkew(ctx context.Context, dyn dynamic.Interface) Result {
+	setting, err := dyn.Resource(gvrLonghornSetting).Namespace("longhorn-system").
+		Get(ctx, "current-longhorn-version", metav1.GetOptions{})
+	if k8serrors.IsNotFound(err) {
+		return Warn("current-longhorn-version setting not found")
+	}
+	if err != nil {
+		return Failf("get current-longhorn-version: %v", err)
+	}
+	controlPlane, _, _ := unstructured.NestedString(setting.Object, "value")
+	cpMajor, cpMinor, ok := parseMajorMinor(controlPlane)
+	if !ok {
+		return Warnf("could not parse current-longhorn-version %q", controlPlane)
+	}
+
+	images, err := dyn.Resource(gvrLonghornEngineImage).Namespace("longhorn-system").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return Failf("list engineimages: %v", err)
+	}
+
+	var maxGap int
+	var skewed []string
+	for _, img := range images.Items {
+		refCount, _, _ := unstructured.NestedInt64(img.Object, "status", "refCount")
+		if refCount == 0 {
+			continue // not in use by any engine or replica
+		}
+		image, _, _ := unstructured.NestedString(img.Object, "spec", "image")
+		major, minor, ok := parseMajorMinor(image)
+		if !ok || major != cpMajor {
+			continue // different major line or unparsable — not a minor-skew comparison
+		}
+		gap := cpMinor - minor
+		if gap <= 0 {
+			continue
+		}
+		if gap > maxGap {
+			maxGap = gap
+		}
+		skewed = append(skewed, fmt.Sprintf("%s v%d.%d (refCount=%d)", img.GetName(), major, minor, refCount))
+	}
+
+	if len(skewed) == 0 {
+		return Passf("all in-use engine images match control plane v%d.%d", cpMajor, cpMinor)
+	}
+	msg := fmt.Sprintf("control plane v%d.%d, %d minor(s) behind: %s",
+		cpMajor, cpMinor, maxGap, strings.Join(skewed, ", "))
+	if maxGap >= 2 {
+		return Fail(msg)
+	}
+	return Warn(msg)
+}
+
+// parseMajorMinor extracts the major.minor pair from a "vX.Y.Z" version
+// string, or an image reference ending in ":vX.Y.Z".
+func parseMajorMinor(s string) (major, minor int, ok bool) {
+	if i := strings.LastIndex(s, ":"); i >= 0 {
+		s = s[i+1:]
+	}
+	s = strings.TrimPrefix(s, "v")
+	parts := strings.SplitN(s, ".", 3)
+	if len(parts) < 2 {
+		return 0, 0, false
+	}
+	major, errMajor := strconv.Atoi(parts[0])
+	minor, errMinor := strconv.Atoi(parts[1])
+	if errMajor != nil || errMinor != nil {
+		return 0, 0, false
+	}
+	return major, minor, true
 }
 
 // checkVaultPodReady asserts Vault pods are Ready, not merely Running.
