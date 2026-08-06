@@ -29,6 +29,10 @@ serviceAccount:
 
 podAnnotations: {}
 podLabels: {}
+# Lands on the Deployment object's own metadata, not the pod template --
+# podAnnotations has no path there. Needed for controllers (e.g. Reloader's
+# secret.reloader.stakater.com/reload) that key off the Deployment itself.
+deploymentAnnotations: {}
 
 # At the time of writing, the litellm docker image requires write access to the
 #  filesystem on startup so that prisma can install some dependencies.

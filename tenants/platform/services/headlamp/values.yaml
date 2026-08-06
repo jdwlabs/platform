@@ -24,3 +24,11 @@ config:
     externalSecret:
       enabled: true
       name: headlamp-oidc-secret
+
+# Opt-in for Reloader (installed via the platform GitOps path, not yet
+# live): rolls this Deployment when headlamp-oidc-secret above is rotated.
+# deploymentAnnotations (confirmed by render to reach the Deployment's own
+# metadata) is this chart's hook -- podAnnotations only reaches the pod
+# template. Inert until Reloader is installed.
+deploymentAnnotations:
+  secret.reloader.stakater.com/reload: "headlamp-oidc-secret"
