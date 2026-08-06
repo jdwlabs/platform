@@ -67,4 +67,6 @@ spec:
       kind: LimitRange
     - group: networking.k8s.io
       kind: NetworkPolicy
+    - group: cilium.io
+      kind: CiliumNetworkPolicy
   {{- end }}
