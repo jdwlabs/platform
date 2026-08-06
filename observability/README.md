@@ -20,8 +20,10 @@ for the full design, rationale, and migration path.
 ```
 observability/
 ├── dashboards/
-│   └── platform/        # the ONLY synced path -> Grafana folder "Platform dashboards"
-└── jsonnet/             # uncompiled illustrative skeleton, not wired to anything
+│   ├── platform/         # the ONLY synced path -> Grafana folder "Platform dashboards"
+│   ├── jdwlabs/           # scaffolded; folder+team+RBAC exist, Git Sync not wired yet
+│   └── dotablaze-tech/    # scaffolded; folder+team+RBAC exist, Git Sync not wired yet
+└── jsonnet/              # uncompiled illustrative skeleton, not wired to anything
 ```
 
 One Git Sync `Repository` resource exists, `platform-dashboards`. It tracks
@@ -33,8 +35,15 @@ target only.
 
 A per-tenant folder is therefore not just a new subdirectory here: it needs its
 own `Repository` resource pointing at its own path, plus the folder RBAC and
-Grafana team to go with it. Until that exists, a directory added under
-`dashboards/` is inert.
+Grafana team to go with it. The jdwlabs and dotablaze-tech folders + teams +
+RBAC now render from each tenant's `observability` block in `tenant.yaml` (see
+`helm-charts/tenant-envelope/templates/observability.yaml`), so the RBAC half
+of that pair exists — but no `Repository` resource points at either tenant
+path yet, so `dashboards/jdwlabs/` and `dashboards/dotablaze-tech/` are still
+inert from Git Sync's perspective until that follow-up wiring lands (tracked
+under the JDWLABS-67 parent). The dashboard JSON committed for each tenant is
+still real — the queries match this cluster's live series — it just isn't
+reachable through Grafana's UI yet.
 
 Resource definitions live in
 `tenants/platform/services/grafana/postInstall/gitsync-resources.yaml`. They are
@@ -52,7 +61,9 @@ apply Job creates but never updates, so a definition change has to go through
   tenant-scoped datasource.
 - **Folder = tenant** is the intended end state, enforced by folder-level RBAC
   and a per-tenant Grafana team derived from the tenant's `observability` block
-  in `tenants/<tenant>/tenant.yaml`. Only the platform folder exists today.
+  in `tenants/<tenant>/tenant.yaml`. The platform folder predates this model
+  and stays as-is; jdwlabs and dotablaze-tech now render their folder + team +
+  RBAC from that block (Git Sync wiring is the remaining piece — see above).
 - **One owner per dashboard.** A dashboard is provisioned by Git Sync *or* by a
   ConfigMap sidecar, never both — see the migration rule in the design doc.
 - **Every committed dashboard is a real dashboard.** A panel query that matches

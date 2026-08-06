@@ -30,6 +30,13 @@ project:
     - group: rbac.authorization.k8s.io
       kind: ClusterRoleBinding
 
+observability:
+  tenantId: jdwlabs
+  grafana:
+    folder: jdwlabs
+    team: jdwlabs
+    access: edit
+
 services:
   # ARC is dormant: CI runs exclusively on GitHub-hosted runners. Kept
   # commented (values/postInstall intact, namespace still defined) for easy

@@ -1,0 +1,17 @@
+name: jdwlabs
+namespaces:
+  - name: jdwlabs-prd
+observability:
+  tenantId: jdwlabs
+  grafana:
+    folder: jdwlabs
+    team: jdwlabs
+    access: admin
+services:
+  - name: example-svc
+    chartPath: helm-charts/example
+    repo: https://github.com/jdwlabs/platform.git
+    revision: main
+    namespace: jdwlabs-ai
+    postInstall: true
+    syncWave: 10

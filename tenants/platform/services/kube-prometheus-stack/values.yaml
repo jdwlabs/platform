@@ -146,6 +146,13 @@ kubeStateMetrics:
 # repo. This is the only kube-state series dropped; label/state metrics are
 # kept. Upstream default for this key is [], so this adds rather than masks.
 kube-state-metrics:
+  # Surfaces the tenant namespace label as a Prometheus label dimension on
+  # kube_namespace_labels. Without this, kube_namespace_labels emits with no
+  # label_* dimensions at all (upstream default allowlist is empty), so the
+  # label-based tenant metric scoping this cluster's dashboards join against
+  # (platform.jdwlabs.io/tenant -> namespace) has nothing to join on.
+  metricLabelsAllowlist:
+    - "namespaces=[platform.jdwlabs.io/tenant]"
   prometheus:
     monitor:
       metricRelabelings:
