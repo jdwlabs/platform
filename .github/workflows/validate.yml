@@ -100,6 +100,16 @@ jobs:
       - name: Reject mutable image references
         run: python3 tools/check-image-pins.py
 
+  adr-numbering:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.x"
+      - name: Reject duplicate ADR numeric prefixes
+        run: python3 tools/check-adr-numbering.py
+
   go-build-test:
     runs-on: ubuntu-latest
     defaults:
