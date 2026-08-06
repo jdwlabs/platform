@@ -58,6 +58,7 @@ in place removes the ambiguity.
 | Grafana   | `https://grafana.jdwlabs.com` | `admin` / value at `kv/grafana` field `admin_password`                                                                |
 | db-ui     | `https://db.jdwlabs.com`      | Cluster-side OAuth via gitops-managed config                                                                          |
 | Vault     | `https://vault.jdwlabs.com`   | Root token in `secret/vault/vault-init` (offline copy required for break-glass)                                       |
+| Proxmox   | `https://pve<1-5>.attlocal.net:8006` (LAN); Tailscale subnet router off-LAN, once live (§1.3) | Proxmox's own local auth — not gitops-managed |
 
 > `platformctl` does not currently expose URL/credential lookup commands.
 > Adding `platformctl access <service>` is a tracked v2 feature.
@@ -143,6 +144,68 @@ lifetimes, and the auth options evaluated — see
 > ClusterRoleBinding mapping `oidc:admin@jdwlabs.com` to cluster-admin.
 > Full cluster-admin for the single Dex user is intentional for a
 > single-operator homelab.
+
+### 1.3 Proxmox cluster UI (hypervisor management)
+
+Proxmox (`:8006` on each of the five `pve*` hosts) is **not** a platform
+service — it is the hypervisor layer this cluster runs on, owned by the
+`infrastructure` repo, not by any Helm chart or `tenant.yaml` entry here.
+It is documented in this table because it is still part of day-2 admin
+access, and because the access-model decision below was made while working
+this ticket.
+
+**Access model: VPN-only via the Tailscale subnet router, not a public
+`nginx-gateway-fabric` reverse-proxy subdomain.**
+
+Reasoning:
+
+- Proxmox is a privileged management surface (VM console access, storage,
+  backups, cluster settings) — the same category of exposure risk as the
+  Kubernetes (`6443`) and Talos (`50000`) APIs, which were deliberately
+  pulled off the public internet and moved behind a Tailscale subnet router
+  on the HAProxy VM. Reversing that call for Proxmox — a surface with *more*
+  blast radius than either API — would be inconsistent with that posture.
+- The subnet router advertises the whole `192.168.1.0/24` LAN, not just the
+  HAProxy VM. Once it is live, every `pve*` host's `:8006` is already
+  reachable over the tailnet by IP — a second, separate access mechanism
+  (reverse proxy + its own auth layer, a second TLS cert, a second set of
+  credentials to rotate) would duplicate a path that standing up the subnet
+  router already provides for free.
+- A reverse-proxy subdomain would need its own auth layer in front of
+  Proxmox's own login (Proxmox has no OIDC/Dex-style delegation this repo
+  could reuse today, unlike Headlamp/ArgoCD), which is meaningfully more to
+  build and maintain than documenting the VPN path.
+
+**Current state (verified 2026-08-05):** Proxmox UI is LAN-only. Port `8006`
+on the WAN IP refuses the connection — the same signature as the already
+closed `6443`/`50000` — while `443` on the same IP answers normally. No
+router change is required by this decision; there is nothing to close.
+
+**How to reach it today (LAN):** `https://pve<1-5>.attlocal.net:8006`,
+resolved by the gateway's own DNS at `192.168.1.254` — see
+[`infrastructure/docs/host-addressing.md`](https://github.com/jdwlabs/infrastructure/blob/main/docs/host-addressing.md)
+for the full host/address table and the one stale record (`pve5`) still
+being tracked separately.
+
+**How to reach it off-LAN, once available:** over the same Tailscale subnet
+router being stood up for cluster admin — see
+[`infrastructure/docs/tailscale-subnet-router.md`](https://github.com/jdwlabs/infrastructure/blob/main/docs/tailscale-subnet-router.md).
+That work is not yet live (no infrastructure host has joined the tailnet or
+advertised a route as of this writing), so off-LAN Proxmox access does not
+exist yet either — this is a documented dependency, not a gap in this repo.
+
+**What "reachable via a stable domain name" still needs, once the subnet
+router is live:** the `pve*.attlocal.net` names only resolve when a client
+queries the gateway (`192.168.1.254`) directly; Tailscale does not forward
+DNS queries to it by default (the subnet router install intentionally sets
+`--accept-dns=false`). An off-LAN tailnet client therefore needs either a
+[Tailscale split-DNS nameserver](https://tailscale.com/kb/1054/dns#nameservers-and-split-dns)
+pointed at `192.168.1.254` for the `attlocal.net` domain, or a small set of
+MagicDNS/internal-DNS records for the `pve*` hosts — both are Tailscale
+admin-console / DNS-server changes with no Terraform or platformctl
+surface, so they belong to the infrastructure repo alongside the rest of
+the subnet-router runbook, not to this repo. No public `jdwlabs.com` DNS
+record is needed or planned for Proxmox under this decision.
 
 ## 2. Vault lifecycle
 
