@@ -314,6 +314,29 @@ scheme as Loki, as part of the tracing workstream.**
   id across Loki + Tempo (+ Mimir later) gives one consistent tenant identifier
   across all three signals and makes trace↔log↔metric correlation tenant-aware.
 
+### 5.4a Alertmanager: route on a `tenant` alert label, reuse the shared receiver
+
+**Decision (now): a `tenant` label on `PrometheusRule` alerting rules, matched
+by an explicit route per tenant in the shared Alertmanager config. Both
+tenant routes still resolve to the existing `discord` receiver — no new
+receivers or Vault secrets until a tenant needs a distinct channel.**
+
+- Each tenant's `PrometheusRule` rules carry `labels.tenant: <tenant-name>`
+  (not the `platform.jdwlabs.io/tenant` *namespace* label used for the
+  Prometheus/Loki/Tempo join above — Alertmanager only ever sees the alert's
+  own label set, so the rule has to stamp it explicitly).
+- The route tree in
+  `tenants/platform/services/kube-prometheus-stack/postInstall/alertmanager-config-externalsecret.yaml`
+  matches `tenant = "jdwlabs"` / `tenant = "dotablaze-tech"` ahead of the
+  parent's default route. An alert with no `tenant` label (everything that
+  existed before this change) never matches either route, so it falls through
+  to the same `discord` receiver it always used — existing platform routing
+  is unaffected by construction, not just by intent.
+- This is deliberately the minimal version: a route per tenant proves the
+  match path end-to-end and gives a seam to point at a per-tenant receiver
+  (e.g. a tenant-specific Discord webhook or email) later, without touching
+  any alert rule's labels again.
+
 ### 5.5 How this extends the `tenant-envelope` model
 
 Tenancy must ride the **existing** `tenant.yaml` / `tenant-envelope`

@@ -416,6 +416,18 @@ gates green.
 **Prometheus alert routes:** alerts route via `kv/alertmanager`
 `slack_webhook`. Verify by inspecting the alertmanager-config ConfigMap.
 
+**Tenant alert routing:** a `PrometheusRule` alert only reaches a tenant's
+route if the rule's `labels` block sets `tenant: jdwlabs` or
+`tenant: dotablaze-tech` — the namespace-level `platform.jdwlabs.io/tenant`
+label used elsewhere in the observability stack is not visible to
+Alertmanager. Both tenant routes currently resolve to the shared `discord`
+receiver (see `alertmanager-config-externalsecret.yaml`); an alert with no
+`tenant` label falls through unchanged to that same receiver. To verify a
+tenant's route live, fire a test alert carrying the label (e.g. `amtool alert
+add tenant=jdwlabs alertname=Test` against the Alertmanager API) and confirm
+it lands under the `tenant = "jdwlabs"` route in the Alertmanager UI's Status
+→ routing tree before checking it reached Discord.
+
 **Tracing (Tempo) — `TempoNoSpansReceived`:**
 
 Tempo ingesting nothing is invisible by default: a counter that never

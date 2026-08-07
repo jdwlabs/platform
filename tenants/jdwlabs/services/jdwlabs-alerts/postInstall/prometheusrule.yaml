@@ -1,0 +1,28 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: jdwlabs-tenant-alerts
+  namespace: jdwlabs-non
+  labels:
+    tenant: jdwlabs
+spec:
+  groups:
+    - name: jdwlabs-tenant
+      rules:
+        - alert: JdwlabsResourceQuotaNearLimit
+          # Every jdwlabs namespace already renders a ResourceQuota via
+          # tenant-envelope, so this is a real signal today rather than one
+          # invented for the rule — no separate service needs to exist first.
+          expr: |
+            max by (namespace, resource) (
+              kube_resourcequota{namespace=~"jdwlabs-.*", type="used"}
+              / kube_resourcequota{namespace=~"jdwlabs-.*", type="hard"}
+            ) > 0.85
+          for: 10m
+          labels:
+            severity: warning
+            tenant: jdwlabs
+          annotations:
+            summary: "jdwlabs namespace {{ $labels.namespace }} quota for {{ $labels.resource }} above 85%"
+            description: "{{ $labels.resource }} usage is {{ $value | humanizePercentage }} of the ResourceQuota in {{ $labels.namespace }}."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
