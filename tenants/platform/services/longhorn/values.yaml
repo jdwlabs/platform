@@ -68,6 +68,30 @@ longhornManager:
 # (guaranteedInstanceManagerCPU is CPU-only) — earlier longhornDriver/
 # longhornUI resources blocks here were silently ignored by the chart and
 # have been removed rather than left looking effective.
+#
+# Re-verified by rendering the chart end-to-end and reading every template
+# (not just this values.schema): the gap is wider than resources alone.
+# pre-pull-share-manager-image (the second container in the longhorn-manager
+# DaemonSet pod) has no resources hook either. snapshot-cleanup,
+# snapshot-delete, and filesystem-trim pods, like instance-manager and the
+# engine-image DaemonSet above, are created imperatively by longhorn-manager
+# at runtime for RecurringJob CRs — they never appear in this chart's
+# rendered output, so there is no YAML here to attach limits to.
+#
+# More importantly, no template in this chart sets a startupProbe on any
+# container, and there's no values/settings hook to add one — rendering
+# with these values start to finish turns up exactly one probe in the whole
+# manifest set (longhorn-manager's readinessProbe) and exactly one container
+# resources block (longhorn-manager's). This cluster's rule is that memory
+# requests/limits never get tightened on a workload without first adding or
+# verifying a startupProbe generous enough to survive the new ceiling — an
+# earlier right-size elsewhere skipped that and caused a production outage.
+# Since the chart can't satisfy that rule for any Longhorn-managed
+# component, including longhornManager.resources and
+# defaultSettings.systemManagedCSIComponentsResourceLimits above (the only
+# two knobs that exist at all), no memory values were changed here. Longhorn
+# is the storage layer other workloads depend on; the waste this would
+# recover isn't worth tightening blind.
 longhornDriver:
   priorityClass: platform-critical
 
