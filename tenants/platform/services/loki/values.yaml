@@ -142,13 +142,16 @@ loki:
         period: 48h
   ruler:
     enable_api: true
-  # No livenessProbe ships for this container by default, so nothing currently
-  # restarts a wedged process during startup — but the request just above was
-  # tightened, and WAL/index replay against the NFS-backed volume can run long
-  # on a cold start. An explicit startupProbe (reusing the chart's own
-  # readinessProbe endpoint) holds off any future liveness/readiness-driven
-  # restart until the first successful ready check, rather than assuming the
-  # replay always finishes inside a steady-state probe window.
+  # No livenessProbe ships for this container by default, so before this
+  # change nothing could restart it during a slow start -- a wedged process
+  # just sat NotReady. This startupProbe is a genuine new kill path, not a
+  # purely defensive addition: if it fails, kubelet restarts the container.
+  # Sized generously (30s delay + 30x10s = up to 330s) because WAL/index
+  # replay against the NFS-backed volume can run long on a cold start, and
+  # a replay that legitimately takes longer than that now hits
+  # CrashLoopBackOff instead of eventually becoming Ready. If cold-start
+  # replay time is ever observed near that ceiling, raise failureThreshold
+  # rather than assuming this window is permanent margin.
   startupProbe:
     httpGet:
       path: /ready
