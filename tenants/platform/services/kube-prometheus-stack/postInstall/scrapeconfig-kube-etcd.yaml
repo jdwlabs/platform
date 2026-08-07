@@ -30,11 +30,14 @@ spec:
       regex: "true"
     # Node discovery addresses the kubelet by default; retarget to the node's
     # InternalIP on the etcd metrics port.
+    # No node/instance-identifying target label beyond what this produces by
+    # default: every bundled etcd rule aggregates `without (instance, pod)`
+    # to collapse the three members into one cluster-level series, and an
+    # extra 1:1-with-instance label (e.g. node) survives that aggregation and
+    # re-splits each rule per member — turning etcdInsufficientMembers from
+    # "quorum lost" into "any single member down".
     - action: replace
       sourceLabels: [__meta_kubernetes_node_address_InternalIP]
       regex: (.+)
       targetLabel: __address__
       replacement: $1:2381
-    - action: replace
-      sourceLabels: [__meta_kubernetes_node_name]
-      targetLabel: node

@@ -492,12 +492,15 @@ their metrics port to loopback. The Talos machine config widens all three
 `127.0.0.1`), and this chart's `kubeEtcd` / `kubeScheduler` /
 `kubeControllerManager` blocks scrape them. This is a two-repo, ordered
 rollout — the machine-config side is human-applied, and the scrape config
-here must not merge until it has been, or Prometheus records `up == 0` and
-the newly-enabled alert rules fire on a fault that does not exist. See that
-PR's description for the current status of the apply.
+here must not merge until it has, on all control-plane nodes, or Prometheus
+records `up == 0` and the newly-enabled alert rules fire on a fault that does
+not exist. Talos does not restart etcd when `cluster.etcd.extraArgs` changes,
+so etcd needs a manual `talosctl service etcd restart` per node (one at a
+time, confirming quorum and `HEALTH OK` between each) even after the machine
+config has already rolled out to all three.
 
-Endpoints, once the machine-config side is applied — reachable from the node
-network only, not from outside the cluster:
+Endpoints — reachable from the node network only, not from outside the
+cluster:
 
 ```
 http://<control-plane-ip>:2381/metrics   # etcd — plain HTTP, no client API
