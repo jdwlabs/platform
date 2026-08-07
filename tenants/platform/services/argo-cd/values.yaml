@@ -124,7 +124,10 @@ server:
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
+      # Live usage sits ~37Mi; request tracks roughly 2.5x that rather than
+      # the prior 256Mi, which was ~7x observed. Limit is unchanged so burst
+      # headroom during sync storms is unaffected.
+      memory: 96Mi
     limits:
       cpu: 500m
       memory: 512Mi
@@ -139,7 +142,10 @@ repoServer:
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
+      # Live usage sits ~47Mi; request tracks roughly 2.7x that rather than
+      # the prior 256Mi. Limit is unchanged so manifest-generation bursts
+      # keep the same ceiling.
+      memory: 128Mi
     limits:
       cpu: 500m
       memory: 512Mi

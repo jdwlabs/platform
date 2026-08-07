@@ -78,10 +78,16 @@ spec:
           containers:
             - name: upload
               image: rclone/rclone:1.74.4@sha256:c61954aaa32328a5486715dd063a81c7879f5195ad3505cd362deddd509dc4a1
+              # Unlike the dump init container beside it, rclone's footprint
+              # doesn't scale with dump size (it streams in fixed-size
+              # chunks), so a memory ceiling here doesn't risk turning a slow
+              # leak into a lost backup the way it would for pg_dumpall.
               resources:
                 requests:
                   cpu: 50m
                   memory: 128Mi
+                limits:
+                  memory: 256Mi
               env:
                 # rclone rewrites its config in place whenever it refreshes the
                 # Drive access token, so the config cannot be read straight off
