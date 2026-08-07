@@ -98,13 +98,22 @@ proxy_config:
     drop_params: true
     num_retries: 2
 
-# 2Gi limit: boot spike (Prisma engine + proxy import) OOMKilled the container
-# at both 512Mi and 1Gi within ~4s; verified starting clean at 2Gi.
-# Request matches the limit because steady-state usage sits at ~1.99Gi live —
-# a lower request hides ~1.5Gi from the scheduler and lets it pack this pod
-# onto nodes that are actually full. Equal request/limit makes the pod
-# effectively Guaranteed on memory, so it is not an OOM-kill candidate under
-# node pressure.
+# Boot spike (Prisma engine + proxy import) OOMKilled the container at both
+# 512Mi and 1Gi within ~4s; verified starting clean at 2Gi. Request matches
+# the limit so the pod stays Guaranteed on memory and is not an OOM-kill
+# candidate under node pressure.
+#
+# Right-sizing note: a later measurement found steady-state usage at ~1.48Gi
+# (74%), well below the ~1.99Gi this comment originally recorded — read
+# that older figure as stale, not as today's ground truth. 1.75Gi is a
+# modest trim (not the full cut to the measured 74%) specifically because
+# the known failure boundary is 1Gi and the verified-clean point is 2Gi;
+# 1.75Gi has never itself been tested against the boot spike, so it keeps
+# ~750Mi of margin over the known failure point and ~270Mi over the fresh
+# steady-state reading rather than crowding the untested 1-2Gi gap. The
+# chart's own Deployment template already carries a startupProbe
+# (failureThreshold: 30, periodSeconds: 10 -> up to 5 minutes), so the boot
+# spike has probe headroom independent of this resources block.
 resources:
-  requests: {cpu: 100m, memory: 2Gi}
-  limits: {memory: 2Gi}
+  requests: {cpu: 100m, memory: 1792Mi}
+  limits: {memory: 1792Mi}

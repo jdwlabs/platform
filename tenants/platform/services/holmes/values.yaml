@@ -238,16 +238,30 @@ k8sRBAC: false
 
 # Request equals limit deliberately: Guaranteed QoS keeps the investigation
 # agent from being the first thing evicted when a node is under memory
-# pressure, which is exactly when it is needed. 1536Mi sits ~4x steady state
-# (365Mi idle) and ~1.8x the highest figure observed during a tool-heavy
-# investigation, so bursts have room while the reservation no longer holds
-# half a gig that nothing ever touches.
+# pressure, which is exactly when it is needed.
+#
+# Right-sizing note: a later measurement found this pod averaging ~0.39Gi
+# (26%) of the original 1536Mi request, which on its own would point toward
+# ~768Mi. But that figure is a point-in-time average, not a peak -- and the
+# ~1.8x line above already documented a real tool-heavy-investigation burst
+# of ~853Mi. 768Mi sits BELOW that documented burst, which is an OOM-kill
+# risk under the exact workload this pod exists to run. 1024Mi keeps ~170Mi
+# of margin above the known peak while still recovering about half of the
+# flagged waste versus the original 1536Mi.
 resources:
   requests:
     cpu: 100m
-    memory: 1536Mi
+    memory: 1024Mi
   limits:
-    memory: 1536Mi
+    memory: 1024Mi
+
+# Startup-probe verification (required before tightening any memory limit
+# in this namespace): the upstream chart's Deployment template hardcodes
+# livenessProbe/readinessProbe and exposes no startupProbe field to
+# override. The baked-in livenessProbe (initialDelaySeconds: 30,
+# periodSeconds: 10, failureThreshold: 10) already gives ~130s before the
+# first possible kill, which is ample for this Python app's boot time and
+# functions as the startup gate a dedicated startupProbe would provide.
 
 # The Holmes image ships no talosctl; fetch a pinned build matched to the
 # cluster's Talos version and verify it before the main container starts.

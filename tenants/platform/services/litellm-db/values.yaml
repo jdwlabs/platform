@@ -8,12 +8,26 @@ cluster:
   storage:
     size: 5Gi
     storageClass: longhorn
+  # Right-sized from 256Mi/512Mi: measured usage was 88Mi (34% of the old
+  # request). shared_buffers is set explicitly below at 25% of the new
+  # limit (CNPG's own sizing guidance) rather than left to default, so it
+  # scales down with the container instead of staying pinned to whatever
+  # Postgres' own default would reserve against a since-shrunk limit.
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 128Mi
     limits:
-      memory: 512Mi
+      memory: 256Mi
+  postgresql:
+    parameters:
+      shared_buffers: "64MB"
+
+# The CNPG instance manager (PID 1 in the pod) provides Kubernetes startup,
+# liveness, and readiness probes automatically -- no chart-level field to
+# override. The startup probe defaults to a 3600s startDelay window using
+# pg_isready, which is unaffected by (and already ample next to) the
+# resources trim above.
 
 # The chart bootstraps its default 'app' database + owner and generates the
 # platform-litellm-db-cluster-app secret. A top-level bootstrap: block is a
