@@ -73,10 +73,27 @@ server:
   # memory pressure and turn one node loss into quorum loss.
   # Request 192Mi: measured steady-state usage across all three members
   # runs 79-105Mi, so the prior 384Mi request was placing against roughly
-  # 4x actual holdings. 512Mi limit is left untouched, so this is a
-  # scheduler/bin-packing change only — the OOM boundary a member could
-  # actually hit is unchanged. Raft standbys hold less than the active
-  # node, so the same request fits all three members.
+  # 4x actual holdings. The 512Mi limit is untouched, so the cgroup ceiling
+  # a member could actually OOM against is unchanged. But the request also
+  # sets kubelet's oom_score_adj for this Burstable pod (roughly
+  # 1000 - 1000*request/nodeAllocatable), so halving it does raise Vault's
+  # ranking as a node-level OOM-kill victim, and shrinks its eviction margin
+  # (usage-vs-request) from ~279Mi to ~87Mi headroom. Accepted: Vault's ~100Mi
+  # RSS is a small target even at a worse ranking, and hard anti-affinity
+  # means one node's OOM event can cost at most one raft member — but this
+  # is the real mechanism behind "could this affect quorum," not "no
+  # mechanism exists." Raft standbys hold less than the active node, so the
+  # same request fits all three members.
+  #
+  # NOTE: this StatefulSet is updateStrategy OnDelete (see
+  # docs/adr/0007-vault-stays-on-ondelete.md) — merging this does NOT roll
+  # the running pods. The new request only takes effect the next time a
+  # member is deliberately deleted (chart bump, drain, eviction), at which
+  # point that member restarts sealed and needs the ~2min unseal cronjob
+  # cycle to rejoin raft. Verify this change by deleting one pod at a time
+  # and confirming unseal + raft rejoin between each, not by watching for
+  # flapping post-merge — ADR 0007 records that ArgoCD reports OnDelete
+  # StatefulSets Healthy regardless of whether the running pods match spec.
   #
   # This chart's server StatefulSet has no startupProbe field (checked
   # against the templates for the pinned chart revision — readinessProbe

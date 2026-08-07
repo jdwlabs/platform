@@ -4,15 +4,22 @@ enableCertManager: true
 # Right-sized from the chart's default request (250Mi): measured usage is
 # ~25Mi (10% of the old request, the most disproportionate ratio observed in
 # the cluster), so 128Mi still leaves ~5x headroom over what's actually held.
-# 512Mi limit is unchanged, so this is a request-only, scheduler-facing
-# change — it doesn't move the OOM boundary.
+# The 512Mi limit is unchanged, so the cgroup ceiling that could actually
+# OOM-kill the container doesn't move. The request does still lower this
+# Deployment's kubelet oom_score_adj ranking (raises its node-level OOM-kill
+# priority) and its eviction margin — same mechanism as the Vault
+# StatefulSet in the sibling service, see that values.yaml for the detail.
+# Accepted here too: this Deployment holds no data of its own (it's a
+# reconciler against Vault's API, idempotent on restart), so an OOM-kill
+# costs a delayed reconcile, not correctness.
 #
 # This chart's manager Deployment hardcodes livenessProbe/readinessProbe in
 # its template (httpGet on /healthz and /readyz) with no startupProbe field
 # and no values.yaml override point for any of the three. The existing
-# livenessProbe's own grace window (15s initial delay + 3 x 20s
-# failureThreshold, ~75s before a restart) is the closest available
-# approximation of startup protection this chart offers.
+# livenessProbe's own grace window (15s initial delay, default
+# failureThreshold 3 at the chart-set 20s period — not itself configured in
+# this chart) puts the earliest possible kill at ~55s post-start, the
+# closest available approximation of startup protection this chart offers.
 resources:
   requests:
     memory: 128Mi
