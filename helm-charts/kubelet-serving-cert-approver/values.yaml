@@ -8,6 +8,8 @@ image:
 
 replicas: 1
 
+revisionHistoryLimit: 3
+
 namespace:
   name: kubelet-serving-cert-approver
   create: true

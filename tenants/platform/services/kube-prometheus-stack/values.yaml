@@ -3,6 +3,9 @@ crds:
 
 prometheusOperator:
   enabled: true
+  # ArgoCD holds prior manifests in git history; no need for k8s to keep old
+  # ReplicaSets around too.
+  revisionHistoryLimit: 0
   admissionWebhooks:
     certManager:
       enabled: true
@@ -153,6 +156,9 @@ kube-state-metrics:
   # (platform.jdwlabs.io/tenant -> namespace) has nothing to join on.
   metricLabelsAllowlist:
     - "namespaces=[platform.jdwlabs.io/tenant]"
+  # ArgoCD holds prior manifests in git history; no need for k8s to keep old
+  # ReplicaSets around too.
+  revisionHistoryLimit: 0
   prometheus:
     monitor:
       metricRelabelings:
@@ -177,6 +183,9 @@ nodeExporter:
 # BestEffort at ~19Mi observed per node (151Mi across 8); node-exporter's
 # footprint is flat, so a tight bound is safe.
 prometheus-node-exporter:
+  # ArgoCD holds prior manifests in git history; no need for k8s to keep old
+  # controller revisions around either.
+  revisionHistoryLimit: 0
   resources:
     requests:
       memory: 32Mi

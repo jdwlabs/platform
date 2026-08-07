@@ -8,6 +8,8 @@ image:
 
 replicas: 1
 
+revisionHistoryLimit: 3
+
 service:
   port: 80
 

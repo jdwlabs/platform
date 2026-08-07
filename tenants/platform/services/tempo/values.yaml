@@ -1,3 +1,11 @@
+# ArgoCD holds prior manifests in git history; no need for k8s to keep old
+# ReplicaSets around too. The StatefulSet template guards this field with a
+# Go-template truthy check (`if .Values.revisionHistoryLimit`), and 0 is
+# falsy there — setting 0 skips the field entirely and silently leaves the
+# Kubernetes default of 10 in place. 1 is the lowest value this chart can
+# actually apply.
+revisionHistoryLimit: 1
+
 tempo:
   resources:
     requests:

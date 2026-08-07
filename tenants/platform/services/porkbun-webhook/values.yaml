@@ -1,3 +1,7 @@
+# ArgoCD holds prior manifests in git history; no need for k8s to keep old
+# ReplicaSets around too.
+revisionHistoryLimit: 0
+
 groupName: jdwlabs.com
 
 certManager:

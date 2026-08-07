@@ -5,6 +5,11 @@ fullnameOverride: argocd
 # issuer claim in Dex tokens never matches what Headlamp validates against.
 global:
   domain: argocd.jdwlabs.com
+  # ArgoCD holds prior manifests in git history; no need for k8s to keep old
+  # ReplicaSets around too. Feeds every component's Deployment/StatefulSet
+  # (controller, server, repo-server, applicationset, notifications, dex,
+  # redis).
+  revisionHistoryLimit: 0
 
 configs:
   params:
@@ -89,6 +94,10 @@ configs:
       g, dotablazegaming@gmail.com, role:readonly
 
 controller:
+  # The chart's own default for this key is a literal 5, not empty/nil, so
+  # `global.revisionHistoryLimit` above never reaches it through the
+  # template's `| default` fallback -- it has to be set here directly.
+  revisionHistoryLimit: 0
   metrics:
     enabled: true
     serviceMonitor:

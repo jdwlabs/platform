@@ -86,6 +86,11 @@ sidecar:
       memory: 256Mi
 
 loki:
+  # ArgoCD holds prior manifests in git history; no need for k8s to keep old
+  # ReplicaSets around too. One key drives every deployment-mode workload
+  # (single-binary, distributed read/write/backend), so it takes effect
+  # regardless of deploymentMode above.
+  revisionHistoryLimit: 0
   auth_enabled: false
   commonConfig:
     replication_factor: 1

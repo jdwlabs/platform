@@ -1,3 +1,8 @@
+# ArgoCD holds prior manifests in git history; no need for k8s to keep old
+# ReplicaSets around too. Each Deployment reads its own key, so this needs
+# setting per-component rather than once globally.
+revisionHistoryLimit: 0
+
 # All three pods ran BestEffort (first evicted under node memory pressure,
 # invisible to the scheduler). Requests are ~1.5-2x observed steady state;
 # limits leave >=2x burst headroom for secret-sync reconcile spikes.
@@ -11,6 +16,7 @@ resources:
 
 # cert-controller observed ~38Mi.
 certController:
+  revisionHistoryLimit: 0
   resources:
     requests:
       memory: 64Mi
@@ -19,6 +25,7 @@ certController:
 
 # Webhook observed ~82Mi.
 webhook:
+  revisionHistoryLimit: 0
   resources:
     requests:
       memory: 128Mi
