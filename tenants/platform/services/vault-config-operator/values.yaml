@@ -1,6 +1,12 @@
 enableMonitoring: false
 enableCertManager: true
 
+# Pinned explicitly rather than left to the chart's own default (also 1):
+# this is a reconciler against Vault's API with no state of its own and no
+# HPA in the chart, so one replica is the deliberate floor, not an
+# inherited default a future chart bump could change unnoticed.
+replicaCount: 1
+
 # Right-sized from the chart's default request (250Mi): measured usage is
 # ~25Mi (10% of the old request, the most disproportionate ratio observed in
 # the cluster), so 128Mi still leaves ~5x headroom over what's actually held.
