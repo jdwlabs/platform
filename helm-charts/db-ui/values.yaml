@@ -17,11 +17,13 @@ service:
 # spiking to ~600Mi, so the limit gives headroom above that while still
 # protecting the node. The CPU limit is set generously high — an interactive
 # admin UI should never hit 1 CPU, so the limit satisfies bounded-by-policy
-# without adding throttle latency.
+# without adding throttle latency. The request is sized off steady-state
+# (~34Mi observed) rather than the spike the limit covers, since the spike
+# is occasional query load, not the baseline the scheduler should reserve.
 resources:
   requests:
     cpu: 50m
-    memory: 256Mi
+    memory: 96Mi
   limits:
     cpu: "1"
     memory: 768Mi
