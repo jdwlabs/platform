@@ -23,15 +23,19 @@ PREFIX_RE = re.compile(r"^(\d+)-")
 
 def main() -> int:
     if not ADR_DIR.is_dir():
-        print(f"{ADR_DIR}: not found, nothing to check")
-        return 0
+        print(f"{ADR_DIR}: not found — expected at least one numbered ADR")
+        return 1
 
     by_prefix = defaultdict(list)
     for path in sorted(ADR_DIR.glob("*.md")):
         match = PREFIX_RE.match(path.name)
         if not match:
             continue  # not a numbered ADR (e.g. README.md, TEMPLATE.md)
-        by_prefix[match.group(1)].append(path.name)
+        by_prefix[int(match.group(1))].append(path.name)
+
+    if not by_prefix:
+        print(f"{ADR_DIR}: no numbered ADRs found")
+        return 1
 
     collisions = {prefix: names for prefix, names in by_prefix.items() if len(names) > 1}
 
