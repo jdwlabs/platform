@@ -107,6 +107,11 @@ collectors:
     # per node instead of once per cluster.
     presets:
       - singleton
+    # Only ReplicaSet-backed collector here (deployment, via the singleton
+    # preset above) — ArgoCD holds prior manifests in git history, so no
+    # need for k8s to keep old ReplicaSets around too.
+    controller:
+      revisionHistoryLimit: 0
     alloy:
       # Cluster-events collector ran ~170Mi live against the chart's 50Mi default
       # request — 120Mi invisible to the scheduler. 192Mi covers observed steady
