@@ -8,17 +8,20 @@ revisionHistoryLimit: 1
 
 tempo:
   # Native X-Scope-OrgID multi-tenancy, same header and tenant ids as Loki.
-  # Unlike Loki there is no Alloy trace pipeline in front of Tempo today
-  # (the k8s-monitoring chart ships no trace-collection feature here) and no
-  # fallback org: every OTLP push — grpc or http, receivers below — must
-  # carry the header itself or is rejected outright, there is no "fake"
-  # tenant to fall back to once this is on. Traces reach Tempo straight from
-  # each workload's own OTLP exporter, so the header has to be set at the
-  # source (OTEL_EXPORTER_OTLP_HEADERS in the workload's own deployment,
-  # outside this repo) — this only turns the lock on, it doesn't hand every
-  # producer a key. Rollback: flip back to false; a producer that is already
-  # sending the header is accepted and ignored by a non-multitenant Tempo.
-  multitenancyEnabled: true
+  # Deliberately left OFF here: unlike Loki there is no Alloy trace pipeline
+  # in front of Tempo (the k8s-monitoring chart ships no trace-collection
+  # feature here) and no fallback org once multitenancy is on — Tempo's auth
+  # middleware requires X-Scope-OrgID on every push with no "fake"-tenant
+  # fallback, so flipping this before any producer sets the header rejects
+  # every current OTLP push outright (metrics-generator, service graph, and
+  # tracesToMetrics all go blank; TempoNoSpansReceived fires ~30m later).
+  # Traces reach Tempo straight from each workload's own OTLP exporter, so
+  # the header has to be set at the source (OTEL_EXPORTER_OTLP_HEADERS in
+  # each workload's own deployment, outside this repo) FIRST — a producer
+  # already sending the header is accepted and ignored by a non-multitenant
+  # Tempo, so stamping headers first is safe regardless of when this flips.
+  # Flip to true only after every current OTLP producer sends the header.
+  multitenancyEnabled: false
   resources:
     requests:
       cpu: 200m
