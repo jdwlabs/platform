@@ -7,6 +7,18 @@
 revisionHistoryLimit: 1
 
 tempo:
+  # Native X-Scope-OrgID multi-tenancy, same header and tenant ids as Loki.
+  # Unlike Loki there is no Alloy trace pipeline in front of Tempo today
+  # (the k8s-monitoring chart ships no trace-collection feature here) and no
+  # fallback org: every OTLP push — grpc or http, receivers below — must
+  # carry the header itself or is rejected outright, there is no "fake"
+  # tenant to fall back to once this is on. Traces reach Tempo straight from
+  # each workload's own OTLP exporter, so the header has to be set at the
+  # source (OTEL_EXPORTER_OTLP_HEADERS in the workload's own deployment,
+  # outside this repo) — this only turns the lock on, it doesn't hand every
+  # producer a key. Rollback: flip back to false; a producer that is already
+  # sending the header is accepted and ignored by a non-multitenant Tempo.
+  multitenancyEnabled: true
   resources:
     requests:
       cpu: 200m
@@ -42,6 +54,15 @@ tempo:
   # Generate RED span metrics + service-graph metrics and remote-write them to
   # Prometheus. This is what powers trace-to-metrics and the service graph in
   # Grafana, and emits exemplars linking metrics back to traces.
+  #
+  # multitenancyEnabled above needs no accommodation here: Tempo processes
+  # each tenant's ingested spans separately but still remote-writes every
+  # tenant's generated series to this one shared, unauthenticated Prometheus
+  # (matching the existing label-based metrics-tenancy decision) — there's
+  # no per-tenant Prometheus to route to, so a single global remoteWriteUrl
+  # is still correct. remote_write_headers (per-tenant outbound auth) is a
+  # Tempo option only relevant when the remote_write target itself requires
+  # per-tenant credentials, which this Prometheus does not.
   metricsGenerator:
     enabled: true
     remoteWriteUrl: "http://platform-kube-prometheus-s-prometheus:9090/api/v1/write"

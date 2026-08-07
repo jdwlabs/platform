@@ -91,7 +91,15 @@ loki:
   # (single-binary, distributed read/write/backend), so it takes effect
   # regardless of deploymentMode above.
   revisionHistoryLimit: 0
-  auth_enabled: false
+  # Native X-Scope-OrgID multi-tenancy. Every writer must now carry a tenant
+  # header: Alloy stamps one per pod log entry (see the monitoring service's
+  # values.yaml), and the Grafana datasources below carry one per tenant.
+  # Rollback: flip this back to false and drop the Alloy tenant-stamping
+  # stage in the same change — a header-carrying write against an
+  # auth_enabled: false Loki is accepted and ignored, but the reverse
+  # (headerless write against auth_enabled: true) is rejected outright, so
+  # don't revert one side without the other.
+  auth_enabled: true
   commonConfig:
     replication_factor: 1
   storage:
@@ -138,6 +146,17 @@ monitoring:
     enabled: false
     grafanaAgent:
       installOperator: false
+    # Unrelated to the `enabled` flag above (that gates a separate
+    # Grafana-Agent-based self-scrape this cluster doesn't use): the
+    # loki-canary template reads this tenant name unconditionally whenever
+    # auth_enabled is true, to set -user/-tenant-id on its own write+query
+    # loop. Left at the chart default ("self-monitoring") this is a tenant
+    # id no writer ever stamps, so the canary silently drops out of the org
+    # that carries the platform tenant's real traffic. It's cluster infra,
+    # not tenant workload, so it rides the same "platform" fallback org the
+    # Alloy destination default uses.
+    tenant:
+      name: platform
   lokiCanary:
     enabled: true
 
