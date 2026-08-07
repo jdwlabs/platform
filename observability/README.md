@@ -59,6 +59,15 @@ apply Job creates but never updates, so a definition change has to go through
 - **Datasources are referenced via dashboard variables** (`${datasource}`,
   `${loki_ds}`), never hardcoded UIDs, so the same JSON works against a
   tenant-scoped datasource.
+- **Per-tenant Loki/Tempo datasources** now exist for jdwlabs and
+  dotablaze-tech, named `<tenant>-loki` / `<tenant>-tempo` (rendered by the
+  same `templates/observability.yaml` Job as the folder/team/RBAC, off each
+  tenant's `observability.tenantId`). Each carries an `X-Scope-OrgID` header
+  pinned to that tenant, so a tenant dashboard should point its
+  `${loki_ds}`/`${datasource}` variable default at its own pair rather than
+  the platform ones — see
+  [docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.3/§5.4](../docs/observability/DASHBOARDS-AND-MULTITENANCY.md)
+  for the isolation mechanism and its known gaps.
 - **Folder = tenant** is the intended end state, enforced by folder-level RBAC
   and a per-tenant Grafana team derived from the tenant's `observability` block
   in `tenants/<tenant>/tenant.yaml`. The platform folder predates this model

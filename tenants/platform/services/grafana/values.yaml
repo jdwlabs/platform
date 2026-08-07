@@ -93,6 +93,14 @@ datasources:
         uid: P8E90F9AEF21F6940
         access: proxy
         url: http://platform-loki:3100
+        # Loki is now auth_enabled; every read needs a tenant header, this
+        # datasource is the platform tenant's own (Alloy stamps the same
+        # "platform" org on writes that aren't explicitly tenant-stamped —
+        # see the monitoring and loki services' values.yaml).
+        jsonData:
+          httpHeaderName1: "X-Scope-OrgID"
+        secureJsonData:
+          httpHeaderValue1: "platform"
       - name: Alertmanager
         type: alertmanager
         uid: alertmanager
@@ -110,6 +118,9 @@ datasources:
         access: proxy
         url: http://platform-tempo:3200
         jsonData:
+          # Tempo is now multitenancy-enabled; this is the platform tenant's
+          # own read-path header (see tempo service's values.yaml).
+          httpHeaderName1: "X-Scope-OrgID"
           tracesToLogsV2:
             datasourceUid: P8E90F9AEF21F6940
             spanStartTimeShift: '-1h'
@@ -141,6 +152,8 @@ datasources:
             datasourceUid: PBFA97CFB590B2093
           nodeGraph:
             enabled: true
+        secureJsonData:
+          httpHeaderValue1: "platform"
 
 persistence:
   enabled: true

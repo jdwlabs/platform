@@ -290,29 +290,66 @@ scoping. Defer Mimir until scale or hard-isolation demands it.**
 
 ### 5.3 Loki: enable native multi-tenancy (`X-Scope-OrgID`)
 
-**Decision: turn on Loki multi-tenancy (`auth_enabled: true`) and assign each
-tenant an `X-Scope-OrgID`, when tenant log isolation is needed.**
+**Status: implemented.** `auth_enabled: true` is live on Loki
+(`tenants/platform/services/loki/values.yaml`). Alloy's pod-logs pipeline
+(`tenants/platform/services/monitoring/values.yaml`) promotes the source
+namespace's `platform.jdwlabs.io/tenant` label to a `tenant_id` stream label
+via a `discovery.relabel` rule (defaulting to `platform` for the handful of
+namespaces outside the tenant model, e.g. `kube-system`), then a
+`stage.tenant` block in `loki.process` carries that label as the per-entry
+tenant for `loki.write` — which falls back to a static `tenant_id: platform`
+on the destination itself for writers that never run that stage (cluster
+events today). One Grafana Loki datasource exists per tenant
+(`<tenant>-loki`, provisioned by `tenant-envelope`'s observability Job off
+`observability.tenantId`), each carrying its tenant's `X-Scope-OrgID` via the
+`httpHeaderName1`/`httpHeaderValue1` custom-header convention; the platform
+tenant's own existing datasource was updated the same way rather than
+retrofitted onto the per-tenant template.
 
-- Loki is `auth_enabled: false` today (single tenant `fake`). Native tenancy is
-  the `X-Scope-OrgID` header: writers (Alloy) stamp the tenant id, readers
-  (Grafana per-tenant Loki datasource) send the matching header.
-- Mechanics:
-  - Alloy log pipeline sets `X-Scope-OrgID` per tenant — derive it from the
-    `platform.jdwlabs.io/tenant` namespace label so routing follows the
-    existing tenant model.
-  - One Grafana Loki datasource **per tenant**, each pinned to that tenant's
-    `X-Scope-OrgID` (via `httpHeaderName`/`httpHeaderValue` custom headers),
-    scoped to the tenant's Grafana folder.
-- This gives true per-tenant log isolation at the store, not just at the UI.
+- Mechanics implemented as originally decided: writers (Alloy) stamp the
+  tenant id, readers (Grafana per-tenant Loki datasource) send the matching
+  header. This gives true per-tenant log isolation at the store, not just at
+  the UI.
+- **Known gap:** Grafana OSS has no per-datasource query-permission RBAC
+  (that's an Enterprise feature), so a user with access to Grafana's
+  Explore/datasource picker could still select another tenant's named
+  datasource. The store-level header is what actually enforces isolation —
+  the boundary is "who can reach that datasource entry," not folder RBAC on
+  the datasource itself. Acceptable for now under the same trust-internal
+  posture §5.2 already accepts for label-based metric tenancy; hardening
+  (e.g. the `loki` chart's built-in gateway basic-auth → `X-Scope-OrgID`
+  translation) is a possible follow-up, not implemented here.
 
 ### 5.4 Tempo: native multi-tenancy (`X-Scope-OrgID`), same pattern as Loki
 
-**Decision: enable Tempo multi-tenancy with the same `X-Scope-OrgID` tenant id
-scheme as Loki, as part of the tracing workstream.**
+**Status: implemented, with a real gap on the write path.**
+`multitenancyEnabled: true` is live on Tempo
+(`tenants/platform/services/tempo/values.yaml`), and the same per-tenant
+Grafana Tempo datasource convention as Loki exists (`<tenant>-tempo`, same
+`httpHeaderName1`/`httpHeaderValue1` header, plus a `tracesToLogsV2` pointing
+at that tenant's own Loki datasource). Tempo's metrics-generator needs no
+extra accommodation: it still remote-writes every tenant's generated span
+metrics to the one shared Prometheus, matching the existing label-based
+metrics-tenancy decision in §5.2 — there's no per-tenant Prometheus to
+route to.
 
-- Tempo uses the identical `X-Scope-OrgID` mechanism. Reusing the same tenant
-  id across Loki + Tempo (+ Mimir later) gives one consistent tenant identifier
-  across all three signals and makes trace↔log↔metric correlation tenant-aware.
+- **Gap:** unlike Loki, there is no Alloy trace-collection pipeline in this
+  cluster today (the `k8s-monitoring` chart revision pinned here ships no
+  trace feature), so nothing sits between a workload's OTLP exporter and
+  Tempo's receiver to stamp the header on its behalf. Once multitenancy is
+  on, Tempo has no fallback org — a push with no `X-Scope-OrgID` is rejected
+  outright, not defaulted anywhere. The header has to be set at the
+  producer (`OTEL_EXPORTER_OTLP_HEADERS` in the workload's own deployment),
+  which lives in tenant `deployments` repos this repo doesn't own. This PR
+  turns the lock on; it does not hand every existing or future trace
+  producer a key. Follow-up options if this needs closing without relying on
+  every producer's cooperation: an Alloy trace-collection feature (mirroring
+  the logs pipeline's relabel-then-stamp approach) once one ships in this
+  chart, or a Gateway API `RequestHeaderModifier` in front of a per-tenant
+  ingest hostname.
+- Reusing the same tenant id across Loki + Tempo (+ Mimir later) gives one
+  consistent tenant identifier across all three signals and makes
+  trace↔log↔metric correlation tenant-aware.
 
 ### 5.4a Alertmanager: route on a `tenant` alert label, reuse the shared receiver
 

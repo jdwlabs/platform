@@ -29,6 +29,35 @@ clusterEvents:
 podLogsViaLoki:
   enabled: true
   collector: alloy-logs
+  # attach_metadata.namespace on the pod discovery surfaces every namespace
+  # label as a __meta_kubernetes_namespace_label_* meta-label, which is the
+  # only way to reach the tenant label from a log-processing stage below.
+  attachNamespaceMetadata: true
+  # Promotes the namespace's tenant label to a real "tenant_id" stream label.
+  # Every governed namespace carries platform.jdwlabs.io/tenant (rendered by
+  # tenant-envelope's namespaces.yaml), but a handful of cluster-native
+  # namespaces (kube-system and friends) sit outside that model entirely and
+  # would otherwise resolve to an empty tenant_id; the second rule folds
+  # those into the platform org rather than dropping the header.
+  extraDiscoveryRules: |
+    rule {
+      source_labels = ["__meta_kubernetes_namespace_label_platform_jdwlabs_io_tenant"]
+      target_label  = "tenant_id"
+    }
+    rule {
+      source_labels = ["tenant_id"]
+      regex         = "^$"
+      target_label  = "tenant_id"
+      replacement   = "platform"
+    }
+  # stage.tenant reads the tenant_id stream label set above and carries it
+  # as the per-entry tenant for loki.write, taking precedence over the
+  # destination's static tenantId fallback below (used by writers, like
+  # cluster events, that don't run this stage).
+  extraLogProcessingStages: |
+    stage.tenant {
+      label = "tenant_id"
+    }
 
 nodeLogs:
   enabled: false
@@ -145,3 +174,8 @@ destinations:
   Loki:
     type: loki
     url: "http://platform-loki:3100/loki/api/v1/push"
+    # Fallback X-Scope-OrgID for any write that never runs the per-entry
+    # stage.tenant override (cluster events, currently) — without this,
+    # loki.write sends no tenant header at all and auth_enabled Loki rejects
+    # the push outright rather than defaulting it anywhere.
+    tenantId: platform

@@ -1,14 +1,23 @@
-# Per-tenant Grafana folder + team + folder-RBAC, driven by the
-# `observability` block in tenant.yaml. See
-# docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.1/§5.5: tenancy is
-# folders + folder-RBAC + teams, never Grafana organizations, and it rides
+# Per-tenant Grafana folder + team + folder-RBAC + Loki/Tempo datasources,
+# driven by the `observability` block in tenant.yaml. See
+# docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.1/§5.3/§5.4/§5.5:
+# tenancy is folders + folder-RBAC + teams (never Grafana organizations) plus
+# native X-Scope-OrgID isolation at the Loki/Tempo store, and it all rides
 # tenant.yaml so onboarding stays a single-file change.
 #
-# Grafana's folder/team/permission objects live in Grafana's own store, not
-# as Kubernetes resources, so ArgoCD cannot reconcile them directly (the same
-# constraint the Git Sync Connection/Repository objects have — see the
-# grafana service's gitsync-apply-job.yaml). This Job is the same pattern
-# applied to folders/teams/RBAC instead of Git Sync resources.
+# Grafana's folder/team/permission/datasource objects live in Grafana's own
+# store, not as Kubernetes resources, so ArgoCD cannot reconcile them
+# directly (the same constraint the Git Sync Connection/Repository objects
+# have — see the grafana service's gitsync-apply-job.yaml). This Job is the
+# same pattern applied to folders/teams/RBAC/datasources instead of Git Sync
+# resources.
+#
+# The datasources aren't restricted to the tenant's folder — Grafana OSS has
+# no per-datasource query-permission RBAC (that's an Enterprise feature), so
+# "scoped to the tenant's folder" here means named and intended for that
+# folder's dashboards, not access-controlled to them. The actual isolation is
+# store-level: the datasource's X-Scope-OrgID header means it can only ever
+# return that tenant's data no matter who queries through it.
 #
 # It renders into the `monitoring` namespace (where Grafana and its admin
 # credentials live), which the governance ApplicationSet can reach because it
@@ -25,6 +34,9 @@
 {{- $folderUID := .Values.observability.grafana.folder }}
 {{- $teamName := .Values.observability.grafana.team }}
 {{- $permLevel := include "tenant-envelope.grafanaPermissionLevel" .Values.observability.grafana.access }}
+{{- $tenantID := .Values.observability.tenantId }}
+{{- $lokiUID := printf "%s-loki" .Values.name }}
+{{- $tempoUID := printf "%s-tempo" .Values.name }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -36,6 +48,29 @@ data:
     {"uid": {{ $folderUID | quote }}, "title": {{ .Values.displayName | default $folderUID | quote }}}
   team.json: |
     {"name": {{ $teamName | quote }}}
+  loki-datasource.json: |
+    {
+      "uid": {{ $lokiUID | quote }},
+      "name": {{ printf "%s Loki" .Values.name | quote }},
+      "type": "loki",
+      "access": "proxy",
+      "url": "http://platform-loki:3100",
+      "jsonData": {"httpHeaderName1": "X-Scope-OrgID"},
+      "secureJsonData": {"httpHeaderValue1": {{ $tenantID | quote }}}
+    }
+  tempo-datasource.json: |
+    {
+      "uid": {{ $tempoUID | quote }},
+      "name": {{ printf "%s Tempo" .Values.name | quote }},
+      "type": "tempo",
+      "access": "proxy",
+      "url": "http://platform-tempo:3200",
+      "jsonData": {
+        "httpHeaderName1": "X-Scope-OrgID",
+        "tracesToLogsV2": {"datasourceUid": {{ $lokiUID | quote }}}
+      },
+      "secureJsonData": {"httpHeaderValue1": {{ $tenantID | quote }}}
+    }
 ---
 apiVersion: batch/v1
 kind: Job
@@ -97,6 +132,10 @@ spec:
               value: {{ $teamName | quote }}
             - name: PERM_LEVEL
               value: {{ $permLevel | quote }}
+            - name: LOKI_DS_UID
+              value: {{ $lokiUID | quote }}
+            - name: TEMPO_DS_UID
+              value: {{ $tempoUID | quote }}
           command:
             - /bin/sh
             - -c
@@ -212,6 +251,56 @@ spec:
                   exit 1
                   ;;
               esac
+
+              # ensure_datasource: full-replace reconcile, same reasoning as
+              # the folder permissions step above -- the tenant header this
+              # datasource carries must always match tenant.yaml, so this
+              # converges on every sync rather than create-once.
+              ensure_datasource() {
+                uid="$1"
+                file="$2"
+                code=$(curl -sS -o "$LAST_BODY" -w '%{http_code}' \
+                  -u "$GF_USER:$GF_PASS" "$API/datasources/uid/$uid")
+                case "$code" in
+                  200)
+                    code=$(curl -sS -o "$LAST_BODY" -w '%{http_code}' -X PUT \
+                      -H 'Content-Type: application/json' \
+                      -u "$GF_USER:$GF_PASS" \
+                      --data-binary "@$file" \
+                      "$API/datasources/uid/$uid")
+                    case "$code" in
+                      200) echo "datasource $uid updated" ;;
+                      *)
+                        echo "PUT /api/datasources/uid/$uid returned $code:"
+                        cat "$LAST_BODY"
+                        exit 1
+                        ;;
+                    esac
+                    ;;
+                  404)
+                    code=$(curl -sS -o "$LAST_BODY" -w '%{http_code}' -X POST \
+                      -H 'Content-Type: application/json' \
+                      -u "$GF_USER:$GF_PASS" \
+                      --data-binary "@$file" \
+                      "$API/datasources")
+                    case "$code" in
+                      2*) echo "created datasource $uid" ;;
+                      *)
+                        echo "POST /api/datasources returned $code:"
+                        cat "$LAST_BODY"
+                        exit 1
+                        ;;
+                    esac
+                    ;;
+                  *)
+                    echo "unexpected status $code probing datasource $uid:"
+                    cat "$LAST_BODY"
+                    exit 1
+                    ;;
+                esac
+              }
+              ensure_datasource "$LOKI_DS_UID" /etc/observability/loki-datasource.json
+              ensure_datasource "$TEMPO_DS_UID" /etc/observability/tempo-datasource.json
           volumeMounts:
             - name: resources
               mountPath: /etc/observability
