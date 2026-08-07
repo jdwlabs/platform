@@ -230,11 +230,13 @@ parameterise cleanly per tenant.
 
 ## 5. Multi-tenancy architecture
 
-Today there are three tenants (`platform`, `jdwlabs`, `dotablaze-tech`) but a
-single shared observability stack with `auth_enabled: false` on Loki and a
-single-org Grafana. The recommendation below is **incremental**: it keeps the
-single shared stack and layers tenancy on top, rather than standing up
-per-tenant stacks (overkill for a homelab-scale platform).
+Today there are three tenants (`platform`, `jdwlabs`, `dotablaze-tech`) on a
+single shared observability stack. Loki runs `auth_enabled: true` with native
+`X-Scope-OrgID` tenancy (§5.3); Tempo and Grafana remain
+single-tenant/single-org for now (§5.4, §5.1). The recommendation below is
+**incremental**: it keeps the single shared stack and layers tenancy on top,
+rather than standing up per-tenant stacks (overkill for a homelab-scale
+platform).
 
 ### 5.1 Grafana: folders + RBAC + teams (NOT organizations)
 
@@ -322,34 +324,35 @@ retrofitted onto the per-tenant template.
 
 ### 5.4 Tempo: native multi-tenancy (`X-Scope-OrgID`), same pattern as Loki
 
-**Status: implemented, with a real gap on the write path.**
-`multitenancyEnabled: true` is live on Tempo
-(`tenants/platform/services/tempo/values.yaml`), and the same per-tenant
-Grafana Tempo datasource convention as Loki exists (`<tenant>-tempo`, same
+**Status: deferred.** `multitenancyEnabled` remains `false` on Tempo
+(`tenants/platform/services/tempo/values.yaml`). A pre-merge review found
+that flipping it now would reject every current OTLP trace push outright:
+unlike Loki there is no Alloy trace-collection pipeline in this cluster (the
+`k8s-monitoring` chart revision pinned here ships no trace feature) and
+Tempo has no fallback org once multitenancy is on — a push with no
+`X-Scope-OrgID` is rejected, not defaulted anywhere. That would black-hole
+the metrics-generator, service graph, and `tracesToMetrics`, and fire
+`TempoNoSpansReceived` roughly 30 minutes later. The same per-tenant Grafana
+Tempo datasource convention as Loki does exist (`<tenant>-tempo`, same
 `httpHeaderName1`/`httpHeaderValue1` header, plus a `tracesToLogsV2` pointing
-at that tenant's own Loki datasource). Tempo's metrics-generator needs no
-extra accommodation: it still remote-writes every tenant's generated span
-metrics to the one shared Prometheus, matching the existing label-based
-metrics-tenancy decision in §5.2 — there's no per-tenant Prometheus to
-route to.
+at that tenant's own Loki datasource) and is safe to keep wired ahead of the
+cutover — a non-multitenant Tempo accepts and ignores the header — but Tempo
+itself is **not** tenant-isolated today: any workload's traces land in the
+single shared, unauthenticated tenant.
 
-- **Gap:** unlike Loki, there is no Alloy trace-collection pipeline in this
-  cluster today (the `k8s-monitoring` chart revision pinned here ships no
-  trace feature), so nothing sits between a workload's OTLP exporter and
-  Tempo's receiver to stamp the header on its behalf. Once multitenancy is
-  on, Tempo has no fallback org — a push with no `X-Scope-OrgID` is rejected
-  outright, not defaulted anywhere. The header has to be set at the
-  producer (`OTEL_EXPORTER_OTLP_HEADERS` in the workload's own deployment),
-  which lives in tenant `deployments` repos this repo doesn't own. This PR
-  turns the lock on; it does not hand every existing or future trace
-  producer a key. Follow-up options if this needs closing without relying on
-  every producer's cooperation: an Alloy trace-collection feature (mirroring
-  the logs pipeline's relabel-then-stamp approach) once one ships in this
-  chart, or a Gateway API `RequestHeaderModifier` in front of a per-tenant
-  ingest hostname.
+- The header has to be set at the producer first — `OTEL_EXPORTER_OTLP_HEADERS`
+  in each workload's own deployment, which lives in tenant `deployments`
+  repos this repo doesn't own — before `multitenancyEnabled` can flip to
+  `true` without rejecting existing traffic. A follow-up ticket for that
+  producer-side rollout has not been filed yet.
+- Tempo's metrics-generator needs no extra accommodation once multitenancy
+  does land: it already remote-writes every tenant's generated span metrics
+  to the one shared Prometheus, matching the existing label-based
+  metrics-tenancy decision in §5.2 — there's no per-tenant Prometheus to
+  route to.
 - Reusing the same tenant id across Loki + Tempo (+ Mimir later) gives one
   consistent tenant identifier across all three signals and makes
-  trace↔log↔metric correlation tenant-aware.
+  trace↔log↔metric correlation tenant-aware once this lands.
 
 ### 5.4a Alertmanager: route on a `tenant` alert label, reuse the shared receiver
 
