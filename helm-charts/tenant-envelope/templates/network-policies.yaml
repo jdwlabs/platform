@@ -1,6 +1,16 @@
 {{- range .Values.namespaces }}
 {{- $policy := .networkPolicy | default "default" }}
-{{- $enforce := ne .enforce false }}
+{{- /*
+Opt-in, not opt-out: a namespace enforces only once it explicitly sets
+enforce: true. Cilium has no per-namespace audit mode, so this toggle is the
+only staged-rollout mechanism a future enforcement-enabling change has — an
+opt-out default would flip every currently-unlabeled tenant namespace to full
+enforcement simultaneously the moment a policy engine starts running, and the
+default tier's allow-set (Postgres + monitoring only) is not exhaustive
+enough to survive that for real workload traffic (e.g. same-namespace
+pod-to-pod calls have no rule at all).
+*/}}
+{{- $enforce := eq .enforce true }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
