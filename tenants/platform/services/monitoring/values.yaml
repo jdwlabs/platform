@@ -88,14 +88,23 @@ collectors:
       - daemonset
       - filesystem-log-reader
     alloy:
-      # alloy-logs ran ~175Mi/node unbounded. Cap it: request covers steady state,
-      # limit gives headroom for log bursts while protecting node memory.
+      # alloy-logs ran ~175Mi/node unbounded; the initial cap above still left
+      # this request over-provisioned against later observed usage across the
+      # DaemonSet, so it's trimmed modestly here. Limit is unchanged — it's
+      # the burst ceiling for log spikes, not the steady-state signal driving
+      # this change.
       resources:
         requests:
           cpu: 50m
-          memory: 128Mi
+          memory: 96Mi
         limits:
           memory: 256Mi
+      # This CRD's alloy container spec has no startupProbe field at all (checked
+      # against the Alloy CRD schema and the operator's rendered container spec) —
+      # the livenessProbe below is the only startup-safety knob this chart
+      # exposes. Its 6x10s failureThreshold already gives ~90s of startup grace
+      # before a restart, which covers this modest request cut.
+      #
       # The chart only wires a readinessProbe (hardcoded, 1s timeout) with no
       # livenessProbe, so a wedged Alloy process just sits NotReady forever
       # instead of being restarted — one replica ran wedged for 9 days,

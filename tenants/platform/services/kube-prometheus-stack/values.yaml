@@ -116,15 +116,32 @@ alertmanager:
   alertmanagerSpec:
     useExistingSecret: true
     configSecret: alertmanager-config
-    # The 200Mi request is the prometheus-operator default, restated here so
-    # it survives operator-default changes; observed usage is ~46Mi. The pod
-    # previously had no limit — 512Mi bounds it while leaving generous room
-    # for alert-storm bursts.
+    # The 200Mi prometheus-operator default sat at ~9% utilized against
+    # observed usage — the most disproportionate request-to-usage ratio of any
+    # workload in this stack after loki. Right-sized down; 512Mi limit is
+    # unchanged and still leaves generous room for alert-storm bursts.
     resources:
       requests:
-        memory: 200Mi
+        memory: 96Mi
       limits:
         memory: 512Mi
+    # AlertmanagerSpec exposes no startupProbe field of its own; `containers`
+    # is the operator's supported mechanism for patching a generated
+    # container by name. A generous startup grace here means the operator's
+    # own liveness probe (10 failures at its default 10s period) can't restart
+    # the pod mid config/notification-log load right after the request above
+    # was tightened.
+    containers:
+      - name: alertmanager
+        startupProbe:
+          httpGet:
+            path: /-/ready
+            # Matches this chart's alertmanagerSpec.portName default
+            # ("http-web"), not the prometheus-operator default ("web").
+            port: http-web
+          periodSeconds: 10
+          failureThreshold: 30
+          timeoutSeconds: 3
     storage:
       volumeClaimTemplate:
         spec:
