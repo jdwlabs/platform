@@ -640,10 +640,9 @@ func TestCheckLonghornEngineVersionSkew_UnusedOlderImagePasses(t *testing.T) {
 	}
 }
 
-// This is the exact JDWLABS-212 signature: manager already bumped, the data
-// plane hasn't moved, and concurrentAutomaticEngineUpgradePerNodeLimit=0
-// means nothing ever will on its own. One minor behind is supported, so this
-// is a warning, not a failure.
+// Manager already bumped, the data plane hasn't moved, and
+// concurrentAutomaticEngineUpgradePerNodeLimit=0 means nothing ever will on
+// its own. One minor behind is supported, so this is a warning, not a failure.
 func TestCheckLonghornEngineVersionSkew_OneMinorBehindWarns(t *testing.T) {
 	dyn := newDynamicLonghorn(
 		newLonghornSetting("v1.12.0"),

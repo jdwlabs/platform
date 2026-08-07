@@ -245,6 +245,7 @@ func checkLonghornEngineVersionSkew(ctx context.Context, dyn dynamic.Interface) 
 
 	var maxGap int
 	var skewed []string
+	var unparsed []string
 	for _, img := range images.Items {
 		refCount, _, _ := unstructured.NestedInt64(img.Object, "status", "refCount")
 		if refCount == 0 {
@@ -252,8 +253,12 @@ func checkLonghornEngineVersionSkew(ctx context.Context, dyn dynamic.Interface) 
 		}
 		image, _, _ := unstructured.NestedString(img.Object, "spec", "image")
 		major, minor, ok := parseMajorMinor(image)
-		if !ok || major != cpMajor {
-			continue // different major line or unparsable — not a minor-skew comparison
+		if !ok {
+			unparsed = append(unparsed, img.GetName())
+			continue
+		}
+		if major != cpMajor {
+			continue // different major line — not a minor-skew comparison
 		}
 		gap := cpMinor - minor
 		if gap <= 0 {
@@ -266,6 +271,9 @@ func checkLonghornEngineVersionSkew(ctx context.Context, dyn dynamic.Interface) 
 	}
 
 	if len(skewed) == 0 {
+		if len(unparsed) > 0 {
+			return Warnf("could not parse version for in-use engine image(s): %s", strings.Join(unparsed, ", "))
+		}
 		return Passf("all in-use engine images match control plane v%d.%d", cpMajor, cpMinor)
 	}
 	msg := fmt.Sprintf("control plane v%d.%d, %d minor(s) behind: %s",
