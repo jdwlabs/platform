@@ -25,7 +25,7 @@ singleBinary:
   resources:
     requests:
       cpu: 500m
-      memory: 768Mi
+      memory: 480Mi
     limits:
       memory: 1.5Gi
   persistence:
@@ -142,6 +142,21 @@ loki:
         period: 48h
   ruler:
     enable_api: true
+  # No livenessProbe ships for this container by default, so nothing currently
+  # restarts a wedged process during startup — but the request just above was
+  # tightened, and WAL/index replay against the NFS-backed volume can run long
+  # on a cold start. An explicit startupProbe (reusing the chart's own
+  # readinessProbe endpoint) holds off any future liveness/readiness-driven
+  # restart until the first successful ready check, rather than assuming the
+  # replay always finishes inside a steady-state probe window.
+  startupProbe:
+    httpGet:
+      path: /ready
+      port: http-metrics
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    failureThreshold: 30
+    timeoutSeconds: 1
 
 # Gateway (nginx) ran BestEffort at ~13Mi observed; it only proxies to the
 # single binary, so a tight bound is safe.
