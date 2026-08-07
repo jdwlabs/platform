@@ -50,3 +50,12 @@ services:
     postInstall: false
     rawManifests: true
     syncWave: 5
+
+  - name: jdwlabs-alerts
+    chart: ""
+    repo: ""
+    revision: ""
+    namespace: jdwlabs-non
+    postInstall: false
+    rawManifests: true
+    syncWave: 2
