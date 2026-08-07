@@ -162,8 +162,9 @@ Reasoning:
 - Proxmox is a privileged management surface (VM console access, storage,
   backups, cluster settings) — the same category of exposure risk as the
   Kubernetes (`6443`) and Talos (`50000`) APIs, which were deliberately
-  pulled off the public internet and moved behind a Tailscale subnet router
-  on the HAProxy VM. Reversing that call for Proxmox — a surface with *more*
+  pulled off the public internet, with a Tailscale subnet router on the
+  HAProxy VM as the planned replacement path. Reversing that call for
+  Proxmox — a surface with *more*
   blast radius than either API — would be inconsistent with that posture.
 - The subnet router advertises the whole `192.168.1.0/24` LAN, not just the
   HAProxy VM. Once it is live, every `pve*` host's `:8006` is already
@@ -184,8 +185,9 @@ router change is required by this decision; there is nothing to close.
 **How to reach it today (LAN):** `https://pve<1-5>.attlocal.net:8006`,
 resolved by the gateway's own DNS at `192.168.1.254` — see
 [`infrastructure/docs/host-addressing.md`](https://github.com/jdwlabs/infrastructure/blob/main/docs/host-addressing.md)
-for the full host/address table and the one stale record (`pve5`) still
-being tracked separately.
+for the full host/address table. The `pve5` record currently answers with
+two addresses; only `192.168.1.204` is live — retry if a `pve5` connection
+is refused.
 
 **How to reach it off-LAN, once available:** over the same Tailscale subnet
 router being stood up for cluster admin — see
