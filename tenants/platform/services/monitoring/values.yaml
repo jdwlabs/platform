@@ -99,11 +99,15 @@ collectors:
           memory: 96Mi
         limits:
           memory: 256Mi
-      # This CRD's alloy container spec has no startupProbe field at all (checked
-      # against the Alloy CRD schema and the operator's rendered container spec) —
-      # the livenessProbe below is the only startup-safety knob this chart
-      # exposes. Its 6x10s failureThreshold already gives ~90s of startup grace
-      # before a restart, which covers this modest request cut.
+      # No startupProbe available for this workload: the Alloy CRD's spec is
+      # entirely x-kubernetes-preserve-unknown-fields (no field-level schema
+      # at all, so "not in the CRD" proves nothing on its own) but the alloy
+      # chart values contract the operator actually renders from exposes
+      # alloy.livenessProbe and no alloy.startupProbe — checked against that
+      # contract, not the CRD. The livenessProbe below is the only
+      # startup-safety knob available. Its 6x10s failureThreshold already
+      # gives ~90s of startup grace before a restart, which covers this
+      # modest request cut.
       #
       # The chart only wires a readinessProbe (hardcoded, 1s timeout) with no
       # livenessProbe, so a wedged Alloy process just sits NotReady forever
