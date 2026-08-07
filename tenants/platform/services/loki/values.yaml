@@ -94,11 +94,24 @@ loki:
   # Native X-Scope-OrgID multi-tenancy. Every writer must now carry a tenant
   # header: Alloy stamps one per pod log entry (see the monitoring service's
   # values.yaml), and the Grafana datasources below carry one per tenant.
+  #
+  # Everything written before this flipped lives under org "fake" (Loki's
+  # hardcoded org when auth_enabled is false), which the post-cutover
+  # datasources (org "platform"/"jdwlabs"/"dotablaze-tech") cannot see — with
+  # retention_period 14d below, dashboards and Explore read as empty back to
+  # the cutover instant and stay partially empty for two weeks. `cmd/migrate`
+  # (loki's own tool, `-source.tenant=fake -dest.tenant=<org>`) can backfill
+  # if the pre-cutover window is needed; not run here since it needs cluster
+  # access this repo-only change doesn't have.
+  #
   # Rollback: flip this back to false and drop the Alloy tenant-stamping
-  # stage in the same change — a header-carrying write against an
+  # stage (and the destination-level tenantId in the monitoring service's
+  # values.yaml) in the same change — a header-carrying write against an
   # auth_enabled: false Loki is accepted and ignored, but the reverse
   # (headerless write against auth_enabled: true) is rejected outright, so
-  # don't revert one side without the other.
+  # don't revert one side without the other. Rolling back strands whatever
+  # was written under org "platform"/"jdwlabs"/"dotablaze-tech" during the
+  # multitenant window the same way forward — reads go back to "fake" only.
   auth_enabled: true
   commonConfig:
     replication_factor: 1

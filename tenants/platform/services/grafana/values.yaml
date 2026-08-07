@@ -101,6 +101,22 @@ datasources:
           httpHeaderName1: "X-Scope-OrgID"
         secureJsonData:
           httpHeaderValue1: "platform"
+      - name: Loki (pre-cutover)
+        type: loki
+        uid: loki-pre-cutover
+        access: proxy
+        url: http://platform-loki:3100
+        # Temporary read-only window onto everything logged before
+        # auth_enabled flipped to true — Loki's hardcoded org for an
+        # unauthenticated write is "fake", which the org "platform"
+        # datasource above cannot see. Safe to delete once
+        # retention_period (14d, see the loki service's values.yaml) has
+        # fully rolled past the cutover instant and this datasource has
+        # nothing left to show.
+        jsonData:
+          httpHeaderName1: "X-Scope-OrgID"
+        secureJsonData:
+          httpHeaderValue1: "fake"
       - name: Alertmanager
         type: alertmanager
         uid: alertmanager
@@ -118,8 +134,11 @@ datasources:
         access: proxy
         url: http://platform-tempo:3200
         jsonData:
-          # Tempo is now multitenancy-enabled; this is the platform tenant's
-          # own read-path header (see tempo service's values.yaml).
+          # Tempo multitenancy isn't on yet (see tempo service's values.yaml
+          # for why — no producer sends the header, so flipping it now would
+          # reject every current trace push). Sending this header against a
+          # non-multitenant Tempo today is accepted and ignored, so it's safe
+          # to wire ahead of that cutover.
           httpHeaderName1: "X-Scope-OrgID"
           tracesToLogsV2:
             datasourceUid: P8E90F9AEF21F6940
