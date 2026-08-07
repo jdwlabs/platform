@@ -1,10 +1,21 @@
 enableMonitoring: false
 enableCertManager: true
 
-# The chart's default request (250Mi) is deliberately left untouched — Helm
-# deep-merges values, so only the missing limit is added. Observed usage is
-# ~26Mi; 512Mi (2x the request) just bounds a leak without risking the pod.
+# Right-sized from the chart's default request (250Mi): measured usage is
+# ~25Mi (10% of the old request, the most disproportionate ratio observed in
+# the cluster), so 128Mi still leaves ~5x headroom over what's actually held.
+# 512Mi limit is unchanged, so this is a request-only, scheduler-facing
+# change — it doesn't move the OOM boundary.
+#
+# This chart's manager Deployment hardcodes livenessProbe/readinessProbe in
+# its template (httpGet on /healthz and /readyz) with no startupProbe field
+# and no values.yaml override point for any of the three. The existing
+# livenessProbe's own grace window (15s initial delay + 3 x 20s
+# failureThreshold, ~75s before a restart) is the closest available
+# approximation of startup protection this chart offers.
 resources:
+  requests:
+    memory: 128Mi
   limits:
     memory: 512Mi
 

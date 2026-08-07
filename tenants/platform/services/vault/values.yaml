@@ -71,15 +71,27 @@ server:
   # is satisfiable, and a node failure can then never take out two raft
   # members at once — soft anti-affinity could co-locate members under
   # memory pressure and turn one node loss into quorum loss.
-  # Request 384Mi: steady-state usage runs ~345Mi live, above the old 256Mi
-  # request, so the scheduler was placing against less memory than Vault
-  # actually holds. 512Mi limit unchanged — ample burst headroom observed.
-  # Raft standbys hold less than the active node, so the same sizing fits
-  # all three members.
+  # Request 192Mi: measured steady-state usage across all three members
+  # runs 79-105Mi, so the prior 384Mi request was placing against roughly
+  # 4x actual holdings. 512Mi limit is left untouched, so this is a
+  # scheduler/bin-packing change only — the OOM boundary a member could
+  # actually hit is unchanged. Raft standbys hold less than the active
+  # node, so the same request fits all three members.
+  #
+  # This chart's server StatefulSet has no startupProbe field (checked
+  # against the templates for the pinned chart revision — readinessProbe
+  # and livenessProbe are the only configurable probes; startupProbe is
+  # not rendered regardless of values). livenessProbe stays disabled, as
+  # it already was: Vault starts sealed and only becomes unsealed once the
+  # unseal cronjob next runs, so a liveness check would kill-loop healthy,
+  # merely-sealed pods rather than protect them. readinessProbe (exec
+  # `vault status`) stays enabled and already gates Service membership;
+  # it is unaffected by a request-only change since it isn't a function of
+  # the memory request.
   resources:
     requests:
       cpu: 100m
-      memory: 384Mi
+      memory: 192Mi
     limits:
       cpu: 500m
       memory: 512Mi
