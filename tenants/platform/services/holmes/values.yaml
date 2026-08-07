@@ -240,20 +240,21 @@ k8sRBAC: false
 # agent from being the first thing evicted when a node is under memory
 # pressure, which is exactly when it is needed.
 #
-# Right-sizing note: a later measurement found this pod averaging ~0.39Gi
-# (26%) of the original 1536Mi request, which on its own would point toward
-# ~768Mi. But that figure is a point-in-time average, not a peak -- and the
-# ~1.8x line above already documented a real tool-heavy-investigation burst
-# of ~853Mi. 768Mi sits BELOW that documented burst, which is an OOM-kill
-# risk under the exact workload this pod exists to run. 1024Mi keeps ~170Mi
-# of margin above the known peak while still recovering about half of the
-# flagged waste versus the original 1536Mi.
+# Right-sizing note: this repo's own Phase 1 exit gate
+# (docs/memory-efficiency/03-chart-inventory.md, 04-hit-list.md) already
+# executed the trim this ticket asks for -- 2048Mi -> 1536Mi -- and
+# documents a real tool-heavy-investigation burst of ~1.5Gi with an
+# explicit "not further" below 1536Mi. A later point-in-time average
+# (~0.39Gi/26%) suggested trimming further toward ~768Mi, but that's an
+# average, not the documented peak, and going below the exit gate's own
+# floor risks an OOM-kill during exactly the investigation this pod exists
+# to run. Left at the hit-list target, 1536Mi.
 resources:
   requests:
     cpu: 100m
-    memory: 1024Mi
+    memory: 1536Mi
   limits:
-    memory: 1024Mi
+    memory: 1536Mi
 
 # Startup-probe verification (required before tightening any memory limit
 # in this namespace): the upstream chart's Deployment template hardcodes

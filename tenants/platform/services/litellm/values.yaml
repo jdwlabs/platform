@@ -103,17 +103,15 @@ proxy_config:
 # the limit so the pod stays Guaranteed on memory and is not an OOM-kill
 # candidate under node pressure.
 #
-# Right-sizing note: a later measurement found steady-state usage at ~1.48Gi
-# (74%), well below the ~1.99Gi this comment originally recorded — read
-# that older figure as stale, not as today's ground truth. 1.75Gi is a
-# modest trim (not the full cut to the measured 74%) specifically because
-# the known failure boundary is 1Gi and the verified-clean point is 2Gi;
-# 1.75Gi has never itself been tested against the boot spike, so it keeps
-# ~750Mi of margin over the known failure point and ~270Mi over the fresh
-# steady-state reading rather than crowding the untested 1-2Gi gap. The
-# chart's own Deployment template already carries a startupProbe
+# Right-sizing was investigated and reverted: this repo's own Phase 1
+# baseline (docs/memory-efficiency/appendix-workloads.md,
+# 03-chart-inventory.md) records live usage at ~1988Mi, not the ~1.48Gi a
+# later point-in-time sample suggested -- and that 1988Mi figure is what
+# the prior deliberate raise from 512Mi was based on. Trimming below live
+# usage on a Guaranteed pod is a next-sync OOMKill, not a risk. Left at 2Gi.
+# The chart's own Deployment template already carries a startupProbe
 # (failureThreshold: 30, periodSeconds: 10 -> up to 5 minutes), so the boot
 # spike has probe headroom independent of this resources block.
 resources:
-  requests: {cpu: 100m, memory: 1792Mi}
-  limits: {memory: 1792Mi}
+  requests: {cpu: 100m, memory: 2Gi}
+  limits: {memory: 2Gi}
