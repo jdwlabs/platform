@@ -7,6 +7,11 @@ metadata:
     {{- include "kubelet-serving-cert-approver.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicas }}
+  # A bare `| default 3` treats an explicit 0 override as unset (Sprig's
+  # default() replaces any zero-value input), silently keeping 3 instead of
+  # letting a consumer opt all the way down to 0 -- so the chart itself
+  # supplies the default via values.yaml and this renders the value verbatim.
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   selector:
     matchLabels:
       {{- include "kubelet-serving-cert-approver.selectorLabels" . | nindent 6 }}

@@ -15,6 +15,9 @@ metadata:
     secret.reloader.stakater.com/reload: "ai-sre-relay"
 spec:
   replicas: 1
+  # GitOps rollback is a git revert + ArgoCD resync, not `kubectl rollout
+  # undo`; retaining old ReplicaSets buys nothing here.
+  revisionHistoryLimit: 0
   selector:
     matchLabels: {app: ai-sre-relay}
   template:

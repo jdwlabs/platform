@@ -26,6 +26,9 @@ reloader:
   autoReloadAll: false
 
   deployment:
+    # ArgoCD holds prior manifests in git history; no need for k8s to keep
+    # old ReplicaSets around too.
+    revisionHistoryLimit: 0
     # tenant-limits LimitRange supplies a 64Mi memory defaultRequest but no
     # default limit, which would leave this Burstable and memory-unbounded.
     # 128Mi covers the measured cluster-wide watch cache (~1.3MB of Secret +

@@ -1,6 +1,12 @@
 args:
   - --kubelet-insecure-tls
 
+# ArgoCD holds prior manifests in git history; no need for k8s to keep old
+# ReplicaSets around too. The chart leaves this unset by default (an empty
+# string skips the field entirely rather than falling back to a number), so
+# it has to be set explicitly to take effect at all.
+revisionHistoryLimit: 0
+
 # Shipped with no declared memory at all. Observed ~37Mi; usage tracks node and
 # pod count, so the limit leaves room for the cluster to grow before this needs
 # revisiting.

@@ -3,3 +3,7 @@
 # between platform-kubelet-serving-cert-approver and governance-platform.
 namespace:
   create: false
+
+# ArgoCD holds prior manifests in git history; no need for k8s to keep old
+# ReplicaSets around too.
+revisionHistoryLimit: 0

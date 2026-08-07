@@ -1,5 +1,12 @@
 installCRDs: true
 
+# ArgoCD holds prior manifests in git history; no need for k8s to keep old
+# ReplicaSets around too. The chart leaves this unset by default (an empty
+# string skips the field entirely rather than falling back to a number), so
+# it has to be set explicitly to take effect at all.
+global:
+  revisionHistoryLimit: 0
+
 extraArgs:
   - --enable-gateway-api
   - --dns01-recursive-nameservers-only

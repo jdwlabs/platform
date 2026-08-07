@@ -7,6 +7,9 @@ metadata:
   namespace: ai-sre
 spec:
   replicas: 1
+  # GitOps rollback is a git revert + ArgoCD resync, not `kubectl rollout
+  # undo`; retaining old ReplicaSets buys nothing here.
+  revisionHistoryLimit: 0
   selector:
     matchLabels: {app: litellm-redis}
   template:
