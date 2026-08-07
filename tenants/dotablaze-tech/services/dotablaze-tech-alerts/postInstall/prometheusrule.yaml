@@ -16,7 +16,8 @@ spec:
           expr: |
             max by (namespace, resource) (
               kube_resourcequota{namespace=~"dotablaze-tech-.*", type="used"}
-              / kube_resourcequota{namespace=~"dotablaze-tech-.*", type="hard"}
+              / ignoring(type)
+              (kube_resourcequota{namespace=~"dotablaze-tech-.*", type="hard"} > 0)
             ) > 0.85
           for: 10m
           labels:
