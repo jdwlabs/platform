@@ -134,11 +134,15 @@ datasources:
         access: proxy
         url: http://platform-tempo:3200
         jsonData:
-          # Tempo multitenancy isn't on yet (see tempo service's values.yaml
-          # for why — no producer sends the header, so flipping it now would
-          # reject every current trace push). Sending this header against a
-          # non-multitenant Tempo today is accepted and ignored, so it's safe
-          # to wire ahead of that cutover.
+          # Tempo is multitenant now (see tempo service's values.yaml). This
+          # datasource is pinned to "jdwlabs", not "platform" — jdwlabs is the
+          # only tenant with a live OTLP producer (servicediscovery's non
+          # environment), so this is what keeps the correlation panels below
+          # (tracesToLogsV2/tracesToMetrics/serviceMap/nodeGraph) showing real
+          # data across the cutover instead of going silently blank. The
+          # platform tenant itself emits no traces today; if/when it does,
+          # this needs its own tenant-scoped datasource rather than widening
+          # this one.
           httpHeaderName1: "X-Scope-OrgID"
           tracesToLogsV2:
             datasourceUid: P8E90F9AEF21F6940
@@ -172,7 +176,23 @@ datasources:
           nodeGraph:
             enabled: true
         secureJsonData:
-          httpHeaderValue1: "platform"
+          httpHeaderValue1: "jdwlabs"
+      - name: Tempo (pre-cutover)
+        type: tempo
+        uid: tempo-pre-cutover
+        access: proxy
+        url: http://platform-tempo:3200
+        # Temporary read-only window onto everything traced before
+        # multitenancyEnabled flipped to true — Tempo's internal org id for
+        # an unauthenticated/pre-multitenancy push is "single-tenant", which
+        # the "jdwlabs" datasource above cannot see. Safe to delete once
+        # retention (168h, see the tempo service's values.yaml) has fully
+        # rolled past the cutover instant and this datasource has nothing
+        # left to show.
+        jsonData:
+          httpHeaderName1: "X-Scope-OrgID"
+        secureJsonData:
+          httpHeaderValue1: "single-tenant"
 
 persistence:
   enabled: true
