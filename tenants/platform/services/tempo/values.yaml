@@ -8,20 +8,18 @@ revisionHistoryLimit: 1
 
 tempo:
   # Native X-Scope-OrgID multi-tenancy, same header and tenant ids as Loki.
-  # Deliberately left OFF here: unlike Loki there is no Alloy trace pipeline
-  # in front of Tempo (the k8s-monitoring chart ships no trace-collection
-  # feature here) and no fallback org once multitenancy is on — Tempo's auth
-  # middleware requires X-Scope-OrgID on every push with no "fake"-tenant
-  # fallback, so flipping this before any producer sets the header rejects
-  # every current OTLP push outright (metrics-generator, service graph, and
-  # tracesToMetrics all go blank; TempoNoSpansReceived fires ~30m later).
-  # Traces reach Tempo straight from each workload's own OTLP exporter, so
-  # the header has to be set at the source (OTEL_EXPORTER_OTLP_HEADERS in
-  # each workload's own deployment, outside this repo) FIRST — a producer
-  # already sending the header is accepted and ignored by a non-multitenant
-  # Tempo, so stamping headers first is safe regardless of when this flips.
-  # Flip to true only after every current OTLP producer sends the header.
-  multitenancyEnabled: false
+  # Flipped on now that the sole current OTLP producer (servicediscovery's
+  # non environment — confirmed by grepping every repo for
+  # OTEL_EXPORTER_OTLP_ENDPOINT/OTLP SDK init, cross-checked against live
+  # Tempo span-received metrics) stamps OTEL_EXPORTER_OTLP_HEADERS with its
+  # tenant id at the source, outside this repo. Unlike Loki there is still
+  # no Alloy trace pipeline in front of Tempo and no fallback org — this
+  # merge must land, and ArgoCD sync, strictly AFTER that producer-side
+  # header is live, or its pushes are rejected outright (metrics-generator,
+  # service graph, and tracesToMetrics all go blank; TempoNoSpansReceived
+  # fires ~30m later). Any future OTLP producer must stamp its own tenant
+  # header before its first push, the same way.
+  multitenancyEnabled: true
   resources:
     requests:
       cpu: 200m
