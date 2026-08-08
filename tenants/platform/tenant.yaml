@@ -103,7 +103,7 @@ services:
   - name: argo-cd
     chart: argo-cd
     repo: https://argoproj.github.io/argo-helm
-    revision: 10.2.2
+    revision: 10.3.0
     namespace: argocd
     postInstall: true
     syncWave: 0
@@ -174,7 +174,7 @@ services:
   - name: external-secrets
     chart: external-secrets
     repo: https://charts.external-secrets.io
-    revision: 2.8.0
+    revision: 2.9.0
     namespace: external-secrets
     postInstall: true
     syncWave: 2
@@ -190,7 +190,7 @@ services:
   - name: vault-config-operator
     chart: vault-config-operator
     repo: https://redhat-cop.github.io/vault-config-operator
-    revision: v0.8.51
+    revision: v0.8.52
     namespace: vault-config-operator
     postInstall: false
     syncWave: 2
@@ -214,7 +214,7 @@ services:
   - name: grafana
     chart: grafana
     repo: https://grafana-community.github.io/helm-charts
-    revision: 12.10.1
+    revision: 12.10.4
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -233,7 +233,7 @@ services:
   - name: kube-prometheus-stack
     chart: kube-prometheus-stack
     repo: https://prometheus-community.github.io/helm-charts
-    revision: "88.0.1"
+    revision: "88.2.0"
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -264,7 +264,7 @@ services:
   - name: reloader
     chart: reloader
     repo: https://stakater.github.io/stakater-charts
-    revision: 2.2.14
+    revision: 2.2.15
     namespace: reloader
     postInstall: false
     syncWave: 2
@@ -359,7 +359,7 @@ services:
   - name: holmes
     chart: holmes
     repo: https://robusta-charts.storage.googleapis.com
-    revision: 0.38.0
+    revision: 0.38.2
     namespace: ai-sre
     postInstall: true
     syncWave: 5
