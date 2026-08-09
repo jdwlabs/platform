@@ -189,10 +189,10 @@ write a new one and reference the old.
 
 ## Concurrency: one worktree, one branch, one agent invocation
 
-Multiple AI agents may operate against this repo at the same time. The
-isolation discipline already mandatory for humans (never work on
-`main`/`master`; create a worktree before touching code) is a **hard
-invariant for agents too, not a convention they can relax**:
+Multiple AI agents may operate against this repo at the same time. Never
+work on `main`/`master`, and create a worktree before touching code. For
+humans this is standing practice; for agents it is a **hard invariant,
+not a convention they can relax**:
 
 - Every agent invocation gets its own worktree and its own branch. Never
   share a worktree across two concurrent agent sessions, and never reuse
@@ -207,11 +207,13 @@ invariant for agents too, not a convention they can relax**:
   the failure is silent until the histories are compared.
 
 This generalizes the same failure mode `deployments/.github/workflows/promote-prd.yml`
-already had to solve for a single automated actor with its
-`concurrency:` group on the promotion ref: a shared mutable ref (a
-worktree, or a branch) needs exclusive ownership per in-flight task, or
-concurrent writers eventually race. See `docs/adr/0015-agentic-contribution-identity-and-review-gates.md`
-("Concurrency and isolation") for the fuller rationale.
+already had to solve for a single automated actor: a workflow-wide
+`concurrency:` group serializes promotion runs so two can never race on
+the same promotion branch. A shared mutable resource (a worktree, or a
+branch) needs exclusive ownership per in-flight task, or concurrent
+writers eventually race. See `docs/adr/0015-agentic-contribution-identity-and-review-gates.md`
+("Concurrency and isolation") for the fuller rationale — that ADR is
+still `proposed`; this invariant is the part of it already in force.
 
 ## Tooling Traps
 
