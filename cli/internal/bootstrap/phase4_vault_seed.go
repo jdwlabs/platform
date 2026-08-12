@@ -335,12 +335,17 @@ func buildSeedSpecs(tenants []string) map[string]seedSpec {
 	}
 	for _, t := range tenants {
 		u := toEnvKey(t)
+		// Every tenant-scoped path is optional, because a tenant is not obliged
+		// to deploy the service that consumes one: github-app belongs to an ARC
+		// runner set, and the runner sets are dormant. Marking these required
+		// made a full seed demand credentials for paths nothing references, so
+		// the run blocked on a prompt that had no correct answer. A field named
+		// explicitly via --field is still written regardless.
 		out[t+"-github-app"] = seedSpec{Path: t + "-github-app", Fields: []seedField{
-			{"github_app_id", "PLATFORMCTL_" + u + "_GITHUB_APP_ID", false, false},
-			{"github_app_installation_id", "PLATFORMCTL_" + u + "_GITHUB_INSTALLATION_ID", false, false},
-			{"github_app_private_key", "PLATFORMCTL_" + u + "_GITHUB_PRIVATE_KEY", true, false},
+			{"github_app_id", "PLATFORMCTL_" + u + "_GITHUB_APP_ID", false, true},
+			{"github_app_installation_id", "PLATFORMCTL_" + u + "_GITHUB_INSTALLATION_ID", false, true},
+			{"github_app_private_key", "PLATFORMCTL_" + u + "_GITHUB_PRIVATE_KEY", true, true},
 		}}
-		// ai-keys and discord are optional — not all tenants deploy these services.
 		out[t+"-ai-keys"] = seedSpec{Path: t + "-ai-keys", Fields: []seedField{
 			{"openai_api_key", "PLATFORMCTL_" + u + "_OPENAI_API_KEY", true, true},
 			{"anthropic_api_key", "PLATFORMCTL_" + u + "_ANTHROPIC_API_KEY", true, true},
