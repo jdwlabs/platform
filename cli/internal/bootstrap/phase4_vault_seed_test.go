@@ -81,6 +81,53 @@ func TestVaultSeedPhase_TenantSpec(t *testing.T) {
 	}
 }
 
+func TestTenantSeedSpecs_AllFieldsOptional(t *testing.T) {
+	specs := buildSeedSpecs([]string{"demo"})
+	for _, key := range []string{"demo-github-app", "demo-ai-keys", "demo-discord-bot-token"} {
+		spec, ok := specs[key]
+		if !ok {
+			t.Fatalf("%s seed spec missing", key)
+		}
+		for _, f := range spec.Fields {
+			if !f.Optional {
+				t.Errorf("%s field %s must be Optional: a tenant need not deploy the service that consumes the path", key, f.Name)
+			}
+		}
+	}
+}
+
+func TestVaultSeedPhase_TenantSpecUnsetWritesNothing(t *testing.T) {
+	srv, c := mockVaultKV(t)
+	// No PLATFORMCTL_DEMO_* set: a tenant with no ARC runner set has nothing to
+	// supply, and a non-interactive seed must skip the path rather than fail on
+	// a prompt it cannot answer.
+	p := NewVaultSeedPhase(NewVaultAddrResolver(srv.URL, nil, nil), true, "secret", []string{"demo"}, []string{"demo-github-app"})
+	if err := p.Apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if got, err := c.GetKV(context.Background(), "secret", "demo-github-app"); err == nil && len(got) > 0 {
+		t.Fatalf("wrote %v, want nothing at an unsupplied tenant path", got)
+	}
+}
+
+func TestVaultSeedPhase_TenantFieldSelectedOverridesOptional(t *testing.T) {
+	srv, c := mockVaultKV(t)
+	t.Setenv("PLATFORMCTL_DEMO_GITHUB_APP_ID", "12345")
+
+	p := NewVaultSeedPhase(NewVaultAddrResolver(srv.URL, nil, nil), true, "secret", []string{"demo"}, []string{"demo-github-app"})
+	p.SelectFields([]string{"github_app_id"})
+	if err := p.Apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	got, err := c.GetKV(context.Background(), "secret", "demo-github-app")
+	if err != nil {
+		t.Fatalf("get kv: %v", err)
+	}
+	if got["github_app_id"] != "12345" {
+		t.Fatalf("github_app_id = %v, want 12345", got["github_app_id"])
+	}
+}
+
 func TestVaultSeedPhase_ArgoCDDexFromEnv(t *testing.T) {
 	srv, c := mockVaultKV(t)
 	t.Setenv("PLATFORMCTL_ARGOCD_DEX_ADMIN_PASSWORD_HASH", "$2a$10$testhash")

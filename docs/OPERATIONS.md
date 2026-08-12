@@ -335,9 +335,9 @@ from environment variables. The contract:
 | `kv/argocd-dex` `github-client-secret`            | `PLATFORMCTL_ARGOCD_DEX_GITHUB_CLIENT_SECRET`    |
 | `kv/argocd-dex` `google-client-id` (optional)     | `PLATFORMCTL_ARGOCD_DEX_GOOGLE_CLIENT_ID`        |
 | `kv/argocd-dex` `google-client-secret` (optional) | `PLATFORMCTL_ARGOCD_DEX_GOOGLE_CLIENT_SECRET`    |
-| `kv/<tenant>-github-app` `github_app_id`          | `PLATFORMCTL_<TENANT>_GITHUB_APP_ID`             |
-| `kv/<tenant>-github-app` `github_app_installation_id` | `PLATFORMCTL_<TENANT>_GITHUB_INSTALLATION_ID` |
-| `kv/<tenant>-github-app` `github_app_private_key` | `PLATFORMCTL_<TENANT>_GITHUB_PRIVATE_KEY`        |
+| `kv/<tenant>-github-app` `github_app_id` (optional) | `PLATFORMCTL_<TENANT>_GITHUB_APP_ID`           |
+| `kv/<tenant>-github-app` `github_app_installation_id` (optional) | `PLATFORMCTL_<TENANT>_GITHUB_INSTALLATION_ID` |
+| `kv/<tenant>-github-app` `github_app_private_key` (optional) | `PLATFORMCTL_<TENANT>_GITHUB_PRIVATE_KEY`  |
 | `kv/<tenant>-ai-keys` `openai_api_key` (optional) | `PLATFORMCTL_<TENANT>_OPENAI_API_KEY`            |
 | `kv/<tenant>-ai-keys` `anthropic_api_key` (optional) | `PLATFORMCTL_<TENANT>_ANTHROPIC_API_KEY`      |
 | `kv/<tenant>-ai-keys` `openrouter_api_key` (optional) | `PLATFORMCTL_<TENANT>_OPENROUTER_API_KEY`   |
@@ -347,6 +347,11 @@ from environment variables. The contract:
 
 Tenant name in env-var keys is uppercased, with `-` → `_`. So tenant
 `dotablaze-tech` maps to `PLATFORMCTL_DOTABLAZE_TECH_GITHUB_APP_ID`.
+
+Every `kv/<tenant>-*` path is optional: a tenant is not obliged to deploy the
+service that consumes one, and the ARC runner sets that consume `-github-app`
+are dormant. Seeding skips an unsupplied tenant path and says so rather than
+prompting. Naming a field with `--field` writes it regardless.
 
 **`--json` event stream:** every state transition emits one
 newline-delimited JSON line. Schema:
