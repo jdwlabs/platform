@@ -64,10 +64,12 @@ securityContext:
 
 # The chart ships resources: {} and kube-system has no LimitRange to backfill
 # it, so an unmodified install is BestEffort — the first cgroup Talos kills
-# under memory pressure, which is when isolation matters most. 192Mi is sized
-# against the measured ~180Mi agent footprint with Envoy off, and fits the
-# tightest node's remaining request budget. A request large enough to leave
-# one agent Pending would leave that node silently unenforced.
+# under memory pressure, which is when isolation matters most. 192Mi is the
+# measured ~180Mi per node for agent plus Envoy, rounded up; Envoy is off
+# here, so the figure is deliberately conservative rather than snug. It fits
+# the tightest node's remaining request budget with room to spare, which is
+# the property that matters — a request large enough to leave one agent
+# Pending would leave that node silently unenforced.
 resources:
   requests:
     cpu: 100m
