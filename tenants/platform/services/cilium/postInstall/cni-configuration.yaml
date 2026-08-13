@@ -1,0 +1,36 @@
+# The chained CNI configuration Cilium writes to /etc/cni/net.d. The flannel
+# and portmap plugin blocks and the `name` field reproduce kube-flannel-cfg's
+# cni-conf.json exactly — CNI matches a conflist by `name`, so a value other
+# than cbr0 yields a configuration nothing ever uses, with no error. Compare
+# this against kube-flannel-cfg at every Flannel bump.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cni-configuration
+  namespace: kube-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+data:
+  cni-config: |-
+    {
+      "name": "cbr0",
+      "cniVersion": "1.0.0",
+      "plugins": [
+        {
+          "type": "flannel",
+          "delegate": {
+            "hairpinMode": true,
+            "isDefaultGateway": true
+          }
+        },
+        {
+          "type": "portmap",
+          "capabilities": {
+            "portMappings": true
+          }
+        },
+        {
+          "type": "cilium-cni"
+        }
+      ]
+    }

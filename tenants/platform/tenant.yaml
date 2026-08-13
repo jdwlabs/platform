@@ -82,6 +82,7 @@ project:
   extraSourceRepos:
     - 'https://argoproj.github.io/argo-helm'
     - 'https://charts.jetstack.io'
+    - 'https://helm.cilium.io'
     - 'https://charts.longhorn.io'
     - 'https://charts.external-secrets.io'
     - 'https://helm.releases.hashicorp.com'
@@ -109,6 +110,17 @@ services:
     syncWave: 0
 
   # Wave 1: Core infrastructure (Networking, TLS, Storage)
+  # Policy engine only — Flannel keeps the CNI slot and the datapath. Installed
+  # in audit mode, so it enforces nothing until the allow-set has been
+  # corrected against observed traffic.
+  - name: cilium
+    chart: cilium
+    repo: https://helm.cilium.io
+    revision: 1.20.0
+    namespace: kube-system
+    postInstall: true
+    syncWave: 1
+
   - name: cert-manager
     chart: cert-manager
     repo: https://charts.jetstack.io
