@@ -1,0 +1,88 @@
+# Cilium runs here as a NetworkPolicy engine only. Flannel keeps the CNI slot
+# and the datapath; Cilium chains after it and evaluates policy. Anything in
+# this file that would make Cilium take over forwarding is deliberately off.
+
+cni:
+  chainingMode: generic-veth
+  customConf: true
+  configMap: cni-configuration
+  # At true the agent renames every non-Cilium file in /etc/cni/net.d to
+  # *.cilium_bak and re-asserts that via fsnotify, which against Flannel
+  # deletes the conflist of the CNI being chained onto. The chart only emits
+  # the key when customConf is false, so this is declared intent rather than
+  # an active setting — it starts mattering the moment customConf changes.
+  exclusive: false
+
+# Flannel forwards and masquerades. Cilium must do neither.
+routingMode: native
+enableIPv4Masquerade: false
+enableIPv6Masquerade: false
+endpointRoutes:
+  enabled: true
+
+ipam:
+  mode: kubernetes
+
+# Every packet is evaluated against the loaded policies and the verdict is
+# logged without being acted on, so the allow-set can be corrected against
+# observed traffic instead of against recollection. Daemon-wide, not
+# per-namespace: staged isolation is the tenant-envelope `enforce` flag.
+policyAuditMode: true
+
+# L7 enforcement is unavailable in chaining mode, so the Envoy DaemonSet
+# (on by default for new 1.20 installs) is pure overhead here.
+envoy:
+  enabled: false
+
+# KubePrism, Talos's node-local apiserver proxy.
+k8sServiceHost: localhost
+k8sServicePort: 7445
+
+cgroup:
+  autoMount:
+    enabled: false
+  hostRoot: /sys/fs/cgroup
+
+securityContext:
+  capabilities:
+    ciliumAgent:
+      - CHOWN
+      - KILL
+      - NET_ADMIN
+      - NET_RAW
+      - IPC_LOCK
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    cleanCiliumState:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+
+# The chart ships resources: {} and kube-system has no LimitRange to backfill
+# it, so an unmodified install is BestEffort — the first cgroup Talos kills
+# under memory pressure, which is when isolation matters most. 192Mi is sized
+# against the measured ~180Mi agent footprint with Envoy off, and fits the
+# tightest node's remaining request budget. A request large enough to leave
+# one agent Pending would leave that node silently unenforced.
+resources:
+  requests:
+    cpu: 100m
+    memory: 192Mi
+  limits:
+    memory: 512Mi
+
+operator:
+  # Off the datapath, but required for identity allocation: with it down, a
+  # newly scheduled pod gets no CiliumIdentity and policy cannot resolve for
+  # it. Two replicas keep that window closed across a node reboot.
+  replicas: 2
+  resources:
+    requests:
+      cpu: 25m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
