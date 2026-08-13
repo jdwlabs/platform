@@ -363,3 +363,21 @@ whoever implements it.
   against this cluster's admission webhook; verify with a `--dry-run=server`
   first, per this repo's own documented Windows/kubectl gotcha that
   `--dry-run=server` still runs admission plugins.
+
+## Addendum — 2026-08-13: Vault raft-HA superseded Batch 4
+
+Vault raft-HA (a separate ticket) has landed since this runbook was
+written. Vault now runs 3 replicas, and all 3 Vault volumes are already on
+engine v1.12.0 — not via this runbook's Batch 4, but incidentally through
+the raft-HA cutover. This supersedes the "2 orphan volumes" evidence above
+([Orphan volumes and the Vault coupling](#orphan-volumes-and-the-vault-coupling))
+and [Batch 4 — Vault](#batch-4--vault-1-volume-highest-stakes-alone): both
+sections are left as-is per this doc's append-only convention, but neither
+reflects current cluster state.
+
+Remaining work is exactly Batches 1–3 above (11 volumes: monitoring x4,
+CNPG non-prod x3, CNPG prod + litellm x4). A human still needs to run those
+three batches, one at a time, via the existing per-volume trigger command
+([Sequence — batched, least-critical first](#sequence--batched-least-critical-first)) —
+this remains human-executed only; the agent contract forbids storage-layer
+mutation.

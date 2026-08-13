@@ -26,12 +26,12 @@ defaultSettings:
   orphanResourceAutoDeletion: "replica-data"
   dataLocality: "best-effort"
   deletingConfirmationFlag: true
-  # Chart default happens to be 0 already, but leaving it implicit means a
-  # future chart bump is free to change that default out from under us and
-  # start auto-upgrading engines unattended. This cluster has a documented
-  # instance-manager cascade history, so engine upgrades stay human-triggered
-  # via a batched spec.image patch — pinning the value keeps that true no
-  # matter what the chart's own default becomes.
+  # Automatic engine upgrade stays disabled: this cluster has a documented
+  # history of instance-manager cascade failures, and instance-manager
+  # memory footprint scales with attached volumes and rebuild activity.
+  # Engine upgrades are done manually, in a batched window, per the
+  # engine-upgrade runbook — an unattended cluster-wide upgrade is the
+  # opposite of that.
   concurrentAutomaticEngineUpgradePerNodeLimit: 0
   # System-managed components (engine-image, instance-manager, longhorn-csi-plugin).
   systemManagedComponentsNodeSelector: "workload.jdwlabs.io/worker:true"
