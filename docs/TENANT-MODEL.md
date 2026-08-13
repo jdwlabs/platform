@@ -72,7 +72,7 @@ In non-interactive mode, each field reads from
 
 ## `deploymentRepo.url`
 
-A tenant may keep its application manifests in a separate private repo.
+A tenant may keep its application manifests in a separate repo.
 Set `deploymentRepo.url` in `tenant.yaml`:
 
 ```yaml
@@ -84,6 +84,26 @@ deploymentRepo:
 When set, the tenant's `<tenant>-deployments` ApplicationSet auto-generates
 Apps from that repo. Leave the field unset if all of the tenant's
 workloads live in `tenants/<name>/services/`.
+
+### Private deployment repos
+
+A public repo needs nothing beyond the field above — ArgoCD clones it
+anonymously. A **private** repo additionally needs a repository credential,
+or the ApplicationSet renders Apps that cannot sync.
+
+Register the credential as a Secret in the `argocd` namespace labelled
+`argocd.argoproj.io/secret-type: repository`, sourced from Vault via an
+ExternalSecret so no credential is committed. GitHub App is the preferred
+mechanism — it does not expire, is scoped to the repos you grant it, and
+matches how git access is already provisioned elsewhere in this repo.
+
+Vault path `<tenant>-argocd-repo`, with fields `app-id`, `installation-id`
+and `private-key`. ArgoCD consumes them as `githubAppID`,
+`githubAppInstallationID` and `githubAppPrivateKey`. See
+`tenants/platform/services/argo-cd/postInstall/` for a worked example.
+
+The AppProject's `sourceRepos` is derived from `deploymentRepo.url` by the
+`tenant-envelope` chart, so no separate project change is required.
 
 ## Removing a tenant
 
