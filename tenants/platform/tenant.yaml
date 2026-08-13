@@ -110,16 +110,19 @@ services:
     syncWave: 0
 
   # Wave 1: Core infrastructure (Networking, TLS, Storage)
-  # Policy engine only — Flannel keeps the CNI slot and the datapath. Installed
-  # in audit mode, so it enforces nothing until the allow-set has been
-  # corrected against observed traffic.
-  - name: cilium
-    chart: cilium
-    repo: https://helm.cilium.io
-    revision: 1.20.0
-    namespace: kube-system
-    postInstall: true
-    syncWave: 1
+  # Cilium (chained policy engine, ADR 0012/0013) reverted 2026-08-13: despite
+  # `cilium status` reporting chaining engaged (generic-veth), Service/ClusterIP
+  # traffic broke cluster-wide within ~2h of rollout (CoreDNS unreachable via
+  # its own ClusterIP, cascading to every ExternalSecret and several app pods).
+  # Root cause not yet isolated — see the NetworkPolicy-enforcement ADRs
+  # before re-attempting. Flannel remains the sole CNI in the meantime.
+  # - name: cilium
+  #   chart: cilium
+  #   repo: https://helm.cilium.io
+  #   revision: 1.20.0
+  #   namespace: kube-system
+  #   postInstall: true
+  #   syncWave: 1
 
   - name: cert-manager
     chart: cert-manager
