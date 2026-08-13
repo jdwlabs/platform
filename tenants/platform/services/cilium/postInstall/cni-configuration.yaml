@@ -3,6 +3,11 @@
 # cni-conf.json exactly — CNI matches a conflist by `name`, so a value other
 # than cbr0 yields a configuration nothing ever uses, with no error. Compare
 # this against kube-flannel-cfg at every Flannel bump.
+#
+# chaining-mode belongs to the cilium-cni plugin block and is not the same
+# setting as the daemon's cni-chaining-mode. The plugin binary reads only this
+# file; without the key it sees flannel's PrevResult, concludes it was invoked
+# unchained, and fails every pod sandbox creation on the node.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -30,7 +35,8 @@ data:
           }
         },
         {
-          "type": "cilium-cni"
+          "type": "cilium-cni",
+          "chaining-mode": "generic-veth"
         }
       ]
     }
