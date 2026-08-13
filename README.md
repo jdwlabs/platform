@@ -1,7 +1,7 @@
 # Platform
 
 [![Validate](https://github.com/jdwlabs/platform/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/jdwlabs/platform/actions/workflows/validate.yml)
-[![Release Charts](https://github.com/jdwlabs/platform/actions/workflows/release.yaml/badge.svg?branch=main)](https://github.com/jdwlabs/platform/actions/workflows/release.yaml)
+[![Release Charts](https://github.com/jdwlabs/platform/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/jdwlabs/platform/actions/workflows/release.yml)
 [![Release platformctl](https://github.com/jdwlabs/platform/actions/workflows/release-platformctl.yml/badge.svg)](https://github.com/jdwlabs/platform/actions/workflows/release-platformctl.yml)
 [![License](https://img.shields.io/badge/License-PolyForm%20NonCommercial%201.0-blue)](https://polyformproject.org/licenses/noncommercial/1.0.0/)
 
