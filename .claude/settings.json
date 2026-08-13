@@ -20,14 +20,17 @@
       "Bash(kubectl explain *)",
       "Bash(kubectl api-resources*)",
       "Bash(kubectl version*)",
+      "Bash(kubectl apply *)",
       "Bash(helm show *)",
       "Bash(helm template *)",
       "Bash(helm pull *)",
       "Bash(helm list*)",
       "Bash(helm search *)"
     ],
-    "deny": [
-      "Bash(kubectl apply *)",
+    "ask": [
+      "Bash(kubectl rollout restart *)",
+      "Bash(kubectl exec -n kube-system *)",
+      "Bash(kubectl -n kube-system exec *)",
       "Bash(kubectl delete *)",
       "Bash(kubectl patch *)",
       "Bash(kubectl edit *)",
@@ -37,14 +40,12 @@
       "Bash(kubectl scale *)",
       "Bash(kubectl autoscale *)",
       "Bash(kubectl expose *)",
-      "Bash(kubectl rollout *)",
       "Bash(kubectl drain *)",
       "Bash(kubectl cordon *)",
       "Bash(kubectl uncordon *)",
       "Bash(kubectl taint *)",
       "Bash(kubectl annotate *)",
       "Bash(kubectl label *)",
-      "Bash(kubectl exec *)",
       "Bash(kubectl run *)",
       "Bash(kubectl attach *)",
       "Bash(kubectl debug *)",
@@ -61,6 +62,7 @@
       "Bash(helm repo add *)",
       "Bash(helm plugin *)",
       "Bash(helm registry *)"
-    ]
+    ],
+    "deny": []
   }
 }
