@@ -317,7 +317,7 @@ for r in "${REPOS[@]}"; do
 done
 note "Next (separate PR, not this script): add actions/create-github-app-token to the"
 note "workflow that opens agent-authored PRs, keyed on AGENT_APP_ID / AGENT_APP_PRIVATE_KEY —"
-note "see docs/adr/0017-agentic-app-topology.md §4 for the exact shape to mirror from"
+note "see docs/adr/0018-agentic-app-topology.md §4 for the exact shape to mirror from"
 note "deployments/.github/workflows/promote-prd.yml."
 
 finish
