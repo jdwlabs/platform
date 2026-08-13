@@ -34,6 +34,17 @@ policyAuditMode: true
 envoy:
   enabled: false
 
+tls:
+  # Holds secrets for TLS-aware policies, which are an L7 feature chaining
+  # cannot use. The chart defaults to creating a cilium-secrets namespace for
+  # them; the AppProject's destinations are generated from this tenant's
+  # namespaces and service namespaces, so a namespace the chart invents is not
+  # a permitted destination and the whole sync fails validation. Keeping the
+  # (unused) RBAC in kube-system avoids inventing a namespace at all.
+  secretsNamespace:
+    create: false
+    name: kube-system
+
 # KubePrism, Talos's node-local apiserver proxy.
 k8sServiceHost: localhost
 k8sServicePort: 7445
