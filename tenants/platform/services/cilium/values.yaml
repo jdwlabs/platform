@@ -17,8 +17,16 @@ cni:
 routingMode: native
 enableIPv4Masquerade: false
 enableIPv6Masquerade: false
+# Upstream's generic-veth guidance recommends this on, but this cluster's
+# Flannel runs bridge-mode (cni0), not point-to-point veth. Enabled, it
+# installs a per-endpoint /32 host route that bypasses cni0's bridge for
+# every pod Cilium creates — breaking host-to-pod delivery for exactly
+# those pods (kubelet probes, and any inbound response to a pod-initiated
+# flow) while pods that predate Cilium, delivered only via the coarse
+# /24-via-cni0 bridge route, are unaffected. Off, every pod is delivered
+# the same way — through the bridge, same as before Cilium existed.
 endpointRoutes:
-  enabled: true
+  enabled: false
 
 ipam:
   mode: kubernetes
