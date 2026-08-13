@@ -50,7 +50,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md#deployments-applicationset) for the deploy
 
 - **Namespace**: Per-tenant namespaces prevent resource collisions
 - **ArgoCD AppProject**: Tenant apps can only deploy to their own namespaces
-- **NetworkPolicy**: Default-deny with explicit allow rules per namespace, defined but **not yet enforced** — Flannel has no policy engine, so these objects are currently accepted by the API server and ignored at the data plane. Enforcement is planned via chained Cilium (see [ADR 0012](adr/0012-networkpolicy-enforcement-via-chained-cilium.md) and [ADR 0013](adr/0013-chained-cilium-rollout-sizing-and-proof.md)); until that rollout lands, treat namespace/RBAC/AppProject scoping as the real isolation boundary
+- **NetworkPolicy**: Default-deny with explicit allow rules per namespace, defined but **not yet enforced** — Flannel has no policy engine, so these objects are currently accepted by the API server and ignored at the data plane. Enforcement is planned via chained Cilium (see [ADR 0012](adr/0012-networkpolicy-enforcement-via-chained-cilium.md), [ADR 0013](adr/0013-chained-cilium-rollout-sizing-and-proof.md) and [ADR 0017](adr/0017-chained-cilium-rollout-corrections.md), which corrects 0013's rollout sequence and is the one to follow); until that rollout lands, treat namespace/RBAC/AppProject scoping as the real isolation boundary. Once the engine is running, a namespace isolates only when its `tenant.yaml` entry sets `enforce: true` — no namespace does today
 - **ResourceQuota**: Prevents resource exhaustion by any single tenant
 - **Vault**: Tenant secrets are under separate KV path prefixes
 
