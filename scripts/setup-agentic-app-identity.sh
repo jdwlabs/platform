@@ -198,7 +198,10 @@ REPOS=(apps platform infrastructure deployments)
 # Keep the local record out of any repo working tree — this file ends up
 # holding the App ID and a path to the private key (never the key material
 # itself), but there's no reason for it to live inside a git-tracked dir.
-ENV_FILE="${ENV_FILE:-$HOME/.config/jdwlabs/agent-app-identity.env}"
+# Plain assignment, not "${ENV_FILE:-...}": the library above the marker
+# already defaults ENV_FILE to ".env", so a second :- here would never fire
+# and this script would silently write into the repo's cwd instead.
+ENV_FILE="$HOME/.config/jdwlabs/agent-app-identity.env"
 mkdir -p "$(dirname "$ENV_FILE")"
 
 TOTAL_STAGES=5
@@ -221,6 +224,11 @@ step "Click 'Create GitHub App'."
 say "On the App's settings page that opens next, copy the App ID shown near the top."
 ask AGENT_APP_ID "Paste the App ID:"
 write_env AGENT_APP_ID "$AGENT_APP_ID"
+say "Also copy the slug from the page's URL (github.com/organizations/${ORG}/settings/apps/<slug>) —"
+say "needed below even if you kept the default name, and required if that name was taken."
+ask AGENT_APP_SLUG "App slug (Enter for jdwlabs-agent-bot):"
+AGENT_APP_SLUG="${AGENT_APP_SLUG:-jdwlabs-agent-bot}"
+write_env AGENT_APP_SLUG "$AGENT_APP_SLUG"
 
 # ── Stage 2: generate + save the private key ───────────────────────────────
 stage "Generate the private key"
@@ -240,7 +248,10 @@ fi
 # ── Stage 3: install on the four repos ──────────────────────────────────────
 stage "Install on the four repos"
 say "docs/adr/0017 §2 deliberately scopes this narrower than jdwlabs-release-bot's org-wide install."
-open_url "https://github.com/organizations/${ORG}/settings/apps/jdwlabs-agent-bot/installations"
+if [[ -z "${AGENT_APP_SLUG:-}" ]]; then
+  AGENT_APP_SLUG=$(_existing AGENT_APP_SLUG || echo jdwlabs-agent-bot)
+fi
+open_url "https://github.com/organizations/${ORG}/settings/apps/${AGENT_APP_SLUG}/installations"
 step "Click 'Install' (or the gear icon if already installed once)."
 step "Choose 'Only select repositories'."
 for r in "${REPOS[@]}"; do
@@ -293,7 +304,10 @@ say "this script can trigger before that workflow step exists."
 for r in "${REPOS[@]}"; do
   target="${ORG}/${r}"
   if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    names=$(gh secret list --repo "$target" --json name -q '.[].name' 2>/dev/null | grep -E '^AGENT_APP_(ID|PRIVATE_KEY)$' | sort | tr '\n' ' ')
+    # grep exits 1 (no match) on the very first-run/no-secrets-yet case this
+    # stage exists to catch — under `set -o pipefail` that would kill the
+    # whole script here instead of reaching the warn branch below.
+    names=$(gh secret list --repo "$target" --json name -q '.[].name' 2>/dev/null | { grep -E '^AGENT_APP_(ID|PRIVATE_KEY)$' || true; } | sort | tr '\n' ' ')
     if [[ "$names" == "AGENT_APP_ID AGENT_APP_PRIVATE_KEY " ]]; then
       printf '  %s✓%s %s has both secrets\n' "$GREEN" "$RESET" "$target"
     else
