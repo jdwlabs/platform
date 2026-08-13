@@ -9,11 +9,15 @@ References: `docs/adr/0015-agentic-contribution-identity-and-review-gates.md`
 ("Options considered — identity", "Bypass actors — a flagged hole, not a
 fix", "Consequences — Not addressed here").
 
-## 1. Bypass actor `4065387` — resolved
+## 1. Bypass actor `4065387` — identity resolved, purpose re-examined
 
 ADR 0015 flagged `deployments`' `PRD Promotion Review Gate` ruleset granting
 `{"actor_type": "Integration", "actor_id": 4065387, "bypass_mode":
-"pull_request"}` to an unconfirmed identity, naming Renovate as a candidate.
+"pull_request"}` to an unconfirmed identity, naming Renovate as a candidate,
+and asked Phase 2 to understand it "before it's replicated to three more
+repos."
+
+### Identity
 
 `gh api orgs/jdwlabs/installations` (org-level, admin-token, read-only) lists
 every App installation in the org and resolves it directly:
@@ -25,24 +29,88 @@ repository_selection: "all"
 ```
 
 The bypass actor is `jdwlabs-release-bot` itself — not Renovate, not a
-third-party integration. This matches the repo's own history: `deployments`
-PR #110 ("let the release bot merge its own appVersion bumps") is the change
-that dropped `required_approving_review_count` to 0 on `Baseline` and
-narrowed `CODEOWNERS` specifically so the release bot's own appVersion-bump
-PRs could merge unattended on green checks, while `PRD Promotion Review
-Gate`'s `require_code_owner_review: true` (CODEOWNERS-scoped to
-`values-prd.yaml` / `argocd/prd/`) still forces a human review for the
-production-facing path. The `pull_request`-scoped bypass on that same
-ruleset exists so the App can open the PR without needing a reviewer for its
-own non-owned-path changes — the hole ADR 0015 flagged is not a hole, it's
-the mechanism PR #110 already documented and reasoned through.
+third-party integration.
 
-A second finding, not previously recorded: `repository_selection: "all"`
-means `jdwlabs-release-bot` is already installed org-wide, across all
-repositories the org has, not scoped to `deployments` alone — even though
-only `deployments`' ruleset currently references its bypass actor. This is
-relevant to §2 below: the org's most mature App installation already uses
-the broad-install shape, not a narrowly-scoped one.
+### It isn't only on `PRD Promotion Review Gate`
+
+The same `Integration 4065387` bypass, at the same `bypass_mode:
+"pull_request"`, is present on all three `deployments` rulesets that cover
+`main`:
+
+| Ruleset | id | `required_approving_review_count` | `require_code_owner_review` | Other rules |
+|---|---|---|---|---|
+| `Baseline` | 17653708 | 0 | false | `deletion`, `non_fast_forward`, `required_linear_history`, `required_status_checks` (9 checks) |
+| `PRD Promotion Review Gate` | 18824430 | 0 | true (CODEOWNERS-scoped: `values-prd.yaml`, `argocd/prd/`) | — |
+| `Production Gates` | 17653706 | 0 | false | `deletion`, `non_fast_forward`, `required_linear_history`, `creation`; scoped to `main`, `release/**`, `hotfix/**` |
+
+ADR 0015 only examined the first row. `Production Gates` in particular
+carries a materially broader rule set (creation, deletion, linear-history —
+not just review) that ADR 0015 didn't mention at all.
+
+### What the bypass was meant to do, and what it turned out not to do
+
+`deployments` PR #51 ("scope the release app bypass to pull requests")
+narrowed the bypass on all three rulesets from `always` to `pull_request`,
+and states its own reasoning directly: *"`bypass_mode: pull_request` lets
+the App merge its own pull request — which it must, since an App cannot
+approve one."* That belief is the entire justification for the bypass
+existing in its current form on all three rulesets.
+
+`deployments` PR #110 ("let the release bot merge its own appVersion
+bumps"), filed later against the exact stall this bypass was supposed to
+prevent, found that belief **wrong**: *"`bypass_mode: pull_request` does
+NOT permit the App's explicit merge call... both the auto-merge and
+explicit-merge paths are closed."* PR #110's actual fix was unrelated to
+the bypass — it dropped `required_approving_review_count` to 0 on
+`Baseline` and narrowed `CODEOWNERS` so the bot's own non-owned-path
+changes need no review from anyone, bypass or not.
+
+My own earlier read of this ("the bypass exists so the App can open the PR
+without needing a reviewer") was also wrong, for a simpler reason: opening
+a pull request is never gated by branch-protection rules under any
+ruleset — only merging is. There's nothing for a bypass to do at PR-open
+time.
+
+### Conclusion: the bypass looks vestigial, not intentional
+
+Following the review-count value each ruleset actually carries today: on
+`Baseline` and `Production Gates`, `required_approving_review_count` is
+already 0, so the `pull_request` rule requires no review from anyone
+regardless of the bypass — the bypass has nothing left to do there. On
+`PRD Promotion Review Gate`, `require_code_owner_review: true` still
+applies to the CODEOWNERS-owned paths the promotion workflow actually
+touches (`values-prd.yaml`), and per PR #110's own finding the bypass
+cannot get the App around that requirement either — which is why PR #12's
+original design always routed promotion PRs through an explicit human
+review and merge, bypass or not. In no case examined does the bypass
+appear to be doing any live work today: it was added on the strength of an
+assumption (PR #51) that a later investigation (PR #110) explicitly
+disproved, and nothing since has gone back to remove it.
+
+This ADR does not remove it — that's a `deployments`-only ruleset change,
+independent of registering `jdwlabs-agent-bot`, and removing a bypass
+grant deserves its own verification pass rather than a drive-by edit here.
+But it should not be read as a validated pattern to replicate onto the new
+App's installations either. Recommended as separate follow-up: re-verify
+live behavior directly (e.g. dispatch a real promotion PR and attempt an
+App-token merge against each rule shape) before either removing the bypass
+entries as dead weight or, if some live effect is found that this reading
+missed, documenting what it actually is.
+
+### A second, unrelated finding
+
+`repository_selection: "all"` means `jdwlabs-release-bot` is installed
+org-wide, across every repository the org has, not scoped to `deployments`
+alone — even though only `deployments`' rulesets reference its bypass
+actor. None of PR #12, #51, or #110 — the three PRs that built and
+reshaped this App's access — discusses installation scope at all; the
+`all`-repositories setting is most plausibly the default outcome of
+whichever install click-path was used, not a decision anyone recorded
+reasoning about. Absence of a recorded rationale isn't proof of accident,
+but it's not evidence of a deliberate broad-access design either, so it's
+noted here only as a fact worth not repeating by default (see §2's
+narrower install choice for `jdwlabs-agent-bot`) — not as precedent for
+anything.
 
 ## 2. App topology — one shared App vs. one per agent class
 
@@ -101,10 +169,43 @@ existing convention, not a departure from it.
   distinguish App-authored from human-authored at the PR level; commit
   trailers distinguish within App-authored. Nothing about attribution
   requires a second App registration.
-- **The precedent that does exist (`jdwlabs-release-bot`) is installed
-  broadly (`repository_selection: "all"`, §1), not narrowly per-purpose
-  within its own surface** — reinforcing "one App per surface" over "one
-  App per finer-grained class."
+- **What §1's `repository_selection: "all"` finding does *not* support.**
+  An earlier draft of this ADR cited `jdwlabs-release-bot`'s org-wide
+  install as reinforcing evidence for "one App per surface." §1 now shows
+  that setting was never a deliberate choice — an unintentional default
+  can't be cited as precedent for anything, and this decision doesn't rest
+  on it.
+
+### The real cost this topology accepts, and how to bound it
+
+The argument above rules out per-class Apps on operational-cost grounds, but
+that isn't the same as saying one shared App is free. It has a real
+downside the earlier draft of this ADR didn't name: one App means the
+**same private key** sits in all four repos' Actions secret stores
+(`AGENT_APP_PRIVATE_KEY` on `apps`, `platform`, `infrastructure`, and
+`deployments` alike). A compromised CI job in any *one* of those repos — a
+malicious transitive dependency, a compromised third-party Action, a
+`pull_request_target` workflow that lets an untrusted PR body reach code
+with secret access — yields a credential good for `contents:write` +
+`pull_requests:write` everywhere the App is installed, `deployments`'
+production-promotion-adjacent paths included. That blast radius is the
+actual price of "one App, four repos," and per-class Apps would not have
+been the right fix for it anyway (splitting by *agent class* doesn't map to
+splitting by *repo*, and the operational cost above still applies).
+
+The right mitigation is scoping at token-mint time, not at App-registration
+time: `actions/create-github-app-token` — the same action
+`promote-prd.yml` already uses — accepts a `repositories` input (restrict
+the minted token to one repo, a subset of the App's full install list) and
+per-permission inputs (`permission-contents`, `permission-pull-requests`,
+everything else implicitly `none`). Each repo's workflow mints its own
+token scoped to just that repo at exactly the App's already-minimal
+permission ceiling, even though the underlying App installation spans all
+four. A token leaked from `apps`' CI, minted with `repositories: apps`,
+cannot touch `deployments` — the compromise is bounded to the repo it
+leaked from, regardless of what the App itself is installed on. This
+belongs in the workflow wiring, not the ruleset; see the runbook (§4) for
+where it lands.
 
 ### Where this is installed narrower than precedent
 
@@ -149,11 +250,31 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 This is the fingerprint: a commit with an agent co-author trailer, opened
 under a non-agent identity. #112 is not a hypothetical case this control
 would need to catch — it is a real, already-merged PR that would have
-tripped it. That makes this control directly falsifiable against history
-rather than speculative: run it against `platform`'s merged PRs and #112
-fails, #63 (dependabot-authored, no human co-author trailer) passes, and any
-future PR opened correctly through `jdwlabs-agent-bot` passes because its
-author *is* the agent identity, not a human one carrying an agent trailer.
+tripped it. That makes this control directly falsifiable against history:
+run it against `platform`'s merged PRs and #112 fails, #63
+(dependabot-authored, no human co-author trailer) passes, and any future PR
+opened correctly through `jdwlabs-agent-bot` passes because its author *is*
+the agent identity, not a human one carrying an agent trailer.
+
+### What this check cannot catch
+
+#112 trips this check only because the trailer happened to be present. The
+trailer is unauthenticated, self-asserted text in a commit message — a
+human (or an agent instructed to) can author a change under a personal
+identity and simply omit it, and the check has nothing to see. That is
+exactly the failure mode ADR 0015 named: "an agent that pushes under
+`jdwillmsen`'s own token" — an omitted trailer produces precisely that,
+passing this check while never having gone through the agent identity at
+all. This control catches an *accidental* leak of the wrong identity (the
+trailer present because agent tooling adds it by convention, as it already
+does in this org, while the PR was opened under the wrong account) — it is
+not, and cannot be, an enforcement mechanism against a *deliberate* or
+careless bypass of the App identity. Treat it as a tripwire for the
+common-case accident, not as proof the identity discipline is enforced;
+the actual enforcement is procedural (only ever open agent PRs through the
+App token) same as ADR 0015 already said, and this check is a cheap,
+partial backstop for when that procedure isn't followed — not a
+replacement for it.
 
 ### Proposed check
 
@@ -233,7 +354,11 @@ ID and private key): writing the four repos' secrets via `gh`.
      `deployments` (not "all repositories" — see §2).
   4. Wire `AGENT_APP_ID` / `AGENT_APP_PRIVATE_KEY` secrets on all four repos
      via `gh secret set --repo`.
-  5. Verify each repo can mint an installation token.
+  5. Verify both secrets landed on all four repos (`gh secret list`). The
+     script deliberately stops there — minting an actual installation
+     token needs a workflow run with the `create-github-app-token` step
+     from the next section, which doesn't exist until that follow-up PR
+     lands, so nothing in this script can exercise it yet.
 
 None of this is executed by this ADR or this PR — the script is committed
 for Jake to run once, and to re-run unmodified for the eventual key
@@ -245,25 +370,47 @@ rotation.
   agent-authored PRs, mirroring `deployments/.github/workflows/promote-prd.yml`'s
   `Generate promotion bot token` step, keyed on `AGENT_APP_ID` /
   `AGENT_APP_PRIVATE_KEY` instead of `RELEASE_APP_ID` / `RELEASE_APP_PRIVATE_KEY`.
+  Per §2's "real cost" analysis: pass `repositories: <owning-repo-only>` and
+  explicit `permission-contents` / `permission-pull-requests` inputs on
+  every one of the four repos' steps, even though the App itself is
+  installed on all four — each repo mints a token scoped to itself alone,
+  so a leak in one repo's CI can't reach the other three.
 - Implement and land `agent-identity / co-author-check` (§3), prove it
   against `platform` PR #112 (should fail) and #63 (should pass) as a
   regression fixture, then add it to `required_status_checks` per the draft
-  diff above and run `apply.sh`.
+  diff above and run `apply.sh`. Document its limits (§3, "What this check
+  cannot catch") alongside it so it isn't relied on as more than a
+  tripwire.
+- Separately, re-verify what (if anything) `jdwlabs-release-bot`'s
+  `Integration` bypass on `deployments`' three rulesets actually does live
+  (§1), and either remove it or document the real mechanism — before
+  deciding whether `jdwlabs-agent-bot` needs any bypass grant of its own
+  (current recommendation: it doesn't, see §3's ruleset diff).
 
 ## Consequences
 
 **Accepted cost.** One new App registration and one new pair of per-repo
 secrets (`AGENT_APP_ID` / `AGENT_APP_PRIVATE_KEY`), on top of the three the
-org already manages. Key rotation is a repeat of the human-only runbook.
+org already manages. Key rotation is a repeat of the human-only runbook. One
+shared private key across four repos' secret stores, whose blast radius on
+compromise is only bounded by per-workflow token scoping (§2) that has to
+be wired correctly in every one of the four repos' workflows — an ongoing
+discipline requirement, not a one-time setup step.
 
 **Not addressed here.** The `agent-identity / co-author-check` job's actual
-implementation (a script, not just a ruleset entry) and its CI wiring; the
-workflow change that adds `actions/create-github-app-token` where agent PRs
-are opened; running the human runbook itself. All are follow-up work gated
-on Jake completing the App registration.
+implementation (a script, not just a ruleset entry) and its CI wiring,
+including the documented limitation that an omitted trailer defeats it
+entirely (§3); the workflow change that adds `actions/create-github-app-token`
+(with per-repo `repositories`/`permission-*` scoping) where agent PRs are
+opened; running the human runbook itself; and re-verifying — not just
+re-explaining — what `jdwlabs-release-bot`'s `Integration` bypass on
+`deployments`' three rulesets actually does today, which §1 leaves as "looks
+vestigial" rather than confirmed dead. All are follow-up work gated on Jake
+completing the App registration.
 
 **Deliberately unchanged.** `jdwlabs-release-bot`'s existing bypass and
-installation shape (§1 only explains it, doesn't touch it); the
-`OrganizationAdmin` break-glass bypass (ADR 0015); every repo's existing
+installation shape (§1 explains and questions it, doesn't touch it — no
+ruleset in this org is edited by this ADR); the `OrganizationAdmin`
+break-glass bypass (ADR 0015); every repo's existing
 `required_approving_review_count` / `require_code_owner_review` shape (§3 —
 no ruleset edits needed there, only a new required check once it exists).
