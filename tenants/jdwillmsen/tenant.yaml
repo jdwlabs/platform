@@ -1,0 +1,31 @@
+name: jdwillmsen
+displayName: "Jdwillmsen"
+githubOrg: jdwillmsen
+contacts:
+  - jdwillmsen@gmail.com
+
+deploymentRepo:
+  url: https://github.com/jdwillmsen/deployments-private.git
+  revision: main
+
+namespaces:
+  # Single environment: personal workloads, no non/prd split to promote between.
+  # externalEgress is required — a Bedrock server in online mode authenticates
+  # players against Xbox Live, and NetworkPolicies are enforced now that the
+  # chained policy engine is in place.
+  - name: jdwillmsen-prd
+    quotaTier: standard
+    networkPolicy: default
+    externalEgress: true
+
+project:
+  elevated: false
+
+observability:
+  tenantId: jdwillmsen
+  grafana:
+    folder: jdwillmsen
+    team: jdwillmsen
+    access: edit
+
+services: []
