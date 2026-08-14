@@ -223,11 +223,30 @@ spec:
             sizeLimit: 500Mi
         {{- end }}
         - name: litellm-config
-          configMap:
-            name: {{ include "litellm.fullname" . }}-config
-            items:
-              - key: "config.yaml"
-                path: "config.yaml"
+          # Projected so an optional second ConfigMap (extraConfigMapProjection)
+          # can land extra files (e.g. a custom_callbacks.py for
+          # litellm_settings.callbacks) in this same directory. LiteLLM's
+          # get_instance_fn requires such a module to be a literal file next to
+          # config.yaml -- it has no PYTHONPATH fallback in every build, only
+          # some -- so two separate volumes both targeting /etc/litellm/ (one a
+          # full-directory ConfigMap mount, one a subPath mount into it) fails
+          # at container-init ("not a directory"): two volumes racing to both
+          # populate the same parent directory is fragile across container
+          # runtimes. A single projected volume with multiple sources is the
+          # correct, K8s-native primitive for "multiple sources, one directory".
+          # Default (extraConfigMapProjection unset) renders identically to the
+          # plain configMap volume this replaces.
+          projected:
+            sources:
+              - configMap:
+                  name: {{ include "litellm.fullname" . }}-config
+                  items:
+                    - key: "config.yaml"
+                      path: "config.yaml"
+              {{- with .Values.extraConfigMapProjection }}
+              - configMap:
+                  name: {{ . }}
+              {{- end }}
       {{- with .Values.volumes }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
