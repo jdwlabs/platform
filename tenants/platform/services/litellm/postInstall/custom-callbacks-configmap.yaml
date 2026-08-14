@@ -58,14 +58,20 @@ data:
     # template / special-token overhead, and Holmes' skill-file injection
     # (tenants/platform/services/holmes/values.yaml customSkills, sizeable
     # runbook markdown that can land in the system prompt outside of
-    # messages/tools). Confirmed live 2026-08-14: a first cut of this
-    # guardrail without `tools` in the count and a 512 margin still let a
-    # real drift-scan request through at the ceiling with prompt_tokens
-    # underestimated by several hundred tokens against vLLM's real count.
-    # Widened well past that gap rather than chasing an exact match run by
-    # run -- losing ~1.5k tokens of headroom out of a 32k window is cheap
-    # insurance against re-litigating this on every prompt-shape change.
-    SAFETY_MARGIN_TOKENS = 2048
+    # messages/tools).
+    #
+    # Confirmed live 2026-08-14 against the real drift-scan CronJob, whose
+    # prompt is deterministic across runs -- vLLM's own error reports "at
+    # least 16769 input tokens" every time. A first cut without `tools` in
+    # the count (no margin beyond the request itself) and a second cut with
+    # tools + a 2048 margin both still let the request through unclamped by
+    # context (hit the 16000 absolute cap, meaning this guardrail's own
+    # prompt_tokens estimate was under roughly 14720 -- a 2000+ token
+    # undercount against vLLM's real count, on top of whatever the 2048
+    # margin was already covering). Rather than keep chasing the exact size
+    # of an estimation gap this code cannot directly observe, widened well
+    # past it and re-verified against the same real job.
+    SAFETY_MARGIN_TOKENS = 6000
     # Never returns less than this -- a near-exhausted context gets a short
     # response instead of an outright max_tokens<=0 error, and this floor is
     # the signal something upstream (prompt size, this model's fit for the
