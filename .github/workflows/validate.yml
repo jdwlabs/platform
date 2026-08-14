@@ -8,6 +8,16 @@ on:
     branches:
       - main
 
+# Every job only reads the tree. Two of them (kubeconform, helm-lint) execute a
+# binary downloaded at runtime, so a token they cannot write with is the point.
+permissions:
+  contents: read
+
+# Cancel superseded PR runs; a main-push always runs the gates to completion.
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
