@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: truenas-graphite-exporter-mapping
+  namespace: monitoring
+data:
+  # Deliberately a narrow subset of what TrueNAS pushes, not the full upstream
+  # mapping. Two reasons: Prometheus here runs with a 20GB retention cap and
+  # cardinality is already a standing concern, and the ingest port is
+  # unauthenticated (see service.yaml) — combined with
+  # --graphite.mapping-strict-match, anything that does not match one of these
+  # patterns is dropped rather than stored, so a spoofed sender cannot invent
+  # arbitrary series.
+  #
+  # Names are prefixed truenas_ rather than carrying a job="truenas" label.
+  # A job label set by a mapping collides with the one Prometheus attaches at
+  # scrape time and silently becomes exported_job; the prefix cannot collide.
+  # host= mirrors the label blackbox-exporter already puts on this same
+  # machine, so NAS alerts from both sources join on one identifier.
+  #
+  # Metric paths follow netdata's graphite naming under a "truenas" prefix,
+  # which is the prefix the TrueNAS reporting exporter must be configured with.
+  mapping.conf: |
+    mappings:
+      # netdata zfspool: one series per pool per state, 1 marks the live state.
+      - match: 'truenas\.([^.]+)\.zfspool\.state_(.+)\.(.+)'
+        match_type: regex
+        name: "truenas_zfs_pool_state"
+        labels:
+          host: "${1}"
+          pool: "${2}"
+          state: "${3}"
+
+      # Filesystem-level capacity per mountpoint. netdata reports these in
+      # GiB, hence the unit in the name — every rule that consumes them uses a
+      # used/(used+avail) ratio, so the unit cancels and only the naming has
+      # to stay honest.
+      - match: 'truenas\.([^.]+)\.disk_space\.(.+)\.used'
+        match_type: regex
+        name: "truenas_disk_space_used_gib"
+        labels:
+          host: "${1}"
+          mountpoint: "${2}"
+
+      - match: 'truenas\.([^.]+)\.disk_space\.(.+)\.avail'
+        match_type: regex
+        name: "truenas_disk_space_avail_gib"
+        labels:
+          host: "${1}"
+          mountpoint: "${2}"
+
+      # Drive temperature is the only SMART attribute this pipeline carries;
+      # netdata renamed the chart between releases, so both spellings are
+      # mapped to one metric name rather than betting on which one 25.10 emits.
+      - match: 'truenas\.([^.]+)\.smart_log_smart\.disktemp\.([^.]+)\.(.+)'
+        match_type: regex
+        name: "truenas_disk_temperature_celsius"
+        labels:
+          host: "${1}"
+          serial: "${2}"
+
+      - match: 'truenas\.([^.]+)\.smart\.log\.smart\.disktemp\.([^.]+)\.(.+)'
+        match_type: regex
+        name: "truenas_disk_temperature_celsius"
+        labels:
+          host: "${1}"
+          serial: "${2}"

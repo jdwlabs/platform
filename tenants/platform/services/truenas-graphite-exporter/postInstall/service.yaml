@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: truenas-graphite-exporter
+  namespace: monitoring
+  # Carried only by this Service, not by the ingest one below — it is what the
+  # ServiceMonitor selects on, and the ingest Service exposes no /metrics port
+  # to scrape.
+  labels:
+    app: truenas-graphite-exporter
+spec:
+  type: ClusterIP
+  selector:
+    app: truenas-graphite-exporter
+  ports:
+    - name: metrics
+      port: 9108
+      targetPort: metrics
+      protocol: TCP
+---
+# Split from the ClusterIP Service above rather than adding a second port to
+# it: a Service of type NodePort allocates a node port for *every* port it
+# declares, which would publish /metrics on all five nodes as a side effect of
+# needing the ingest port reachable.
+#
+# NodePort and not LoadBalancer because this cluster has no LB implementation
+# — Cilium runs in chaining mode over Flannel with ipam: kubernetes and no
+# L2/BGP announcement, so nginx-gateway-fabric reaches the LAN the same way
+# (30180/30543). Gateway API is not an option either; this is raw TCP, not
+# HTTP.
+#
+# The ingest port is unauthenticated: the Graphite plaintext protocol has no
+# auth, and TrueNAS's exporter cannot add any. Anything on the LAN can write
+# to it. The blast radius is bounded to *metric* pollution — no code path
+# executes attacker input — and --graphite.mapping-strict-match plus the
+# narrow mapping means a sender can only forge series that already exist,
+# never invent new ones. Worth knowing when reading a pool-state alert: this
+# pipeline is trusted-LAN-grade, not authenticated.
+apiVersion: v1
+kind: Service
+metadata:
+  name: truenas-graphite-exporter-ingest
+  namespace: monitoring
+spec:
+  type: NodePort
+  selector:
+    app: truenas-graphite-exporter
+  ports:
+    - name: ingest
+      port: 9109
+      targetPort: ingest
+      # Pinned, not dynamically allocated: the NAS-side destination is
+      # configured by hand and must survive a Service being recreated.
+      nodePort: 30203
+      protocol: TCP
