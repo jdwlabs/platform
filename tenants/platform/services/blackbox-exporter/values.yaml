@@ -24,27 +24,27 @@ serviceMonitor:
   targets:
     - name: pve1-mgmt
       url: "192.168.1.200:22"
-      labels:
+      additionalMetricsRelabels:
         host: pve1
     - name: pve2-mgmt
       url: "192.168.1.201:22"
-      labels:
+      additionalMetricsRelabels:
         host: pve2
     - name: pve3-mgmt
       url: "192.168.1.202:22"
-      labels:
+      additionalMetricsRelabels:
         host: pve3
     - name: pve4-mgmt
       url: "192.168.1.203:22"
-      labels:
+      additionalMetricsRelabels:
         host: pve4
     - name: pve5-mgmt
       url: "192.168.1.204:22"
-      labels:
+      additionalMetricsRelabels:
         host: pve5
     - name: truenas-mgmt
       url: "192.168.1.205:22"
-      labels:
+      additionalMetricsRelabels:
         host: truenas
 
 prometheusRule:
@@ -60,4 +60,19 @@ prometheusRule:
       annotations:
         summary: "Host {{ $labels.host }} unreachable on :22"
         description: "TCP connect to {{ $labels.target }} ({{ $labels.host }}) has failed for 5m. This host has no in-cluster identity (bare hypervisor/NAS) — recovery may require Wake-on-LAN or physical access. See runbook."
+        runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/host-remote-power-recovery.md"
+
+    # Dead-man's-switch: probe_success == 0 above only matches an EXISTING
+    # series. If the exporter pod dies or its ServiceMonitor stops being
+    # scraped, probe_success disappears entirely and that comparison yields
+    # zero results — silently no alert, the exact "went dark, unnoticed"
+    # failure mode this chart exists to close, moved up one layer.
+    - alert: HardwareHostProbeMissing
+      expr: absent(probe_success{target=~".*-mgmt"}) == 1
+      for: 10m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Hardware host reachability probes have stopped reporting entirely"
+        description: "No probe_success series found for 10m — the blackbox-exporter deployment or its ServiceMonitor may be down. Host unreachability alerting is blind until this is fixed."
         runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/host-remote-power-recovery.md"
