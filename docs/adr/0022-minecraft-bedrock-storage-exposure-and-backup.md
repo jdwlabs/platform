@@ -72,8 +72,10 @@ Three consequences are not optional:
 - **Block storage fixes correctness, not availability.** A NAS outage takes an iSCSI
   volume down as surely as an NFS mount, and arguably harder: the filesystem is local
   while its journal sits across the broken link, so the volume can go read-only or
-  require `fsck` rather than simply hanging. Longhorn remains the only class that
-  survives the NAS being unavailable, and remains the default.
+  require `fsck` rather than simply hanging. Longhorn is the only replicated class that
+  survives the NAS being unavailable, and remains the default; `local-path` survives it
+  too but pins a volume to one node with no redundancy, which is not a serious candidate
+  for a world worth keeping.
 - **The democratic-csi API migration is a hard predecessor.** The iSCSI driver reaches
   TrueNAS over the same REST API removed in 26.04. After removal, provisioning, expansion
   and deletion fail on this class exactly as on the NFS one. Alerting does not mitigate a
@@ -110,8 +112,10 @@ no player has a saved server entry, the port change costs nothing and the contro
 change is not justified.
 
 The pod is scheduled by affinity onto `talos-lx0-6a4` or `talos-4h8-zy6`, the only nodes
-with room: they sit at 18% and 21% memory use against 64 GiB and 14.7 GiB allocatable,
-while the remaining six run 71–91%.
+with room: 61.3 GiB and 14.1 GiB allocatable respectively, against roughly 12 GiB and
+3 GiB in use when this was written. Every other node sits far tighter — see
+`infrastructure/docs/ram-expansion-decision.md` for the fleet's memory picture, which is
+the durable record; utilisation snapshots here would only go stale.
 
 ### 3. No third-party backup sidecar; a self-contained CronJob instead
 
@@ -142,7 +146,8 @@ AMP shipped a live-backup implementation missing this and corrupted worlds with 
 
 Because that protocol is easy to implement subtly wrong, a cold stop, copy and start is
 the safer default for a server with no players waiting on uptime, and is what was
-validated by hand when the world was first rescued. Live quiescing is an optimisation to
+validated by hand on 2026-08-13, when the world was archived off the VM to close the
+backup gap described above. Live quiescing is an optimisation to
 adopt only once the truncation behaviour is tested against a restore.
 
 Three properties are acceptance criteria, not refinements, because they are precisely
