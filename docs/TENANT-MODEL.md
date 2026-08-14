@@ -102,7 +102,9 @@ already seeds rather than adding a parallel one: its `github_app_id`,
 `github_app_installation_id` and `github_app_private_key` fields map directly
 onto ArgoCD's `githubAppID`, `githubAppInstallationID` and
 `githubAppPrivateKey`. Seed it with
-`platformctl bootstrap seed <tenant>-github-app`. See
+`platformctl bootstrap seed <tenant>-github-app`, run from a tree that
+contains `tenants/<tenant>/` — seed specs are derived from the tenants found
+on disk, so the key does not resolve before the tenant directory exists. See
 `tenants/platform/services/argo-cd/postInstall/` for a worked example.
 
 The App needs Contents: Read on the deployment repo, and must be installed on
