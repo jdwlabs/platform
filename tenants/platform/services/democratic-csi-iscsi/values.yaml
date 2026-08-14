@@ -1,0 +1,111 @@
+csiDriver:
+  name: "org.democratic-csi.iscsi"
+
+# Second democratic-csi release alongside the NFS one. csiDriver.name is
+# per-release, so a single release cannot serve both transports. ArgoCD names
+# the Helm release after the Application (platform-democratic-csi-iscsi), so
+# resources do not collide with the NFS release in this same namespace.
+#
+# Block rather than file: this class exists for workloads whose data is a
+# database expecting POSIX locking and mmap semantics — LevelDB, SQLite — which
+# are not reliable over NFS. Bulk and RWX workloads belong on truenas-nfs.
+driver:
+  # Set only so the chart selects iSCSI host mounts (not NFS); the actual
+  # driver config comes from existingConfigSecret.
+  config:
+    driver: freenas-api-iscsi
+  existingConfigSecret: democratic-csi-iscsi-driver-config
+
+storageClasses: []   # StorageClass managed declaratively in postInstall
+
+# Mirrors the sizing already established for the NFS release: both pods ran
+# BestEffort there and were first to evict under node memory pressure. The
+# iSCSI node container does attach/mount work rather than NFS mounts, but the
+# footprint is comparable, so the same requests apply until observed otherwise.
+csiProxy:
+  resources:
+    requests:
+      memory: 16Mi
+    limits:
+      memory: 64Mi
+
+controller:
+  driver:
+    resources:
+      requests:
+        memory: 96Mi
+      limits:
+        memory: 256Mi
+  externalAttacher:
+    resources:
+      requests:
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+  externalProvisioner:
+    resources:
+      requests:
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+  externalResizer:
+    resources:
+      requests:
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+  externalSnapshotter:
+    resources:
+      requests:
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+
+node:
+  # Talos runs kubelet in its own mount namespace, so the chart's default
+  # hostPath of /etc/iscsi does not resolve even though that directory exists
+  # on the host — the node pods sit in ContainerCreating with "hostPath type
+  # check failed: /etc/iscsi is not a directory". hostPID plus the nsenter
+  # strategy below is the supported Talos path: the driver enters the host
+  # namespace and runs the initiator the iscsi-tools extension provides,
+  # rather than shipping its own.
+  hostPID: true
+  driver:
+    # The extension installs the initiator under /usr/local, not /usr/sbin.
+    # Verified on the live nodes: /usr/local/sbin/{iscsiadm,iscsid} present,
+    # /usr/local/etc/iscsi absent — hence DirectoryOrCreate rather than the
+    # chart's default Directory, which would fail the same check again.
+    iscsiDirHostPath: /usr/local/etc/iscsi
+    iscsiDirHostPathType: DirectoryOrCreate
+    extraEnv:
+      - name: ISCSIADM_HOST_STRATEGY
+        value: nsenter
+      - name: ISCSIADM_HOST_PATH
+        value: /usr/local/sbin/iscsiadm
+    resources:
+      requests:
+        memory: 96Mi
+      limits:
+        memory: 256Mi
+  driverRegistrar:
+    resources:
+      requests:
+        memory: 32Mi
+      limits:
+        memory: 64Mi
+  cleanup:
+    resources:
+      requests:
+        memory: 16Mi
+      limits:
+        memory: 32Mi
+  # Same reasoning as the NFS release: the node DaemonSet has no business on
+  # control-plane nodes, and explicit anti-affinity survives a taint-timing
+  # race during a CP rejoin in a way that relying on the taint alone does not.
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
