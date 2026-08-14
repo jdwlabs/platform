@@ -27,6 +27,23 @@ csiProxy:
 # invisible to the scheduler. Requests are ~1.5x observed per container;
 # limits leave burst headroom for mount storms / large volume operations.
 controller:
+  # Disabled: the chart hardcodes this probe's timing (failureThreshold: 3,
+  # periodSeconds: 60, timeoutSeconds: 15 -- templates/controller.yaml, no
+  # values override beyond this on/off toggle) and it calls straight through
+  # to the driver's own Probe() RPC, which fails whenever the backend TrueNAS
+  # host is briefly unreachable -- confirmed live 2026-08-14, csi-driver
+  # container logs show repeated "TrueNAS api is unavailable: ... EHOSTUNREACH
+  # 192.168.1.205:80" right before each SIGTERM. 189 restarts accumulated over
+  # this pod's 19-day lifetime from that alone. Restarting the controller does
+  # not make TrueNAS reachable sooner -- the driver already handles a
+  # downstream-unreachable gRPC call gracefully on its own (it returns a real
+  # error to the caller, does not crash or hang) -- so the only effect of this
+  # probe, with no tunable available, is unnecessary restart churn on every
+  # transient NAS blip. If the driver process itself genuinely wedges, nothing
+  # else here currently detects that either; that's a real gap, but a false
+  # positive every time the NAS reboots is worse than no probe at all.
+  livenessProbe:
+    enabled: false
   # democratic-csi driver container carries most of the controller pod's usage.
   driver:
     resources:
