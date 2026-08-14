@@ -49,14 +49,6 @@ Run with no subcommand to list every volume.`,
 			return runVolumeList(cmd, g, &volumeListOptions{Class: "all"})
 		},
 	}
-	// Cobra reports a bad flag on stderr, which agents do not read, and the
-	// process prints nothing else on failure. Without this an unknown flag is an
-	// empty response with a non-zero exit: the one failure mode that looks like
-	// no data rather than a mistake. Subcommands inherit it from here.
-	cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
-		return reportVolumeError(c.OutOrStdout(), err,
-			fmt.Sprintf("Valid flags for `%s`: %s", c.CommandPath(), localFlagNames(c)))
-	})
 	cmd.AddCommand(newVolumesListCmd(g))
 	cmd.AddCommand(newVolumesReclaimCmd(g))
 	return cmd
@@ -145,6 +137,7 @@ is skipped unless --min-age is 0 or it is named explicitly.`,
 	cmd.Flags().BoolVar(&opts.Confirm, "confirm", false, "actually delete the selected volumes")
 	cmd.Flags().DurationVar(&opts.MinAge, "min-age", time.Hour,
 		"with --all-orphaned, skip volumes referenced by a pod more recently than this")
+	bindDryRun(cmd, g)
 	return cmd
 }
 
@@ -153,16 +146,16 @@ func runVolumeList(cmd *cobra.Command, g *Globals, opts *volumeListOptions) erro
 
 	fields, err := resolveVolumeFields(opts.Fields, opts.Full)
 	if err != nil {
-		return reportVolumeError(out, err, "Run `platformctl cluster volumes list --help` for the field list")
+		return reportCLIError(out, err, "Run `platformctl cluster volumes list --help` for the field list")
 	}
 	if !validVolumeClass(opts.Class) {
 		err := fmt.Errorf("unknown --class %s; valid: all, %s", opts.Class, strings.Join(volumeClasses, ", "))
-		return reportVolumeError(out, err, "Run `platformctl cluster volumes list --class orphaned` to see reclaim candidates")
+		return reportCLIError(out, err, "Run `platformctl cluster volumes list --class orphaned` to see reclaim candidates")
 	}
 
 	cands, err := loadVolumeCandidates(cmd.Context())
 	if err != nil {
-		return reportVolumeError(out, err, "Run `platformctl cluster status` to check Longhorn itself")
+		return reportCLIError(out, err, "Run `platformctl cluster status` to check Longhorn itself")
 	}
 
 	shown := cands
@@ -196,29 +189,29 @@ func runVolumeReclaim(cmd *cobra.Command, g *Globals, opts *volumeReclaimOptions
 	// Every flag conflict is settled before a single cluster read, so a
 	// malformed invocation can never half-execute.
 	if opts.Confirm && g.DryRun {
-		return reportVolumeError(out,
+		return reportCLIError(out,
 			fmt.Errorf("--confirm and --dry-run are mutually exclusive"),
 			"Run with --dry-run to preview, then re-run with --confirm to delete")
 	}
 	if !opts.Confirm && !g.DryRun {
-		return reportVolumeError(out,
+		return reportCLIError(out,
 			fmt.Errorf("reclaim needs --confirm to delete or --dry-run to preview"),
 			"Run `platformctl cluster volumes reclaim --all-orphaned --dry-run` first, then re-run with --confirm")
 	}
 	if opts.AllOrphaned && len(opts.Names) > 0 {
-		return reportVolumeError(out,
+		return reportCLIError(out,
 			fmt.Errorf("--all-orphaned and --name are mutually exclusive"),
 			"Run with --name for a specific volume, or --all-orphaned for every unclaimed one")
 	}
 	if !opts.AllOrphaned && len(opts.Names) == 0 {
-		return reportVolumeError(out,
+		return reportCLIError(out,
 			fmt.Errorf("reclaim needs --all-orphaned or at least one --name"),
 			"Run `platformctl cluster volumes list --class orphaned` to see what is reclaimable")
 	}
 
 	cands, err := loadVolumeCandidates(cmd.Context())
 	if err != nil {
-		return reportVolumeError(out, err, "Run `platformctl cluster status` to check Longhorn itself")
+		return reportCLIError(out, err, "Run `platformctl cluster status` to check Longhorn itself")
 	}
 
 	selected, skipped, refused := selectReclaimTargets(cands, opts)
@@ -233,7 +226,7 @@ func runVolumeReclaim(cmd *cobra.Command, g *Globals, opts *volumeReclaimOptions
 	if opts.Confirm {
 		dc, err := volumeDynamicClient()
 		if err != nil {
-			return reportVolumeError(out, err, "Check KUBECONFIG points at the cluster")
+			return reportCLIError(out, err, "Check KUBECONFIG points at the cluster")
 		}
 		for _, c := range selected {
 			if err := longhorn.DeleteVolume(cmd.Context(), dc, c.Name); err != nil {
@@ -568,16 +561,4 @@ func emitVolumeEvents(out io.Writer, g *Globals, phaseName string, cands []longh
 	}
 	em.Emit(Event{Phase: "volumes", Name: phaseName, Status: "ok", Message: summary})
 	return nil
-}
-
-// reportVolumeError writes the error and its fix as data on stdout, so an agent
-// reading stdout sees why the command refused and what to run instead.
-func reportVolumeError(out io.Writer, err error, help string) error {
-	if serr := display.ToonScalar(out, "error", err.Error()); serr != nil {
-		return serr
-	}
-	if serr := display.ToonList(out, "help", []string{help}); serr != nil {
-		return serr
-	}
-	return err
 }
