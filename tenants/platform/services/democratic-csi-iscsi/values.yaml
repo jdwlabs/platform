@@ -72,12 +72,13 @@ node:
   hostPID: true
   driver:
     # Under the nsenter strategy the driver runs the host's iscsiadm, so this
-    # volume is vestigial — it only has to resolve. It points at /var/lib/iscsi
-    # because that is the one candidate that both exists on the node and sits
-    # on a writable partition: /etc/iscsi does not resolve in kubelet's mount
-    # namespace, and /usr/local/etc is part of the immutable image, so
-    # DirectoryOrCreate there fails with "read-only file system".
-    iscsiDirHostPath: /var/lib/iscsi
+    # volume is vestigial — it only has to resolve, on a writable path, at a
+    # container mountPath the chart does not already use. /etc/iscsi does not
+    # resolve in kubelet's mount namespace; /usr/local/etc is part of the
+    # immutable image, so DirectoryOrCreate there fails read-only; and
+    # /var/lib/iscsi collides with the chart's own iscsi-info mount, which
+    # leaves ArgoCD unable to diff the DaemonSet at all.
+    iscsiDirHostPath: /var/etc/iscsi
     iscsiDirHostPathType: DirectoryOrCreate
     extraEnv:
       - name: ISCSIADM_HOST_STRATEGY
