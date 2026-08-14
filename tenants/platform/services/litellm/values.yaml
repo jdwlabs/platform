@@ -97,6 +97,25 @@ proxy_config:
   litellm_settings:
     drop_params: true
     num_retries: 2
+    # Server-side max_tokens ceiling. litellm_params.max_tokens above is only
+    # a default -- the router always lets a caller's explicit max_tokens win
+    # (see postInstall/custom-callbacks-configmap.yaml for the full why).
+    # Module path resolves to custom_callbacks.py, mounted alongside
+    # config.yaml below by the volumes/volumeMounts overrides.
+    callbacks: custom_callbacks.guardrail_instance
+
+# Mounts the ConfigMap from postInstall/custom-callbacks-configmap.yaml as a
+# second file in the same directory LiteLLM already loads config.yaml from --
+# required for litellm_settings.callbacks above to import it by module path.
+volumes:
+  - name: litellm-custom-callbacks
+    configMap:
+      name: litellm-custom-callbacks
+volumeMounts:
+  - name: litellm-custom-callbacks
+    mountPath: /etc/litellm/custom_callbacks.py
+    subPath: custom_callbacks.py
+    readOnly: true
 
 # Boot spike (Prisma engine + proxy import) OOMKilled the container at both
 # 512Mi and 1Gi within ~4s; verified starting clean at 2Gi. Request matches

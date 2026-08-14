@@ -1,0 +1,76 @@
+# Enforces a hard per-model max_tokens ceiling before a request reaches the
+# backend. litellm_params.max_tokens on a model_list entry is a DEFAULT only
+# -- LiteLLM's router builds the outgoing request as {**litellm_params,
+# **kwargs}, so a caller's explicit max_tokens always wins over the config
+# value. Holmes always sends an explicit max_tokens (falls back to a
+# max(64000, 12%-of-context) floor when it can't resolve a model's real
+# limit, which it can't for a proxy-aliased self-hosted model), so the
+# config's existing max_tokens: 16384 on each entry was never actually
+# enforced. This pre-call hook is the one shared choke point every caller
+# goes through, regardless of what any client requests.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-custom-callbacks
+  namespace: ai-sre
+data:
+  custom_callbacks.py: |
+    from typing import Literal, Optional
+
+    from litellm.integrations.custom_logger import CustomLogger
+    from litellm.proxy.proxy_server import UserAPIKeyAuth, DualCache
+
+    # Every model_list entry's real backend context window, minus headroom for
+    # prompt tokens. sre-investigator-local is the only entry whose backend
+    # (vLLM, max_model_len=32768) hard-rejects an over-limit request instead of
+    # tolerating it -- the cloud entries (OpenRouter, NVIDIA NIM) silently
+    # accept a larger value today, but capping all four keeps the guarantee
+    # true regardless of what any given provider currently tolerates.
+    MAX_TOKENS_CEILING_BY_MODEL = {
+        "sre-investigator": 16000,
+        "sre-investigator-fb1": 16000,
+        "sre-investigator-fb2": 16000,
+        "sre-investigator-local": 16000,
+    }
+    # Any model_list entry not named above still gets this ceiling -- new
+    # entries are safe by default rather than silently uncapped.
+    DEFAULT_MAX_TOKENS_CEILING = 16000
+
+
+    class MaxTokensCeilingGuardrail(CustomLogger):
+        async def async_pre_call_hook(
+            self,
+            user_api_key_dict: UserAPIKeyAuth,
+            cache: DualCache,
+            data: dict,
+            call_type: Literal[
+                "completion",
+                "text_completion",
+                "embeddings",
+                "image_generation",
+                "moderation",
+                "audio_transcription",
+            ],
+        ) -> Optional[dict]:
+            requested = data.get("max_tokens")
+            if requested is None:
+                return data
+
+            model = data.get("model", "")
+            ceiling = MAX_TOKENS_CEILING_BY_MODEL.get(model, DEFAULT_MAX_TOKENS_CEILING)
+
+            if requested > ceiling:
+                import logging
+
+                logging.getLogger("litellm").warning(
+                    "max_tokens_ceiling_guardrail: clamped model=%s requested=%s to ceiling=%s",
+                    model,
+                    requested,
+                    ceiling,
+                )
+                data["max_tokens"] = ceiling
+
+            return data
+
+
+    guardrail_instance = MaxTokensCeilingGuardrail()
