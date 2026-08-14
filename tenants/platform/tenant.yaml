@@ -267,6 +267,14 @@ services:
     postInstall: true
     syncWave: 2
 
+  - name: blackbox-exporter
+    chart: prometheus-blackbox-exporter
+    repo: https://prometheus-community.github.io/helm-charts
+    revision: "11.17.2"
+    namespace: monitoring
+    postInstall: false
+    syncWave: 2
+
   # Distributed tracing backend. Single-binary Tempo chart now lives in the
   # grafana-community repo (grafana/helm-charts copy is deprecated).
   - name: tempo

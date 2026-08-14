@@ -1,0 +1,62 @@
+# tcp_connect (not icmp): the icmp module needs the NET_RAW capability, which
+# this namespace's baseline PSA enforcement disallows adding
+# (helm-charts/tenant-envelope/templates/namespaces.yaml). A TCP connect to
+# SSH is a reasonable reachability proxy that needs no elevated capability at
+# all — chart's default securityContext (drop: ["ALL"], no add) is untouched.
+config:
+  modules:
+    tcp_connect:
+      prober: tcp
+      timeout: 5s
+
+serviceMonitor:
+  enabled: true
+  defaults:
+    module: tcp_connect
+    interval: 60s
+    scrapeTimeout: 10s
+
+  # Hosts have no in-cluster identity (bare hypervisors/NAS, not K8s nodes),
+  # so this is the only place their reachability is declared — see
+  # infrastructure repo docs/host-addressing.md for how these addresses are
+  # pinned (gateway DHCP reservations, confirmed live 2026-08-14).
+  targets:
+    - name: pve1-mgmt
+      url: "192.168.1.200:22"
+      labels:
+        host: pve1
+    - name: pve2-mgmt
+      url: "192.168.1.201:22"
+      labels:
+        host: pve2
+    - name: pve3-mgmt
+      url: "192.168.1.202:22"
+      labels:
+        host: pve3
+    - name: pve4-mgmt
+      url: "192.168.1.203:22"
+      labels:
+        host: pve4
+    - name: pve5-mgmt
+      url: "192.168.1.204:22"
+      labels:
+        host: pve5
+    - name: truenas-mgmt
+      url: "192.168.1.205:22"
+      labels:
+        host: truenas
+
+prometheusRule:
+  enabled: true
+  rules:
+    # No job matcher: this is the only ServiceMonitor in the repo that emits
+    # probe_success, so the metric name alone is unambiguous cluster-wide.
+    - alert: HardwareHostUnreachable
+      expr: probe_success == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Host {{ $labels.host }} unreachable on :22"
+        description: "TCP connect to {{ $labels.target }} ({{ $labels.host }}) has failed for 5m. This host has no in-cluster identity (bare hypervisor/NAS) — recovery may require Wake-on-LAN or physical access. See runbook."
+        runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/host-remote-power-recovery.md"
