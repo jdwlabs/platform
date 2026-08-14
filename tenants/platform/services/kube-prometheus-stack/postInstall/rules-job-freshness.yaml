@@ -1,0 +1,83 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: job-freshness-rules
+  namespace: monitoring
+spec:
+  groups:
+    # Scheduled work fails in a way ordinary liveness checks are blind to: the
+    # pod is Up, the schedule fires, the container exits 0, and nothing is
+    # produced. A backup sidecar here ran twice daily for months writing zero
+    # archives, and every signal the cluster had said healthy.
+    #
+    # These rules cover the half of that failure mode that is observable from
+    # metrics that already exist — a job that stopped completing, or never
+    # completed at all. They do NOT cover the empty-output case, which needs
+    # the producing job to publish an artifact signal; that contract is
+    # specified in docs/observability/JOB-OUTPUT-FRESHNESS.md and is not
+    # expressed as a rule here because no such metric exists in this cluster
+    # yet and a rule matching nothing is indistinguishable from a rule that
+    # passes.
+    - name: job-output-freshness
+      rules:
+        # 24h is four times the interval of the slowest CronJob in this repo
+        # (postgres-backup, every 6h), so no single missed or slow run can
+        # trip it, while a job that has quietly stopped succeeding is caught
+        # within a day. A CronJob scheduled less often than every 6h needs its
+        # own rule rather than a bumped threshold here — see the doc.
+        - alert: CronJobHasNotSucceededRecently
+          expr: |
+            (time() - max by (namespace, cronjob) (kube_cronjob_status_last_successful_time)) > 86400
+            and on (namespace, cronjob) max by (namespace, cronjob) (kube_cronjob_spec_suspend) == 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} has not succeeded in 24h"
+            description: "Last successful completion was {{ $value | humanizeDuration }} ago. The CronJob is not suspended, so it is either failing, not being scheduled, or its jobs are never completing."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # kube-state-metrics only emits last_successful_time once a job has
+        # actually completed, so a CronJob that has never once succeeded has no
+        # series at all and is invisible to the rule above — the failure mode
+        # where something is merrily scheduled from the day it ships and has
+        # never worked. Same 24h grace, measured from creation.
+        - alert: CronJobNeverSucceeded
+          expr: |
+            (
+              (time() - max by (namespace, cronjob) (kube_cronjob_created)) > 86400
+              unless on (namespace, cronjob) max by (namespace, cronjob) (kube_cronjob_status_last_successful_time)
+            )
+            and on (namespace, cronjob) max by (namespace, cronjob) (kube_cronjob_spec_suspend) == 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} has never completed successfully"
+            description: "The CronJob was created over 24h ago and kube-state-metrics has never recorded a successful completion for it."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # Catches a failing job hours before the 24h rule does, by comparing
+        # when the CronJob last fired against when it last worked.
+        #
+        # The `for:` here is load-bearing and must stay longer than any covered
+        # job's normal runtime: between a schedule firing and that run
+        # completing, last_schedule_time has advanced while
+        # last_successful_time has not, so the difference legitimately spikes
+        # to a full interval on every healthy run. 1h is longer than any job
+        # here takes, so a healthy run always resolves the condition before it
+        # fires, while a genuinely failing run holds it true indefinitely.
+        - alert: CronJobLastRunDidNotSucceed
+          expr: |
+            (
+              max by (namespace, cronjob) (kube_cronjob_status_last_schedule_time)
+              - max by (namespace, cronjob) (kube_cronjob_status_last_successful_time)
+            ) > 3600
+            and on (namespace, cronjob) max by (namespace, cronjob) (kube_cronjob_spec_suspend) == 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} fired but has not succeeded since"
+            description: "{{ $labels.cronjob }} was last scheduled {{ $value | humanizeDuration }} after its last success, and has stayed that way for an hour. The most recent run is failing or hanging."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"

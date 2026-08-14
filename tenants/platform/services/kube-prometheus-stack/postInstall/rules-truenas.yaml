@@ -1,0 +1,156 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: truenas-rules
+  namespace: monitoring
+spec:
+  groups:
+    - name: truenas-storage
+      rules:
+        # DEGRADED means redundancy is gone but data is still served, which is
+        # the window in which a second failure becomes fatal — warning so it
+        # reads as "act today", not "act now", and so it does not compete with
+        # the not-online case below.
+        - alert: TrueNASPoolDegraded
+          expr: max by (host, pool) (truenas_zfs_pool_state{state="degraded"}) == 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS pool {{ $labels.pool }} is DEGRADED"
+            description: "ZFS pool {{ $labels.pool }} on {{ $labels.host }} has lost redundancy. Data is still served but a further disk failure risks the pool. Check pool status and replace the failed vdev member."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # Any state that is neither online nor degraded — faulted, unavail,
+        # suspended, removed, offline. The degraded term excludes the case
+        # above so the two alerts are mutually exclusive; Alertmanager's
+        # inhibit rule keys on alertname+namespace and these carry no
+        # namespace, so overlapping alerts would both page rather than one
+        # suppressing the other.
+        - alert: TrueNASPoolNotOnline
+          expr: |
+            max by (host, pool) (truenas_zfs_pool_state{state="online"}) == 0
+            unless max by (host, pool) (truenas_zfs_pool_state{state="degraded"}) == 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS pool {{ $labels.pool }} is not ONLINE"
+            description: "ZFS pool {{ $labels.pool }} on {{ $labels.host }} is faulted, suspended or otherwise not online. Every democratic-csi volume and the Loki chunk store on this pool are affected."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # 85% matches the threshold PVCUsageHigh and LonghornVolumeUsageHigh
+        # already use, so one number means the same thing across every storage
+        # backend here. It is also roughly where ZFS's allocator switches from
+        # best-fit to first-fit and write throughput starts degrading, so the
+        # figure is not purely conventional.
+        - alert: TrueNASPoolCapacityHigh
+          expr: |
+            truenas_disk_space_used_gib
+              / (truenas_disk_space_used_gib + truenas_disk_space_avail_gib) > 0.85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS filesystem {{ $labels.mountpoint }} above 85% full"
+            description: "{{ $labels.mountpoint }} on {{ $labels.host }} is {{ $value | humanizePercentage }} full."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # A copy-on-write filesystem cannot free space by overwriting, so a
+        # full pool fails writes *and* the deletes that would fix it. 95% is
+        # the point where that becomes a real risk rather than a theoretical
+        # one, and where democratic-csi provisioning starts failing cluster-wide.
+        - alert: TrueNASPoolCapacityCritical
+          expr: |
+            truenas_disk_space_used_gib
+              / (truenas_disk_space_used_gib + truenas_disk_space_avail_gib) > 0.95
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS filesystem {{ $labels.mountpoint }} above 95% full"
+            description: "{{ $labels.mountpoint }} on {{ $labels.host }} is {{ $value | humanizePercentage }} full. ZFS needs free space to complete writes, including the deletes that would reclaim it."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+    - name: truenas-disks
+      rules:
+        # Drive temperature is the only SMART attribute this pipeline carries
+        # (see rules-truenas notes in docs/OPERATIONS.md §8). 50C is inside
+        # every consumer HDD's 5-60C operating spec, but sustained operation
+        # in the upper half of that range is the band where observed annual
+        # failure rates start climbing, so it is a lead indicator rather than
+        # a fault. 15m because a scrub or resilver legitimately heats drives
+        # for minutes at a time.
+        - alert: TrueNASDiskTemperatureHigh
+          expr: max by (host, serial) (truenas_disk_temperature_celsius) > 50
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS disk {{ $labels.serial }} above 50C"
+            description: "Disk {{ $labels.serial }} on {{ $labels.host }} has been at {{ $value }}C for 15m. Check chassis airflow before the drive reaches its spec limit."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # 60C is the top of the operating spec for the drive classes used
+        # here; past it the manufacturer no longer rates the drive at all.
+        # Short for: at this point the cause is cooling failure, not workload.
+        - alert: TrueNASDiskTemperatureCritical
+          expr: max by (host, serial) (truenas_disk_temperature_celsius) > 60
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS disk {{ $labels.serial }} above 60C"
+            description: "Disk {{ $labels.serial }} on {{ $labels.host }} is at {{ $value }}C, past its rated operating range. Suspect a failed fan rather than load."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+    - name: truenas-pipeline
+      rules:
+        # Every rule above is a comparison against a series that only exists
+        # while TrueNAS is actively pushing. Stop the push — NAS down, exporter
+        # config wiped by an upgrade, NodePort unreachable — and those
+        # comparisons match nothing and stay silent. This is the alert that
+        # makes the silence audible, and it is also what fires until the
+        # one-time NAS-side exporter setup is done.
+        #
+        # Deliberately not "the NAS is down": blackbox-exporter already owns
+        # host reachability for 192.168.1.205 via HardwareHostUnreachable.
+        # This one means the NAS may be perfectly healthy and simply not
+        # telling us anything.
+        - alert: TrueNASMetricsStale
+          expr: absent(truenas_zfs_pool_state)
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS has stopped reporting metrics"
+            description: "No truenas_zfs_pool_state series for 15m. Pool health, capacity and disk temperature alerting for the NAS is blind. Check that the TrueNAS reporting exporter still points at the cluster NodePort — a TrueNAS update resets it."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+        # Narrower companion to the above. Pool state and disk temperature come
+        # from different netdata collectors, and TrueNAS 25.04 dropped a number
+        # of default metrics — so temperature can go missing on its own while
+        # pool state keeps arriving, silently disabling both disk alerts. 30m
+        # and warning because this is a coverage gap, not an outage.
+        - alert: TrueNASDiskTemperatureSignalMissing
+          expr: absent(truenas_disk_temperature_celsius) and on() (count(truenas_zfs_pool_state) > 0)
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS is reporting, but disk temperatures are missing"
+            description: "truenas_zfs_pool_state is arriving while truenas_disk_temperature_celsius is absent for 30m, so the SMART temperature collector is not exporting. TrueNASDiskTemperature{High,Critical} cannot fire until this is restored."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+        # The receiving half of the pipeline, as opposed to the sending half.
+        # Distinguishes "the NAS stopped pushing" from "we stopped listening",
+        # which are different fixes.
+        - alert: TrueNASGraphiteExporterDown
+          expr: up{job="truenas-graphite-exporter"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS graphite exporter is not scrapeable"
+            description: "The graphite-exporter receiving TrueNAS metrics has been unscrapeable for 10m. Pushed samples are being dropped on the floor; expect TrueNASMetricsStale to follow."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"

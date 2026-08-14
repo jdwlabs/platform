@@ -275,6 +275,19 @@ services:
     postInstall: false
     syncWave: 2
 
+  # TrueNAS has no Prometheus endpoint of its own — Graphite push is the only
+  # metrics export its API offers, so the receiving half has to live here.
+  # rawManifests because no upstream chart models a push-ingest target that is
+  # scraped from one port and written to on another.
+  - name: truenas-graphite-exporter
+    chart: ""
+    repo: ""
+    revision: ""
+    namespace: monitoring
+    rawManifests: true
+    postInstall: false
+    syncWave: 2
+
   # Distributed tracing backend. Single-binary Tempo chart now lives in the
   # grafana-community repo (grafana/helm-charts copy is deprecated).
   - name: tempo

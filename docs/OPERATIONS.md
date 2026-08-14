@@ -533,6 +533,46 @@ Then confirm the alert rules loaded rather than merely being absent:
 `/api/v1/rules`, filter for `etcd`, `KubeScheduler`, `KubeControllerManager`
 — every one should read `inactive`, never `firing` on a healthy cluster.
 
+**TrueNAS metrics (`truenas-*` alerts):**
+
+TrueNAS SCALE 25.10.4 exposes no Prometheus endpoint. Its API offers exactly
+one metrics export type — `GRAPHITE`, a push — so the cluster runs a
+`graphite-exporter` in `monitoring` that receives the push and is scraped
+normally. Metrics flow NAS → node:30203 → `truenas-graphite-exporter` →
+Prometheus. This is the opposite direction to every other target here, which
+has two consequences worth remembering when reading an alert:
+
+- The NAS being healthy and the NAS *reporting* are independent. Host
+  reachability for 192.168.1.205 is owned by blackbox-exporter
+  (`HardwareHostUnreachable`, TCP :22); `TrueNASMetricsStale` means only that
+  metrics stopped arriving.
+- **A TrueNAS update resets the reporting exporter configuration.** If NAS
+  alerting goes quiet after an upgrade, re-add it under Reporting → Exporters
+  before looking anywhere else. Required settings: type `GRAPHITE`, prefix
+  `truenas`, hostname `truenas`, destination any cluster node IP, port
+  `30203`.
+
+Only pool state, per-mountpoint capacity and disk temperature are mapped —
+deliberately, since the ingest port is unauthenticated on the LAN and the
+mapping runs in strict-match mode so unmapped series are dropped. **SMART
+self-test results, reallocated-sector counts and scrub status are not
+available through this path at all**; the netdata collector behind the
+Graphite push does not export them. A pool degrading because a disk failed
+SMART is caught by `TrueNASPoolDegraded`, but only once ZFS has reacted.
+
+Verification queries:
+
+```
+count by (pool, state) (truenas_zfs_pool_state)   # expect one series per pool per state
+truenas_disk_space_used_gib                        # expect one series per mountpoint
+truenas_disk_temperature_celsius                   # may be empty — see below
+```
+
+If the third returns nothing while the first two have data,
+`TrueNASDiskTemperatureSignalMissing` fires: TrueNAS 25.04 dropped a number of
+default netdata metrics, and the SMART temperature chart is among those that
+may need a netdata-side collector config on the NAS to restore.
+
 ## Self-hosted CI runners (ARC) — dormant
 
 All CI runs exclusively on GitHub-hosted runners (`ubuntu-latest`). The ARC

@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: truenas-graphite-exporter-metrics
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: truenas-graphite-exporter
+  namespaceSelector:
+    matchNames:
+      - monitoring
+  endpoints:
+    - port: metrics
+      # Left at the global 60s rather than the 30s other ServiceMonitors here
+      # use. The NAS pushes on netdata's own cadence, so scraping faster only
+      # re-reads the same samples.
+      interval: 60s

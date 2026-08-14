@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: truenas-graphite-exporter
+  namespace: monitoring
+  annotations:
+    # The mapping is read once at startup, so a mapping edit that ArgoCD syncs
+    # would otherwise sit inert until the pod happened to restart.
+    configmap.reloader.stakater.com/reload: "truenas-graphite-exporter-mapping"
+spec:
+  # Single replica on purpose. Graphite ingest is stateful in the sense that
+  # samples live in the receiving process's memory until scraped; a second
+  # replica behind the same Service would take an arbitrary half of the pushed
+  # samples and each would expose an incomplete view, so pool state would flap
+  # depending on which pod Prometheus reached.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: truenas-graphite-exporter
+  template:
+    metadata:
+      labels:
+        app: truenas-graphite-exporter
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: graphite-exporter
+          image: prom/graphite-exporter:v0.17.0@sha256:c1a266f63a84fd11048ab6ad1552a4c497b14522d02823925247698e41eeac2b
+          args:
+            - --graphite.mapping-config=/etc/graphite-exporter/mapping.conf
+            # Drop everything the mapping does not name. Bounds both cardinality
+            # and what an unauthenticated sender on the LAN can put into
+            # Prometheus.
+            - --graphite.mapping-strict-match
+            # Samples must outlive a scrape interval or every scrape races the
+            # push. Prometheus scrapes this cluster at 60s; 10m tolerates a
+            # short NAS-side hiccup without dropping series, while still
+            # letting them expire fast enough for the absent() alerts in
+            # rules-truenas.yaml to mean something.
+            - --graphite.sample-expiry=10m
+          ports:
+            - name: ingest
+              containerPort: 9109
+              protocol: TCP
+            - name: metrics
+              containerPort: 9108
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: mapping
+              mountPath: /etc/graphite-exporter
+              readOnly: true
+      volumes:
+        - name: mapping
+          configMap:
+            name: truenas-graphite-exporter-mapping
