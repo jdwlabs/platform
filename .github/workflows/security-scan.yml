@@ -2,8 +2,18 @@ name: Security Scan
 
 on:
   pull_request:
+  # The main-branch run is what files code-scanning alerts against the default
+  # branch, so it stays — but a docs-only merge cannot change a scan result.
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+
+# Cancel superseded PR runs; a main-push must finish to upload its SARIF.
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
