@@ -39,6 +39,13 @@ redis:
 # Injects provider API keys and LITELLM_MASTER_KEY as env vars from Vault-backed ESO secret.
 environmentSecrets:
   - litellm-secrets
+  # Not actually sensitive -- PYTHONPATH is a plain directory string. The
+  # chart's only extension point for extra container env vars is
+  # environmentSecrets (secretRef only, no plain-ConfigMap envFrom exists in
+  # this chart), so it's carried in a Secret purely to fit that mechanism;
+  # see postInstall/custom-callbacks-configmap.yaml for what it points at
+  # and why.
+  - litellm-callbacks-pythonpath
 
 # Opt-in for Reloader (installed via the platform GitOps path, not yet live):
 # rolls this Deployment when litellm-secrets above is rotated. Inert until
@@ -100,21 +107,31 @@ proxy_config:
     # Server-side max_tokens ceiling. litellm_params.max_tokens above is only
     # a default -- the router always lets a caller's explicit max_tokens win
     # (see postInstall/custom-callbacks-configmap.yaml for the full why).
-    # Module path resolves to custom_callbacks.py, mounted alongside
-    # config.yaml below by the volumes/volumeMounts overrides.
+    # LiteLLM's get_instance_fn (litellm/proxy/types_utils/utils.py) first
+    # checks for this module as a file living next to config.yaml itself; only
+    # when that exact path doesn't exist does it fall back to a plain
+    # importlib.import_module(), which searches PYTHONPATH. custom_callbacks.py
+    # is deliberately NOT placed next to config.yaml (see the volumes/env
+    # comments below for why), so this always takes the PYTHONPATH fallback.
     callbacks: custom_callbacks.guardrail_instance
 
-# Mounts the ConfigMap from postInstall/custom-callbacks-configmap.yaml as a
-# second file in the same directory LiteLLM already loads config.yaml from --
-# required for litellm_settings.callbacks above to import it by module path.
+# Mounts the ConfigMap from postInstall/custom-callbacks-configmap.yaml as its
+# own full directory, not a second file injected into config.yaml's directory.
+# First attempt used a subPath mount of this ConfigMap into /etc/litellm/
+# (already the litellm-config ConfigMap volume's mount point) and it failed at
+# container-init with "not a directory" -- two independent volumes racing to
+# both populate the same parent directory is a known-fragile pattern across
+# container runtimes, not something specific to this chart. A dedicated
+# directory sidesteps the collision entirely; environmentSecrets below sets
+# PYTHONPATH so LiteLLM's import fallback (see the callbacks comment above)
+# can still find it.
 volumes:
   - name: litellm-custom-callbacks
     configMap:
       name: litellm-custom-callbacks
 volumeMounts:
   - name: litellm-custom-callbacks
-    mountPath: /etc/litellm/custom_callbacks.py
-    subPath: custom_callbacks.py
+    mountPath: /etc/litellm-callbacks
     readOnly: true
 
 # Boot spike (Prisma engine + proxy import) OOMKilled the container at both
