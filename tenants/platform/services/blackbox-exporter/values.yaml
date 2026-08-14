@@ -1,8 +1,9 @@
-# tcp_connect (not icmp): the icmp module needs the NET_RAW capability, which
-# this namespace's baseline PSA enforcement disallows adding
-# (helm-charts/tenant-envelope/templates/namespaces.yaml). A TCP connect to
-# SSH is a reasonable reachability proxy that needs no elevated capability at
-# all — chart's default securityContext (drop: ["ALL"], no add) is untouched.
+# tcp_connect (not icmp): chosen on least-privilege grounds. icmp needs the
+# NET_RAW capability; tcp_connect needs none, so the chart's default
+# securityContext (drop: ["ALL"], no add) stays untouched. This namespace's
+# PSA is actually privileged (quotaTier: platform), so NET_RAW would be
+# allowed — a TCP connect to SSH is just as good a reachability proxy without
+# requesting it.
 config:
   modules:
     tcp_connect:
