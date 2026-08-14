@@ -18,6 +18,7 @@ namespaces:
   - name: jdwlabs-runners
     quotaTier: ci
     networkPolicy: ci
+    enforce: true
     arc: true
 
 project:

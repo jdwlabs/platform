@@ -20,6 +20,7 @@ namespaces:
   - name: dotablaze-tech-runners
     quotaTier: ci
     networkPolicy: ci
+    enforce: true
     arc: true
 
 project:
