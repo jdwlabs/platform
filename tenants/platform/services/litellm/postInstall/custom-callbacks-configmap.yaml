@@ -51,9 +51,21 @@ data:
     # -- new entries are safe by default rather than silently uncapped.
     DEFAULT_CONTEXT_WINDOW = 32768
 
-    # Reserved for message formatting/role overhead that a raw token count of
-    # the message content can undercount by. Deliberately conservative.
-    SAFETY_MARGIN_TOKENS = 512
+    # Reserved for everything a token count of messages+tools still can't
+    # capture exactly: the fallback tokenizer (unrecognized model names get
+    # a generic encoding, not the backend's real one -- confirmed live this
+    # undercounts against vLLM's own count for this Qwen deployment), chat
+    # template / special-token overhead, and Holmes' skill-file injection
+    # (tenants/platform/services/holmes/values.yaml customSkills, sizeable
+    # runbook markdown that can land in the system prompt outside of
+    # messages/tools). Confirmed live 2026-08-14: a first cut of this
+    # guardrail without `tools` in the count and a 512 margin still let a
+    # real drift-scan request through at the ceiling with prompt_tokens
+    # underestimated by several hundred tokens against vLLM's real count.
+    # Widened well past that gap rather than chasing an exact match run by
+    # run -- losing ~1.5k tokens of headroom out of a 32k window is cheap
+    # insurance against re-litigating this on every prompt-shape change.
+    SAFETY_MARGIN_TOKENS = 2048
     # Never returns less than this -- a near-exhausted context gets a short
     # response instead of an outright max_tokens<=0 error, and this floor is
     # the signal something upstream (prompt size, this model's fit for the
@@ -89,7 +101,14 @@ data:
 
             messages = data.get("messages") or []
             try:
-                prompt_tokens = litellm.token_counter(model=model, messages=messages)
+                # `tools=` matters: Holmes is a function-calling agent, so its
+                # request carries tool-schema definitions that add real prompt
+                # tokens vLLM's own count includes -- confirmed live, omitting
+                # this was the largest single piece of the undercount that let
+                # a real request through at the ceiling despite this guardrail.
+                prompt_tokens = litellm.token_counter(
+                    model=model, messages=messages, tools=data.get("tools")
+                )
             except Exception:
                 import logging
 
