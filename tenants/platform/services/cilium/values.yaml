@@ -31,11 +31,12 @@ endpointRoutes:
 ipam:
   mode: kubernetes
 
-# Every packet is evaluated against the loaded policies and the verdict is
-# logged without being acted on, so the allow-set can be corrected against
-# observed traffic instead of against recollection. Daemon-wide, not
-# per-namespace: staged isolation is the tenant-envelope `enforce` flag.
-policyAuditMode: true
+# Enforcement is live. Only namespaces staged via the tenant-envelope
+# `enforce` flag carry a restrictive policy set (currently jdwlabs-runners,
+# dotablaze-tech-runners, both empty/dormant) — every other namespace still
+# renders an allow-all pair, so this flip only changes behavior in the
+# staged namespaces. Widen the enforce set gradually rather than here.
+policyAuditMode: false
 
 # L7 enforcement is unavailable in chaining mode, so the Envoy DaemonSet
 # (on by default for new 1.20 installs) is pure overhead here.
