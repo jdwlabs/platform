@@ -1,0 +1,50 @@
+name: audit-admin-bypass
+
+on:
+  schedule:
+    # 12:00 UTC: after the US workday's overnight tail and before the next
+    # one starts, so a run always covers a full day of merges across every
+    # timezone this org's contributors work in, once daily.
+    - cron: "0 12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.x"
+
+      # tools/audit-admin-bypass.py reads PR and ruleset data across all four
+      # jdwlabs repos, not just this one — the default GITHUB_TOKEN is scoped
+      # to the repo the workflow runs in, so it can't see the other three.
+      # jdwlabs-agent-bot is installed org-wide with read access to pull
+      # requests and rulesets on every repo, which is what the script needs;
+      # same create-github-app-token pattern already used for cross-repo
+      # access in deployments/.github/workflows/promote-prd.yml.
+      - name: Generate cross-repo read token
+        id: bot-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          app-id: ${{ secrets.AGENT_APP_ID }}
+          private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
+          owner: jdwlabs
+          repositories: apps,platform,infrastructure,deployments
+
+      - name: Run admin-bypass audit
+        env:
+          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+        run: |
+          {
+            echo "### Admin-bypass audit"
+            echo
+            echo '```'
+            python3 tools/audit-admin-bypass.py --list
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
