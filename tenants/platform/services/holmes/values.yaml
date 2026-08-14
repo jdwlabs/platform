@@ -27,6 +27,16 @@ additionalEnvVars:
   # 2048 gives Go runtime headroom while still bounding runaway tools.
   - name: TOOL_MEMORY_LIMIT_MB
     value: "2048"
+  # Holmes computes max(64000, 12%-of-context) and can only shrink that via
+  # litellm's static model_cost pricing table, which has no entry for a
+  # proxy-aliased self-hosted model name like sre-investigator-local -- every
+  # lookup throws and it falls through to 64000 unmodified. Defense-in-depth
+  # alongside the litellm proxy-side guardrail (services/litellm/postInstall/
+  # custom-callbacks-configmap.yaml), which is the real enforcement point for
+  # every caller; this stops the oversized request at the source for Holmes
+  # specifically, one value shared across every model it talks to.
+  - name: OVERRIDE_MAX_OUTPUT_TOKEN
+    value: "16000"
 
 modelList:
   sre-investigator:
