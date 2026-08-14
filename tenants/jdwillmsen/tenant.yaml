@@ -5,7 +5,7 @@ contacts:
   - jdwillmsen@gmail.com
 
 deploymentRepo:
-  url: https://github.com/jdwillmsen/deployments-private.git
+  url: https://github.com/jdwillmsen/jdw-deployments.git
   revision: main
 
 namespaces:
