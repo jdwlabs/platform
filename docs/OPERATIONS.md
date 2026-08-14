@@ -554,11 +554,22 @@ rebuilding to come back.
 
 **Re-enable procedure:**
 
-1. Uncomment the `arc-systems` service in `tenants/platform/tenant.yaml`
-2. Uncomment the `arc-runner-set-<tenant>` service(s) in the tenant file(s)
-3. Verify `kv/<tenant>-github-app` still resolves:
+1. Check free space on `/var` for every worker node a runner could land on
+   (`talosctl -n <node> df`). Runner `_work` comes from `local-path`, which
+   provisions a plain hostPath directory and enforces no capacity — the `4Gi`
+   request in the runner-set values is a scheduling hint, so a build is
+   bounded only by node disk, on the same partition as kubelet and
+   containerd. A runaway job fills the node, not just its own volume.
+   `NodeFilesystemAlmostOutOfSpace` does cover this
+   (`nodeExporterAlerting: true` in `kube-prometheus-stack/values.yaml`), but
+   it fires at 5% / 3% free — late enough that a fast CI fill reaches
+   DiskPressure and evicts co-tenants first, so this pre-flight is not
+   redundant with the alert.
+2. Uncomment the `arc-systems` service in `tenants/platform/tenant.yaml`
+3. Uncomment the `arc-runner-set-<tenant>` service(s) in the tenant file(s)
+4. Verify `kv/<tenant>-github-app` still resolves:
    `platformctl tenants verify-secrets`
-4. Merge; ArgoCD deploys controller (wave 3) then runner sets (wave 5)
-5. Smoke-test with the apps repo `ARC Test kubernetes Workflow`
+5. Merge; ArgoCD deploys controller (wave 3) then runner sets (wave 5)
+6. Smoke-test with the apps repo `ARC Test kubernetes Workflow`
    (workflow_dispatch, input `arc_name`), and confirm runners appear in the
    GitHub org under Settings > Actions > Runners

@@ -105,6 +105,13 @@ containerMode:
     storageClassName: "local-path"
     resources:
       requests:
+        # Scheduling hint only, not a cap: local-path hands out a plain hostPath
+        # directory and enforces no capacity, so _work is bounded by free space
+        # on the node's /var partition — shared with kubelet and containerd. A
+        # runaway build that used to hit ENOSPC and fail alone can now push the
+        # node into DiskPressure and evict co-tenants. An ephemeral-storage
+        # limit does not bound it either; kubelet's accounting excludes
+        # PVC-backed volumes.
         storage: 4Gi
 
 
