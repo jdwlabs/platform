@@ -5,22 +5,28 @@ JDWLABS-181's first success metric is "0 routine admin-bypass merges for
 agent-authored PRs (author != approver enforced natively)" — currently
 unmeasured anywhere. This queries merged-PR history via `gh` and reports it.
 
-A merge is flagged as bypassed when its repo's Baseline ruleset requires at
-least one approving review (checked live, not assumed — `deployments`
-requires zero by design per ADR 0018 §1, so an unapproved merge there is
-compliant, not a bypass) and the PR's `reviewDecision` is not `APPROVED`.
-GitHub does not surface "this merge used --admin" directly (no audit-log API
-access on this org's plan); an already-merged PR that still reads as
-unapproved could only have landed by bypassing the requirement, which is the
-same thing from the metric's perspective regardless of which bypass
-mechanism was used.
+A merge is flagged as bypassed when the target ref's *most restrictive*
+active ruleset requires at least one approving review — every ruleset whose
+`conditions.ref_name.include` covers the ref is consulted, not just the one
+named "Baseline"; a repo can carry several (`platform` also has "Production
+Gates", `deployments` adds "PRD Promotion Review Gate") and GitHub enforces
+whichever is strictest — and the PR's `reviewDecision` is not `APPROVED`.
+`deployments` currently requires zero by design (ADR 0018 §1), so an
+unapproved merge there is compliant, not a bypass. GitHub does not surface
+"this merge used --admin" directly (no audit-log API access on this org's
+plan); an already-merged PR that still reads as unapproved could only have
+landed by bypassing the requirement in force *at merge time* — this tool
+reads the requirement live, so a ruleset changed since a PR merged will be
+judged against today's rule, not the one that actually applied.
 
 A PR counts as agent-authored when any of its commits carries a
 `Co-Authored-By: ... <noreply@anthropic.com>` trailer — the same signal
 ADR 0018 §3 names for the not-yet-built `agent-identity / co-author-check`.
-This is a detection heuristic, not proof: a session instructed to omit the
-trailer would pass through this tool unnoticed, same limitation ADR 0018 §3
-already documents for the CI check version.
+This is a heuristic in both directions: a session told to omit the trailer
+passes through unnoticed (false negative, same limitation ADR 0018 §3
+already documents), and a human-authored PR that merges the base branch
+mid-flight can pull in another commit's trailer and be misclassified (false
+positive) — this tool does not attempt to exclude base-reachable commits.
 
 Usage:
     python3 tools/audit-admin-bypass.py [--since YYYY-MM-DD] [--list]
@@ -28,7 +34,9 @@ Usage:
     --since   Only count PRs merged on or after this date (default: 7 days ago)
     --list    Print each flagged PR's number, title and URL, not just the count
 
-Exit code is always 0 — this is a report, not a CI gate.
+Exit code reflects tool errors only (bad --since, gh/API failures) — it
+never depends on how many bypasses were found; this is a report, not a CI
+gate.
 """
 from __future__ import annotations
 
@@ -37,47 +45,86 @@ import json
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, timedelta
 
 REPOS = ["apps", "platform", "infrastructure", "deployments"]
+TARGET_REF = "refs/heads/main"
 AGENT_TRAILER = re.compile(r"Co-Authored-By:.*<[^>]*@anthropic\.com>", re.IGNORECASE)
+
+# gh pr list's --limit is capped well under gh's own max: requesting the
+# nested commits.authors connection multiplies node cost per PR, and that
+# query blows GitHub's 500k-node budget past roughly 200 PRs with commit
+# data attached. Fetching commits per-PR afterward (see merged_prs_since)
+# sidesteps that entirely, so this limit only bounds the PR *list* itself —
+# confirmed safe at 100 with no commits field requested.
+LIST_LIMIT = 100
+
+
+class ToolError(Exception):
+    """A gh/API failure or bad input — distinct from "found some bypasses"."""
 
 
 def gh_json(args: list[str]) -> object:
     result = subprocess.run(["gh", *args], capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"gh {' '.join(args)}\n{result.stderr}", file=sys.stderr)
-        raise SystemExit(1)
-    return json.loads(result.stdout)
+        raise ToolError(f"gh {' '.join(args)}\n{result.stderr.strip()}")
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ToolError(f"gh {' '.join(args)} returned non-JSON output: {exc}") from exc
 
 
-def required_review_count(repo: str) -> int:
+def required_review_count(repo: str, ref: str = TARGET_REF) -> int:
+    """Max required_approving_review_count across every active ruleset
+    covering `ref`. Simplification: only checks for `ref` appearing
+    literally in a ruleset's include list — none of this org's rulesets
+    currently use the `~ALL`/`~DEFAULT_BRANCH` special values, so that case
+    isn't handled; a repo that starts using them would need this extended.
+    """
     rulesets = gh_json(["api", f"repos/jdwlabs/{repo}/rulesets"])
+    counts = []
     for rs in rulesets:
-        if rs["name"] != "Baseline":
+        if rs["enforcement"] != "active":
             continue
         detail = gh_json(["api", f"repos/jdwlabs/{repo}/rulesets/{rs['id']}"])
+        includes = detail.get("conditions", {}).get("ref_name", {}).get("include", [])
+        if ref not in includes:
+            continue
         for rule in detail["rules"]:
             if rule["type"] == "pull_request":
-                return rule["parameters"]["required_approving_review_count"]
-    raise RuntimeError(f"{repo}: no Baseline ruleset with a pull_request rule found")
+                counts.append(rule["parameters"]["required_approving_review_count"])
+    if not counts:
+        raise ToolError(f"{repo}: no active pull_request-rule ruleset covers {ref}")
+    return max(counts)
 
 
-def merged_prs_since(repo: str, since: datetime) -> list[dict]:
-    # --limit is capped well below gh's own max: requesting the nested
-    # commits.authors connection multiplies node cost per PR — a repo with
-    # heavier per-PR commit counts (apps) blew GitHub's 500k-node budget at
-    # limit 50. 25 comfortably covers a week's merge volume in this org;
-    # raise only if a --since window genuinely needs it, and expect to lower
-    # it again for a repo with unusually large PRs.
-    query = f"is:merged merged:>={since.date().isoformat()}"
-    return gh_json(
+def merged_prs_since(repo: str, since: date, ref: str = TARGET_REF) -> list[dict]:
+    prs = gh_json(
         [
             "pr", "list", "--repo", f"jdwlabs/{repo}",
-            "--search", query, "--state", "merged", "--limit", "25",
-            "--json", "number,title,url,mergedAt,reviewDecision,commits",
+            "--search", f"merged:>={since.isoformat()}", "--state", "merged",
+            "--limit", str(LIST_LIMIT),
+            "--json", "number,title,url,mergedAt,reviewDecision,baseRefName",
         ]
     )
+    if len(prs) == LIST_LIMIT:
+        print(
+            f"WARNING: {repo} hit the {LIST_LIMIT}-PR fetch cap for this "
+            f"window — counts are a lower bound; narrow --since to trust them",
+            file=sys.stderr,
+        )
+    prs = [pr for pr in prs if pr["baseRefName"] == ref.removeprefix("refs/heads/")]
+
+    # commits fetched per-PR, one gh call each, rather than in the list call
+    # above — that's what avoids the node-budget ceiling LIST_LIMIT's
+    # comment describes. Slower (one extra round trip per PR) but correct
+    # regardless of window size.
+    for pr in prs:
+        detail = gh_json(
+            ["pr", "view", str(pr["number"]), "--repo", f"jdwlabs/{repo}", "--json", "commits"]
+        )
+        pr["commits"] = detail["commits"]
+    return prs
 
 
 def is_agent_authored(pr: dict) -> bool:
@@ -87,41 +134,57 @@ def is_agent_authored(pr: dict) -> bool:
     )
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--since", type=str, default=None)
-    parser.add_argument("--list", action="store_true")
-    args = parser.parse_args()
+def parse_since(value: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a YYYY-MM-DD date") from exc
 
-    since = (
-        datetime.strptime(args.since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        if args.since
-        else datetime.now(timezone.utc) - timedelta(days=7)
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter, description=__doc__
     )
+    parser.add_argument(
+        "--since", type=parse_since, default=None,
+        help="only count PRs merged on or after this date (default: 7 days ago)",
+    )
+    parser.add_argument(
+        "--list", action="store_true",
+        help="print each flagged PR's number, title and URL, not just the count",
+    )
+    args = parser.parse_args()
+    since = args.since or (date.today() - timedelta(days=7))
 
     total_agent = 0
     total_bypassed = 0
     flagged: list[tuple[str, dict]] = []
 
-    for repo in REPOS:
-        required = required_review_count(repo)
-        prs = merged_prs_since(repo, since)
-        agent_prs = [pr for pr in prs if is_agent_authored(pr)]
-        bypassed = [
-            pr for pr in agent_prs
-            if required >= 1 and pr["reviewDecision"] != "APPROVED"
-        ]
-        total_agent += len(agent_prs)
-        total_bypassed += len(bypassed)
-        flagged.extend((repo, pr) for pr in bypassed)
+    try:
+        for repo in REPOS:
+            required = required_review_count(repo)
+            agent_prs = [pr for pr in merged_prs_since(repo, since) if is_agent_authored(pr)]
+            bypassed = (
+                [pr for pr in agent_prs if pr["reviewDecision"] != "APPROVED"]
+                if required >= 1
+                else []
+            )
+            total_agent += len(agent_prs)
+            total_bypassed += len(bypassed)
+            flagged.extend((repo, pr) for pr in bypassed)
 
-        print(
-            f"{repo}: required_reviews={required} "
-            f"agent-authored={len(agent_prs)} bypassed={len(bypassed)}"
-        )
+            print(
+                f"{repo}: required_reviews={required} "
+                f"agent-authored={len(agent_prs)} bypassed={len(bypassed)}"
+            )
+    except ToolError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
-    ratio = f"{total_bypassed}/{total_agent}" if total_agent else "0/0"
-    print(f"\nTOTAL bypassed/agent-authored: {ratio} since {since.date().isoformat()}")
+    print(
+        f"\nTOTAL bypassed/agent-authored: {total_bypassed}/{total_agent} "
+        f"since {since.isoformat()}"
+    )
     print("(JDWLABS-181 success metric 1 target: 0 routine admin-bypass merges)")
 
     if args.list and flagged:
