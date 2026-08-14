@@ -62,7 +62,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md#deployments-applicationset) for the deploy
 
 | Path                          | Fields                                     |
 |-------------------------------|--------------------------------------------|
-| `kv/<name>-github-app`        | `app_id`, `installation_id`, `private_key` |
+| `kv/<name>-github-app`        | `github_app_id`, `github_app_installation_id`, `github_app_private_key` |
 | `kv/<name>-ai-keys`           | `openai_api_key`, `anthropic_api_key`, `openrouter_api_key`, `nvidia_api_key` |
 | `kv/<name>-discord-bot-token` | `token`                                    |
 
@@ -97,10 +97,17 @@ ExternalSecret so no credential is committed. GitHub App is the preferred
 mechanism — it does not expire, is scoped to the repos you grant it, and
 matches how git access is already provisioned elsewhere in this repo.
 
-Vault path `<tenant>-argocd-repo`, with fields `app-id`, `installation-id`
-and `private-key`. ArgoCD consumes them as `githubAppID`,
-`githubAppInstallationID` and `githubAppPrivateKey`. See
+Reuse the per-tenant `kv/<tenant>-github-app` path that bootstrap phase 4
+already seeds rather than adding a parallel one: its `github_app_id`,
+`github_app_installation_id` and `github_app_private_key` fields map directly
+onto ArgoCD's `githubAppID`, `githubAppInstallationID` and
+`githubAppPrivateKey`. Seed it with
+`platformctl bootstrap seed <tenant>-github-app`. See
 `tenants/platform/services/argo-cd/postInstall/` for a worked example.
+
+The App needs Contents: Read on the deployment repo, and must be installed on
+it — an App that exists but is not installed yields an installation ID that
+resolves to nothing.
 
 The AppProject's `sourceRepos` is derived from `deploymentRepo.url` by the
 `tenant-envelope` chart, so no separate project change is required.
