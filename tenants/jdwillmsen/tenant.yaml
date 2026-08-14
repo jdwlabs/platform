@@ -10,9 +10,14 @@ deploymentRepo:
 
 namespaces:
   # Single environment: personal workloads, no non/prd split to promote between.
-  # externalEgress is required — a Bedrock server in online mode authenticates
-  # players against Xbox Live, and NetworkPolicies are enforced now that the
-  # chained policy engine is in place.
+  #
+  # externalEgress declares intent rather than taking effect today. Without
+  # enforce: true the envelope also renders allow-all-egress/ingress, which
+  # subsume every scoped rule, and the policy engine is running in audit mode
+  # cluster-wide regardless. It is set because a Bedrock server in online mode
+  # authenticates players against Xbox Live and will need egress the moment
+  # enforcement is real. The scoped rule opens 443 only; whether that covers
+  # Bedrock's auth path is unverified, so revisit before enabling enforce here.
   - name: jdwillmsen-prd
     quotaTier: standard
     networkPolicy: default
