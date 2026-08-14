@@ -189,16 +189,6 @@ services:
     postInstall: true
     syncWave: 1
 
-  # Second release of the same chart: csiDriver.name is per-release, so the
-  # iSCSI transport cannot share the NFS release.
-  - name: democratic-csi-iscsi
-    chart: democratic-csi
-    repo: https://democratic-csi.github.io/charts/
-    revision: 0.15.1
-    namespace: democratic-csi
-    postInstall: true
-    syncWave: 1
-
   # Wave 2: Platform services
   - name: external-secrets
     chart: external-secrets
