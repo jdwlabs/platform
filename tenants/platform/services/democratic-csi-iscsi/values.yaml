@@ -71,11 +71,13 @@ node:
   # rather than shipping its own.
   hostPID: true
   driver:
-    # The extension installs the initiator under /usr/local, not /usr/sbin.
-    # Verified on the live nodes: /usr/local/sbin/{iscsiadm,iscsid} present,
-    # /usr/local/etc/iscsi absent — hence DirectoryOrCreate rather than the
-    # chart's default Directory, which would fail the same check again.
-    iscsiDirHostPath: /usr/local/etc/iscsi
+    # Under the nsenter strategy the driver runs the host's iscsiadm, so this
+    # volume is vestigial — it only has to resolve. It points at /var/lib/iscsi
+    # because that is the one candidate that both exists on the node and sits
+    # on a writable partition: /etc/iscsi does not resolve in kubelet's mount
+    # namespace, and /usr/local/etc is part of the immutable image, so
+    # DirectoryOrCreate there fails with "read-only file system".
+    iscsiDirHostPath: /var/lib/iscsi
     iscsiDirHostPathType: DirectoryOrCreate
     extraEnv:
       - name: ISCSIADM_HOST_STRATEGY
