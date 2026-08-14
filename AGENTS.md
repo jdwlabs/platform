@@ -60,6 +60,7 @@ Connection and Repository live in Grafana's own API server — invisible to `kub
 
 - `platformctl bootstrap seed <spec> --field <name>` writes individual properties of one spec, so a new field can be added without re-supplying or being prompted for the credentials already at that path. Repeatable; requires exactly one spec argument; a field named explicitly is written even where the spec marks it optional
 - An unknown spec key or field name is now an error listing the valid set. Previously an unrecognised key selected an empty spec, wrote nothing, and still reported success — which is how a binary older than the seed spec it is asked to write skips the field silently
+- Seeding has no preview mode. `--dry-run` is accepted **only** by `cluster volumes reclaim`, `gitsync delete`, and `gitsync recreate` — the three commands that implement it. Every other command, `bootstrap seed` included, rejects the flag with an unknown-flag error rather than mutating while reporting a preview
 
 ## Architecture Overview
 

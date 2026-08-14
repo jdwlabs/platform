@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"k8s.io/client-go/dynamic"
@@ -13,7 +14,8 @@ import (
 	"github.com/jdwlabs/platform/internal/vault"
 )
 
-// Globals holds persistent flags wired by NewRoot.
+// Globals holds flags shared across commands. Every field but DryRun is a
+// persistent root flag; DryRun is bound per-command by bindDryRun.
 type Globals struct {
 	Branch         string
 	DryRun         bool
@@ -64,17 +66,47 @@ func NewRoot(version string) (*cobra.Command, func(error)) {
 		g.Session.Close(exitErr)
 	}
 
+	// --dry-run is deliberately absent here: see bindDryRun.
 	cmd.PersistentFlags().StringVar(&g.Branch, "branch", "", "override targetRevision in bootstrap/root-app.yaml")
-	cmd.PersistentFlags().BoolVar(&g.DryRun, "dry-run", false, "log intended actions but do not execute mutating operations")
 	cmd.PersistentFlags().BoolVar(&g.NonInteractive, "non-interactive", false, "consume PLATFORMCTL_* env vars; never prompt")
 	cmd.PersistentFlags().BoolVar(&g.JSON, "json", false, "emit newline-delimited JSON events instead of human-readable text")
 	cmd.PersistentFlags().BoolVar(&g.NoColor, "no-color", false, "disable ANSI color output")
+
+	// SilenceErrors keeps cobra quiet and main prints nothing on failure, so
+	// without this a rejected flag is an empty response with a non-zero exit —
+	// indistinguishable from a command that ran and found nothing. Subcommands
+	// inherit this unless they set their own.
+	cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
+		return reportCLIError(c.OutOrStdout(), err,
+			fmt.Sprintf("Valid flags for `%s`: %s", c.CommandPath(), localFlagNames(c)))
+	})
 
 	cmd.AddCommand(newTenantsCmd(g))
 	cmd.AddCommand(newBootstrapCmd(g))
 	cmd.AddCommand(newClusterCmd(g))
 	cmd.AddCommand(newGitSyncCmd(g))
 	return cmd, cleanup
+}
+
+// bindDryRun declares --dry-run as a local flag on a command that honours it.
+// It is not a persistent root flag: every other command silently accepted the
+// flag and mutated for real anyway, so a preview that was never a preview
+// reported success. A command that cannot preview must reject the flag.
+func bindDryRun(cmd *cobra.Command, g *Globals) {
+	cmd.Flags().BoolVar(&g.DryRun, "dry-run", false,
+		"log intended actions but do not execute mutating operations")
+}
+
+// reportCLIError writes the error and its fix as data on stdout, so an agent
+// reading stdout sees why the command refused and what to run instead.
+func reportCLIError(out io.Writer, err error, help string) error {
+	if serr := display.ToonScalar(out, "error", err.Error()); serr != nil {
+		return serr
+	}
+	if serr := display.ToonList(out, "help", []string{help}); serr != nil {
+		return serr
+	}
+	return err
 }
 
 // NewRootForTest returns a root command whose subcommands use the provided

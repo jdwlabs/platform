@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -66,13 +65,6 @@ Run with no subcommand to report status.`,
 		"Grafana base URL; an in-cluster .svc address is reached by an automatic port-forward (env "+grafanaAddrEnv+")")
 	cmd.PersistentFlags().StringVar(&shared.Namespace, "namespace", gitsync.DefaultNamespace,
 		"Grafana provisioning namespace (not the Kubernetes namespace Grafana runs in)")
-
-	// Cobra writes a bad-flag message to stderr and this process prints nothing
-	// else on failure, so without this an unknown flag is an empty response.
-	cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
-		return reportGitSyncError(c.OutOrStdout(), err,
-			fmt.Sprintf("Valid flags for `%s`: %s", c.CommandPath(), localFlagNames(c)))
-	})
 
 	cmd.AddCommand(newGitSyncStatusCmd(g, shared))
 	cmd.AddCommand(newGitSyncDeleteCmd(g, shared))
@@ -144,6 +136,7 @@ Application. Use "gitsync recreate" to do both in the enforced order.`,
 	cmd.Flags().BoolVar(&opts.Confirm, "confirm", false, "actually delete the resource")
 	cmd.Flags().BoolVar(&opts.AllowOwnedDashboard, "allow-owned-dashboards", false,
 		"proceed even though the repository owns dashboards the finalizer will collect")
+	bindDryRun(cmd, g)
 	return cmd
 }
 
@@ -184,6 +177,7 @@ resolved automatically when exactly one exists; otherwise name it with
 		"proceed even though the repository owns dashboards the finalizer will collect")
 	cmd.Flags().BoolVar(&opts.NoSync, "no-sync", false,
 		"skip the ArgoCD refresh; the resources stay absent until the next sync")
+	bindDryRun(cmd, g)
 	return cmd
 }
 
@@ -192,18 +186,18 @@ func runGitSyncStatus(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, op
 
 	fields, err := resolveGitSyncFields(opts.Fields, opts.Full)
 	if err != nil {
-		return reportGitSyncError(out, err, "Run `platformctl gitsync status --help` for the field list")
+		return reportCLIError(out, err, "Run `platformctl gitsync status --help` for the field list")
 	}
 
 	client, stop, err := newGitSyncClient(cmd.Context(), shared)
 	if err != nil {
-		return reportGitSyncError(out, err, "Set "+grafanaAddrEnv+" to reach Grafana directly, or check KUBECONFIG")
+		return reportCLIError(out, err, "Set "+grafanaAddrEnv+" to reach Grafana directly, or check KUBECONFIG")
 	}
 	defer stop()
 
 	resources, err := readAllGitSyncResources(cmd.Context(), client)
 	if err != nil {
-		return reportGitSyncError(out, err, "Run `platformctl cluster status` to check Grafana itself")
+		return reportCLIError(out, err, "Run `platformctl cluster status` to check Grafana itself")
 	}
 
 	healthy, unhealthy, unknown := countGitSyncHealth(resources)
@@ -274,29 +268,29 @@ func runGitSyncDelete(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, op
 	out := cmd.OutOrStdout()
 
 	if err := requireGitSyncIntent(opts.Confirm, g.DryRun); err != nil {
-		return reportGitSyncError(out, err,
+		return reportCLIError(out, err,
 			"Run `platformctl gitsync delete --kind <kind> --name <name> --dry-run` first, then re-run with --confirm")
 	}
 	if opts.Kind == "" || opts.Name == "" {
-		return reportGitSyncError(out,
+		return reportCLIError(out,
 			fmt.Errorf("--kind and --name are both required"),
 			"Run `platformctl gitsync status` to see the kinds and names that exist")
 	}
 	if !containsString(gitsync.Kinds(), opts.Kind) {
-		return reportGitSyncError(out,
+		return reportCLIError(out,
 			fmt.Errorf("unknown --kind %s; valid: %s", opts.Kind, strings.Join(gitsync.Kinds(), ", ")),
 			"Run `platformctl gitsync status` to see the kinds that exist")
 	}
 
 	client, stop, err := newGitSyncClient(cmd.Context(), shared)
 	if err != nil {
-		return reportGitSyncError(out, err, "Set "+grafanaAddrEnv+" to reach Grafana directly, or check KUBECONFIG")
+		return reportCLIError(out, err, "Set "+grafanaAddrEnv+" to reach Grafana directly, or check KUBECONFIG")
 	}
 	defer stop()
 
 	resources, err := readAllGitSyncResources(cmd.Context(), client)
 	if err != nil {
-		return reportGitSyncError(out, err, "Run `platformctl cluster status` to check Grafana itself")
+		return reportCLIError(out, err, "Run `platformctl cluster status` to check Grafana itself")
 	}
 	if !gitSyncExists(resources, opts.Kind, opts.Name) {
 		if err := display.ToonScalar(out, "result",
@@ -307,7 +301,7 @@ func runGitSyncDelete(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, op
 	}
 
 	if err := checkGitSyncDeletable(cmd.Context(), client, resources, opts.Kind, opts.Name, opts.AllowOwnedDashboard); err != nil {
-		return reportGitSyncError(out, err, gitSyncRefusalHelp(opts.Kind))
+		return reportCLIError(out, err, gitSyncRefusalHelp(opts.Kind))
 	}
 
 	mode := "delete"
@@ -328,7 +322,7 @@ func runGitSyncDelete(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, op
 		return display.ToonList(out, "help", []string{"Re-run with --confirm to delete it"})
 	}
 	if err := client.Delete(cmd.Context(), opts.Kind, opts.Name); err != nil {
-		return reportGitSyncError(out, err, "Run `platformctl gitsync status` to see whether it survived")
+		return reportCLIError(out, err, "Run `platformctl gitsync status` to see whether it survived")
 	}
 	if err := display.ToonScalar(out, "result", fmt.Sprintf("deleted %s/%s", opts.Kind, opts.Name)); err != nil {
 		return err
@@ -343,32 +337,32 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 	out := cmd.OutOrStdout()
 
 	if err := requireGitSyncIntent(opts.Confirm, g.DryRun); err != nil {
-		return reportGitSyncError(out, err,
+		return reportCLIError(out, err,
 			"Run `platformctl gitsync recreate --dry-run` first, then re-run with --confirm")
 	}
 
 	client, stop, err := newGitSyncClient(cmd.Context(), shared)
 	if err != nil {
-		return reportGitSyncError(out, err, "Set "+grafanaAddrEnv+" to reach Grafana directly, or check KUBECONFIG")
+		return reportCLIError(out, err, "Set "+grafanaAddrEnv+" to reach Grafana directly, or check KUBECONFIG")
 	}
 	defer stop()
 
 	repos, err := client.List(cmd.Context(), gitsync.KindRepository)
 	if err != nil {
-		return reportGitSyncError(out, err, "Run `platformctl cluster status` to check Grafana itself")
+		return reportCLIError(out, err, "Run `platformctl cluster status` to check Grafana itself")
 	}
 	repo, err := pickRepository(repos, opts.Repository)
 	if err != nil {
-		return reportGitSyncError(out, err, "Run `platformctl gitsync status` to see which repositories exist")
+		return reportCLIError(out, err, "Run `platformctl gitsync status` to see which repositories exist")
 	}
 
 	owned, err := client.DashboardsOwnedBy(cmd.Context(), repo.Name)
 	if err != nil {
-		return reportGitSyncError(out, err,
+		return reportCLIError(out, err,
 			"Ownership could not be verified, so nothing was deleted; retry once Grafana answers")
 	}
 	if len(owned) > 0 && !opts.AllowOwnedDashboard {
-		return reportGitSyncError(out,
+		return reportCLIError(out,
 			fmt.Errorf("repository %s owns %d dashboard(s): %s", repo.Name, len(owned), strings.Join(owned, " ")),
 			"Deleting it lets the remove-orphan-resources finalizer collect them; pass --allow-owned-dashboards only if that is intended")
 	}
@@ -400,7 +394,7 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 
 	for _, step := range steps {
 		if err := client.Delete(cmd.Context(), step[1], step[2]); err != nil {
-			return reportGitSyncError(out, err, "Run `platformctl gitsync status` to see what is left")
+			return reportCLIError(out, err, "Run `platformctl gitsync status` to see what is left")
 		}
 	}
 
@@ -689,14 +683,4 @@ func containsString(haystack []string, needle string) bool {
 		}
 	}
 	return false
-}
-
-func reportGitSyncError(out io.Writer, err error, help string) error {
-	if serr := display.ToonScalar(out, "error", err.Error()); serr != nil {
-		return serr
-	}
-	if serr := display.ToonList(out, "help", []string{help}); serr != nil {
-		return serr
-	}
-	return err
 }
