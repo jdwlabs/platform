@@ -69,6 +69,10 @@ kind: Service
 metadata:
   name: ai-sre-relay
   namespace: ai-sre
+  # ServiceMonitor selects on this, not on spec.selector (that's pod
+  # selection and invisible to the operator) — without it the scrape target
+  # list is empty and AiSreRelayMetricsTargetDown fires permanently.
+  labels: {app: ai-sre-relay}
 spec:
   selector: {app: ai-sre-relay}
   ports:
