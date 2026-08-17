@@ -21,7 +21,19 @@ spec:
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:
+      # A whole-Job retry re-runs the multi-minute investigation to redo a
+      # one-second POST, and the only non-transient escalation failures (auth,
+      # schema) fail identically on every attempt. Transient relay hiccups are
+      # retried inside the container by curl instead, and the hourly schedule
+      # is itself the retry for anything else.
       backoffLimit: 0
+      # failedJobsHistoryLimit only prunes an old failed Job when a *new*
+      # failure pushes the count over the limit, so one failure followed by
+      # nothing but successes lingers forever and keeps kube_job_failed
+      # pinned at 1. TTL-clean any finished Job after a day instead. A day
+      # rather than an hour: Alertmanager's repeat_interval is 4h, and a
+      # shorter TTL would retract the alert before it had been notified.
+      ttlSecondsAfterFinished: 86400
       template:
         spec:
           restartPolicy: Never
@@ -64,6 +76,14 @@ spec:
               volumeMounts:
                 - name: tmp
                   mountPath: /tmp
+              env:
+                # The relay rejects unauthenticated callers on /webhook. Read
+                # fresh on every hourly pod, so a rotation needs no rollout.
+                - name: RELAY_WEBHOOK_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: holmes-drift-scan
+                      key: webhook_token
               command:
                 - sh
                 - -ec
@@ -98,8 +118,14 @@ spec:
                   fingerprint="drift-scan-$(date -u +%Y%m%d)"
                   echo "drift-scan: issue found, escalating via relay (fingerprint=$fingerprint)"
 
-                  curl -sf -m 30 http://ai-sre-relay:8080/webhook \
+                  # --retry only covers transient classes (connection refused,
+                  # timeout, 5xx/429), so a rejected bearer or a bad payload
+                  # still fails on the first attempt instead of being retried
+                  # into the same answer three times.
+                  curl -sf -m 30 --retry 3 --retry-delay 5 --retry-connrefused \
+                    http://ai-sre-relay:8080/webhook \
                     -H 'Content-Type: application/json' \
+                    -H "Authorization: Bearer $RELAY_WEBHOOK_TOKEN" \
                     -d "$(jq -n --arg fp "$fingerprint" --arg summary "$summary" --arg desc "$analysis" '{
                       receiver: "ai-sre",
                       status: "firing",
