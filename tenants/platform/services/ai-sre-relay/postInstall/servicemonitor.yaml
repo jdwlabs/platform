@@ -1,0 +1,29 @@
+# The relay decides whether an alert becomes a pull request, and its counters
+# are the only place that decision is recorded numerically — Loki lines aside,
+# an unscraped relay that discards every remediation is indistinguishable from
+# a cluster with no drift to remediate.
+#
+# Scrapes the existing `http` port rather than a dedicated metrics one: the
+# relay serves /metrics, /healthz and /webhook off a single mux on 8080, so a
+# separate port would need a second listener in the binary and buys nothing —
+# /metrics is already exempt from the webhook bearer-token gate.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ai-sre-relay-metrics
+  namespace: ai-sre
+spec:
+  selector:
+    matchLabels:
+      app: ai-sre-relay
+  namespaceSelector:
+    matchNames:
+      - ai-sre
+  endpoints:
+    # Global scrape interval, not the 30s some monitors here use. These are
+    # hand-written counters that move a handful of times a day (~4.5 alerts
+    # processed/day observed over the deployment's life), so scraping faster
+    # only re-reads identical values.
+    - port: http
+      interval: 60s
+      path: /metrics
