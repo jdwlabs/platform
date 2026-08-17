@@ -12,12 +12,15 @@ spec:
     # like a cluster with no drift. Twelve consecutive rejected remediations
     # went unnoticed for two weeks for precisely that reason.
     #
-    # Every one of these alerts is severity warning, not critical, and that is
-    # deliberate: the Alertmanager route mirrors alerts to the relay with
-    # `continue: true`, so humans keep receiving every alert on Discord whether
-    # or not the relay works. A dark relay costs automated remediation, not
-    # visibility. It also means these alerts still reach a human when the
-    # subject of the alert is the relay's own inability to process them.
+    # Severity here is a routing decision, not a description of impact. Only
+    # critical reaches Discord; warning reaches the relay alone. So the two
+    # alerts that mean "nothing is being processed, or nothing can be observed"
+    # are critical — at warning they would be delivered exclusively to the very
+    # relay they are reporting dark, which is the one recipient guaranteed not
+    # to act on them. The two that mean "the relay is alive but producing less"
+    # stay warning: in both of those states the relay is still receiving and
+    # handling alerts, so it fans this one out to Discord itself, and the
+    # critical route is unaffected either way.
     #
     # Each Handle() increments exactly one of investigations_run or
     # repeats_skipped, so their sum is "alerts the relay processed" and the two
@@ -70,10 +73,10 @@ spec:
             and on() count(ALERTS{alertstate="firing", severity=~"critical|warning"}) > 0
           for: 30m
           labels:
-            severity: warning
+            severity: critical
           annotations:
             summary: "AI-SRE relay has processed no alerts while alerts are firing"
-            description: "The relay has neither investigated nor deduplicated an alert in 6h, while critical/warning alerts kept firing and re-notifying. Alerts are not reaching it, or it is not handling them. Automated investigation and remediation are stopped; Discord notification is unaffected."
+            description: "The relay has neither investigated nor deduplicated an alert in 6h, while critical/warning alerts kept firing. Alerts are not reaching it, or it is not handling them. Automated remediation is stopped and warnings now reach nobody — read them from the Alertmanager UI."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
 
         # The other half of "processed zero": traffic is arriving and every
@@ -115,7 +118,7 @@ spec:
             or absent(up{job="ai-sre-relay", namespace="ai-sre"})
           for: 15m
           labels:
-            severity: warning
+            severity: critical
           annotations:
             summary: "AI-SRE relay metrics are not being scraped"
             description: "Prometheus has not scraped ai-sre-relay for 15m, or the target has vanished from service discovery. Every other relay alert is keyed on these counters and is blind until this is fixed."

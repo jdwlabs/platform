@@ -365,10 +365,18 @@ receivers or Vault secrets until a tenant needs a distinct channel.**
 - The route tree in
   `tenants/platform/services/kube-prometheus-stack/postInstall/alertmanager-config-externalsecret.yaml`
   matches `tenant = "jdwlabs"` / `tenant = "dotablaze-tech"` ahead of the
-  parent's default route. An alert with no `tenant` label (everything that
-  existed before this change) never matches either route, so it falls through
-  to the same `discord` receiver it always used — existing platform routing
-  is unaffected by construction, not just by intent.
+  parent's default route. An alert with no `tenant` label never matches either
+  route, so tenant routing changed nothing for platform alerts.
+
+  It does **not** follow that such an alert reaches the root `discord`
+  receiver — an earlier version of this section claimed it did, and that was
+  wrong both before and after the tenant routes landed. The `ai-sre` route
+  above them matches `severity =~ "critical|warning"`, and `continue: true`
+  resumes at the next *sibling*, never at the parent, so an untenanted critical
+  or warning matching no later sibling resolved to `ai-sre` alone. The root
+  receiver is reached only when *no* child route matches at all. A
+  `severity = "critical"` sibling now sits at the bottom of the list to close
+  that gap; see `docs/OPERATIONS.md` §8 for who receives what.
 - This is deliberately the minimal version: a route per tenant proves the
   match path end-to-end and gives a seam to point at a per-tenant receiver
   (e.g. a tenant-specific Discord webhook or email) later, without touching

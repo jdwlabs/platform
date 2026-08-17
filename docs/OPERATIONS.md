@@ -523,20 +523,36 @@ gates green.
 {namespace="cert-manager", container="cert-manager"} |= "DNS" # DNS-01 detail
 ```
 
-**Prometheus alert routes:** alerts route via `kv/alertmanager`
-`slack_webhook`. Verify by inspecting the alertmanager-config ConfigMap.
+**Prometheus alert routes:** the Discord receiver reads `kv/alertmanager`
+`discord_webhook_url`; the config is the `alertmanager-config` **Secret**,
+rendered by the ExternalSecret of the same name — there is no ConfigMap to
+inspect. Which receivers an alert actually resolves to is a property of the
+route tree, not of the receiver list, so read it with
+`amtool config routes test --config.file=<rendered> <label>=<value> ...`
+rather than by eye.
+
+**Who gets what:** `severity: critical` reaches both the `ai-sre` relay and
+Discord. `severity: warning` reaches the relay only — deliberately, because
+mirroring the chart's warning population into Discord as well would bury the
+criticals. Anything else (`info`, no `severity`) falls through to the root
+`discord` receiver, and `Watchdog`/`InfoInhibitor` are dropped at `null`.
+A `continue: true` route resumes at the next *sibling* only; it never falls
+back to the parent's receiver, so an alert that matches a child route and no
+later sibling reaches that child's receiver and nothing else.
 
 **Tenant alert routing:** a `PrometheusRule` alert only reaches a tenant's
 route if the rule's `labels` block sets `tenant: jdwlabs` or
 `tenant: dotablaze-tech` — the namespace-level `platform.jdwlabs.io/tenant`
 label used elsewhere in the observability stack is not visible to
 Alertmanager. Both tenant routes currently resolve to the shared `discord`
-receiver (see `alertmanager-config-externalsecret.yaml`); an alert with no
-`tenant` label falls through unchanged to that same receiver. To verify a
-tenant's route live, fire a test alert carrying the label (e.g. `amtool alert
-add tenant=jdwlabs alertname=Test` against the Alertmanager API) and confirm
-it lands under the `tenant = "jdwlabs"` route in the Alertmanager UI's Status
-→ routing tree before checking it reached Discord.
+receiver (see `alertmanager-config-externalsecret.yaml`). A tenant route sits
+above the critical fallback route and does not continue, so a tenant alert
+reaches Discord at any severity — including `warning`, which an untenanted
+alert does not. To verify a tenant's route live, fire a test alert carrying
+the label (e.g. `amtool alert add tenant=jdwlabs alertname=Test` against the
+Alertmanager API) and confirm it lands under the `tenant = "jdwlabs"` route in
+the Alertmanager UI's Status → routing tree before checking it reached
+Discord.
 
 **Tracing (Tempo) — `TempoNoSpansReceived`:**
 
@@ -614,10 +630,15 @@ sum(increase(ai_sre_relay_repeats_skipped_total[6h]))               # work dedup
 - `up` empty rather than 0 → the ServiceMonitor has stopped selecting the
   Service; every other relay alert is blind until it is restored.
 
-A dark relay costs automated remediation, not visibility: the Alertmanager
-route mirrors alerts to it with `continue: true`, so Discord notification is
-unaffected either way. That is why these alerts are `warning` and not
-`critical`.
+A dark relay costs visibility, not just automated remediation. `continue: true`
+on the `ai-sre` route resumes at the next sibling, never at the parent, so a
+`warning` alert reaches the relay and no one else — the relay is the sole
+recipient of every warning in the cluster. That is why the two dead-man's
+switches, `AiSreRelayProcessingNothing` and `AiSreRelayMetricsTargetDown`, are
+`critical`: at `warning` the alert reporting the relay dark would be delivered
+only to the dark relay. The other two stay `warning` because the relay is
+still handling traffic in those states and fans the alert out itself. While a
+dead-man's switch is firing, treat the Alertmanager UI as the warning feed.
 
 **Where to look first when X is broken:**
 
