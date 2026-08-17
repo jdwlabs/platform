@@ -104,7 +104,7 @@ services:
   - name: argo-cd
     chart: argo-cd
     repo: https://argoproj.github.io/argo-helm
-    revision: 10.3.0
+    revision: 10.3.3
     namespace: argocd
     postInstall: true
     syncWave: 0
@@ -165,7 +165,7 @@ services:
   - name: longhorn
     chart: longhorn
     repo: https://charts.longhorn.io
-    revision: 1.12.0
+    revision: 1.12.1
     namespace: longhorn-system
     postInstall: true
     syncWave: 1
@@ -211,7 +211,7 @@ services:
   - name: vault
     chart: vault
     repo: https://helm.releases.hashicorp.com
-    revision: 0.34.0
+    revision: 0.34.1
     namespace: vault
     postInstall: true
     syncWave: 2
@@ -235,7 +235,7 @@ services:
   - name: monitoring
     chart: k8s-monitoring
     repo: https://grafana.github.io/helm-charts
-    revision: 4.3.2
+    revision: 4.4.0
     namespace: monitoring
     postInstall: false
     syncWave: 2
@@ -251,7 +251,7 @@ services:
   - name: loki
     chart: loki
     repo: https://grafana.github.io/helm-charts
-    revision: 7.2.0
+    revision: 7.3.0
     namespace: monitoring
     # No postInstall directory: its only manifest was the Loki dashboard, now
     # owned by Git Sync. Leaving this true would point an ArgoCD source at a
@@ -262,7 +262,7 @@ services:
   - name: kube-prometheus-stack
     chart: kube-prometheus-stack
     repo: https://prometheus-community.github.io/helm-charts
-    revision: "88.2.0"
+    revision: "88.3.0"
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -280,7 +280,7 @@ services:
   - name: tempo
     chart: tempo
     repo: https://grafana-community.github.io/helm-charts
-    revision: 2.2.3
+    revision: 2.2.4
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -301,7 +301,7 @@ services:
   - name: reloader
     chart: reloader
     repo: https://stakater.github.io/stakater-charts
-    revision: 2.2.15
+    revision: 2.2.16
     namespace: reloader
     postInstall: false
     syncWave: 2
@@ -396,7 +396,7 @@ services:
   - name: holmes
     chart: holmes
     repo: https://robusta-charts.storage.googleapis.com
-    revision: 0.38.2
+    revision: 0.39.0
     namespace: ai-sre
     postInstall: true
     syncWave: 5
