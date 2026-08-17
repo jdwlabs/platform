@@ -61,7 +61,7 @@ var dryRunContract = map[string]bool{
 func TestDryRun_ScopedToImplementingCommands(t *testing.T) {
 	for path, wantAccept := range dryRunContract {
 		t.Run(path, func(t *testing.T) {
-			root, _ := NewRoot("test")
+			root, _, g := newRootWithGlobals("test")
 			cmd := findCommand(t, root, path)
 
 			// ParseFlags resolves inherited persistent flags exactly as an
@@ -75,6 +75,25 @@ func TestDryRun_ScopedToImplementingCommands(t *testing.T) {
 			case !wantAccept && !strings.Contains(err.Error(), "unknown flag"):
 				t.Fatalf("`%s` must reject --dry-run as an unknown flag, got: %v", path, err)
 			}
+			if !wantAccept {
+				return
+			}
+
+			// Accepting the flag is not the contract. A command that binds
+			// --dry-run to anything but the Globals its RunE body reads
+			// passes every acceptance check and still mutates for real, so
+			// assert the flag writes through to that exact field.
+			flag := cmd.Flags().Lookup("dry-run")
+			if flag == nil {
+				t.Fatalf("`%s` parsed --dry-run but declares no such flag", path)
+			}
+			g.DryRun = false
+			if err := flag.Value.Set("true"); err != nil {
+				t.Fatalf("`%s` --dry-run is not settable: %v", path, err)
+			}
+			if !g.DryRun {
+				t.Fatalf("`%s` binds --dry-run to something other than Globals.DryRun", path)
+			}
 		})
 	}
 }
@@ -86,6 +105,16 @@ func TestDryRun_ContractCoversEveryCommand(t *testing.T) {
 	var walk func(*cobra.Command)
 	walk = func(c *cobra.Command) {
 		found = append(found, c.CommandPath())
+		// Either setting makes ParseFlags return nil for an unknown flag, so
+		// the contract test above would read a rejecting command as accepting
+		// and steer its author to mark the row true — at which point the
+		// command swallows --dry-run and mutates for real.
+		if c.DisableFlagParsing {
+			t.Errorf("`%s` sets DisableFlagParsing, which defeats the --dry-run contract test", c.CommandPath())
+		}
+		if c.FParseErrWhitelist.UnknownFlags {
+			t.Errorf("`%s` whitelists unknown flags, so it would swallow --dry-run instead of rejecting it", c.CommandPath())
+		}
 		for _, sub := range c.Commands() {
 			if sub.Name() == "help" || sub.Name() == "completion" {
 				continue
@@ -115,9 +144,8 @@ func TestDryRun_UnsupportedCommandReportsTheRejection(t *testing.T) {
 	var out bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&out)
-	root.SetArgs([]string{"bootstrap", "seed", "grafana", "--dry-run"})
 
-	err := root.Execute()
+	err := Execute(root, []string{"bootstrap", "seed", "grafana", "--dry-run"})
 	if err == nil {
 		t.Fatalf("bootstrap seed must fail on --dry-run\n%s", out.String())
 	}
@@ -125,6 +153,32 @@ func TestDryRun_UnsupportedCommandReportsTheRejection(t *testing.T) {
 		t.Fatalf("bootstrap seed --dry-run must exit non-zero, got %d", ExitCode(err))
 	}
 	if !strings.Contains(out.String(), "unknown flag: --dry-run") {
+		t.Errorf("rejection must name the flag on stdout:\n%s", out.String())
+	}
+	// FlagErrorFunc already reported this one; Execute must not repeat it.
+	if n := strings.Count(out.String(), "unknown flag: --dry-run"); n != 1 {
+		t.Errorf("rejection reported %d times, want 1:\n%s", n, out.String())
+	}
+}
+
+// TestDryRun_RootPositionReportsTheRejection is the sibling of the above for
+// the documented `platformctl --dry-run <subcommand>` form. Cobra resolves the
+// subcommand before any command's flags exist, so this failure never reaches
+// FlagErrorFunc and is the one ordering that can exit non-zero in silence.
+func TestDryRun_RootPositionReportsTheRejection(t *testing.T) {
+	root, _ := NewRoot("test")
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+
+	err := Execute(root, []string{"--dry-run", "bootstrap", "seed", "grafana"})
+	if err == nil {
+		t.Fatalf("bootstrap seed must fail on --dry-run\n%s", out.String())
+	}
+	if ExitCode(err) == ExitOK {
+		t.Fatalf("--dry-run bootstrap seed must exit non-zero, got %d", ExitCode(err))
+	}
+	if !strings.Contains(out.String(), "--dry-run") {
 		t.Errorf("rejection must name the flag on stdout:\n%s", out.String())
 	}
 }

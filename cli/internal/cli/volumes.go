@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
@@ -52,23 +51,6 @@ Run with no subcommand to list every volume.`,
 	cmd.AddCommand(newVolumesListCmd(g))
 	cmd.AddCommand(newVolumesReclaimCmd(g))
 	return cmd
-}
-
-// localFlagNames lists a command's own flags for an unknown-flag error, so the
-// agent can correct itself without a second call for --help.
-func localFlagNames(cmd *cobra.Command) string {
-	var names []string
-	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		if f.Name == "help" {
-			return
-		}
-		names = append(names, "--"+f.Name)
-	})
-	if len(names) == 0 {
-		return "none"
-	}
-	sort.Strings(names)
-	return strings.Join(names, " ")
 }
 
 type volumeListOptions struct {
