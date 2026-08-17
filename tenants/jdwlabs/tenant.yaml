@@ -12,6 +12,13 @@ namespaces:
   - name: jdwlabs-non
     quotaTier: standard
     networkPolicy: default
+    enforce: true
+    # Inter-app calls (authui/rolesui/usersui/container -> usersrole,
+    # servicediscovery) go out via their public *.jdwlabs.com hostnames and
+    # hairpin back through the gateway rather than using in-cluster Service
+    # DNS, so egress needs the external allow, not just the ingress-controller
+    # allow that already covers the inbound leg.
+    externalEgress: true
   - name: jdwlabs-prd
     quotaTier: standard
     networkPolicy: default

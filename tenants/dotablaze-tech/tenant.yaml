@@ -12,6 +12,7 @@ namespaces:
   - name: dotablaze-tech-non
     quotaTier: standard
     networkPolicy: default
+    enforce: true
     externalEgress: true
   - name: dotablaze-tech-prd
     quotaTier: standard
