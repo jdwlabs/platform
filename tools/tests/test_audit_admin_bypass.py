@@ -72,5 +72,72 @@ class ParseSinceTests(unittest.TestCase):
             audit.parse_since("not-a-date")
 
 
+def _ruleset(
+    *,
+    count: int = 0,
+    code_owner: bool = False,
+    enforcement: str = "active",
+    includes: tuple[str, ...] = ("refs/heads/main",),
+    rule_type: str = "pull_request",
+) -> dict:
+    return {
+        "enforcement": enforcement,
+        "conditions": {"ref_name": {"include": list(includes), "exclude": []}},
+        "rules": [
+            {
+                "type": rule_type,
+                "parameters": {
+                    "required_approving_review_count": count,
+                    "require_code_owner_review": code_owner,
+                },
+            }
+        ],
+    }
+
+
+class RulesetReviewRequirementTests(unittest.TestCase):
+    REF = "refs/heads/main"
+
+    def test_plain_approval_count_is_reported(self):
+        got = audit.ruleset_review_requirement(_ruleset(count=1), self.REF)
+        self.assertEqual(got, 1)
+
+    def test_code_owner_gate_with_zero_count_still_requires_one(self):
+        # The shape both real owner-gates use; scored as 0 this audit would
+        # exempt every path they protect.
+        got = audit.ruleset_review_requirement(
+            _ruleset(count=0, code_owner=True), self.REF
+        )
+        self.assertEqual(got, 1)
+
+    def test_code_owner_gate_does_not_lower_a_higher_count(self):
+        got = audit.ruleset_review_requirement(
+            _ruleset(count=2, code_owner=True), self.REF
+        )
+        self.assertEqual(got, 2)
+
+    def test_zero_count_without_code_owner_stays_zero(self):
+        got = audit.ruleset_review_requirement(_ruleset(count=0), self.REF)
+        self.assertEqual(got, 0)
+
+    def test_inactive_ruleset_does_not_apply(self):
+        got = audit.ruleset_review_requirement(
+            _ruleset(count=1, enforcement="disabled"), self.REF
+        )
+        self.assertIsNone(got)
+
+    def test_ruleset_not_covering_the_ref_does_not_apply(self):
+        got = audit.ruleset_review_requirement(
+            _ruleset(count=1, includes=("refs/heads/release/**",)), self.REF
+        )
+        self.assertIsNone(got)
+
+    def test_ruleset_without_a_pull_request_rule_does_not_apply(self):
+        got = audit.ruleset_review_requirement(
+            _ruleset(count=1, rule_type="deletion"), self.REF
+        )
+        self.assertIsNone(got)
+
+
 if __name__ == "__main__":
     unittest.main()
