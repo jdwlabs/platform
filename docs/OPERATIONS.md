@@ -577,6 +577,38 @@ If the third returns nothing while the first two have data,
 default netdata metrics, and the SMART temperature chart is among those that
 may need a netdata-side collector config on the NAS to restore.
 
+**Upgrade gate — the NAS does not go past 25.10.x:**
+
+TrueNAS removes the REST API in 26. Both democratic-csi releases reach the
+NAS over it (`freenas-api-nfs` and `freenas-api-iscsi`, `protocol: http` to
+192.168.1.205:80), and **no released or unreleased build of democratic-csi
+can speak the replacement JSON-RPC-over-WebSocket API** — verified against
+driver source, not release notes, in
+`docs/adr/0024-truenas-rest-removal-blocks-democratic-csi.md`.
+
+Upgrading the NAS to 26.x therefore takes out the CSI control plane for both
+`truenas-nfs` and `truenas-iscsi`. Already-bound, already-mounted volumes
+keep serving — the NFS and iSCSI data paths never touch the API — but
+provisioning, expansion, snapshotting and deletion all fail, and the only
+remedy is downgrading the NAS.
+
+Before any TrueNAS major upgrade, confirm the gate has lifted:
+
+```
+kubectl -n democratic-csi get secret democratic-csi-driver-config \
+  -o jsonpath='{.data.driver-config-file\.yaml}' | base64 -d | head -6
+# a `protocol: http` httpConnection block means the gate still applies
+```
+
+The standing REST-deprecation alert on the NAS is the live signal that the
+dependency is still there. Leave it alone — it self-clears 24h after the
+last REST call, and dismissing it destroys the only evidence available.
+
+The ADR's R1-R4 triggers say what has to become true before the gate lifts,
+and record a second, opposite hazard: the driver image runs from an unpinned
+`latest` tag, and upstream's announced next version drops REST support and
+requires 26.x. That one breaks provisioning with no commit in this repo.
+
 ## Self-hosted CI runners (ARC) — dormant
 
 All CI runs exclusively on GitHub-hosted runners (`ubuntu-latest`). The ARC
