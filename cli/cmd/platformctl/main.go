@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/jdwlabs/platform/internal/cli"
 )
@@ -23,7 +24,7 @@ func buildVersion() string {
 
 func main() {
 	root, cleanup := cli.NewRoot(buildVersion())
-	err := root.Execute()
+	err := cli.Execute(root, os.Args[1:])
 	cleanup(err)
 	cli.Exit(cli.ExitCode(err))
 }
