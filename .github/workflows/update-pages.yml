@@ -8,6 +8,28 @@ on:
 permissions:
   contents: write
 
+# Shares its group with Release Chart: both push to gh-pages, and two Release
+# Chart runs completing close together (batch-releasing more than one chart)
+# would otherwise trigger two of these in parallel, each checking out
+# gh-pages, editing index.html, and pushing. `git push` below has no
+# `|| true` and runs under Actions' default `bash -eo pipefail`, so a racing
+# non-fast-forward rejection fails this job loudly (red run), not silently.
+#
+# cancel-in-progress must stay false: cancelling a run mid-push to a shared
+# ref is worse than the race it would prevent.
+#
+# KNOWN LIMITATION - see the fuller note in release.yml: cancel-in-progress:
+# false holds one pending run per group, not an unbounded queue. A 3rd
+# concurrent entrant across the two workflows sharing this group cancels the
+# previously-pending run instead of queuing behind it, and a `cancelled`
+# conclusion reads as success to anything matching only on `failure`. The
+# `if:` below matches positively on `success`, so a cancelled Release Chart
+# correctly does not trigger this workflow. This group narrows the race
+# window, it does not close it for 3+ concurrent writers.
+concurrency:
+  group: gh-pages-write
+  cancel-in-progress: false
+
 jobs:
   update-index:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
