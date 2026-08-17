@@ -31,6 +31,14 @@ csiProxy:
 
 controller:
   driver:
+    # Same floating-`latest` problem, same digest, same reasoning as the NFS
+    # release -- see the long note on controller.driver.image in
+    # tenants/platform/services/democratic-csi/values.yaml. The two releases
+    # were verified to be running this identical digest before it was pinned,
+    # and they are deliberately kept on one version: a driver skew between the
+    # NFS and iSCSI releases is a debugging trap, not a safety margin.
+    image:
+      tag: latest@sha256:944d0e65077efbd9c1fdf23997eec8fac4b4bfb7c3de400f63e33a0a849c5ced
     resources:
       requests:
         memory: 96Mi
@@ -78,6 +86,10 @@ node:
     # immutable image, so DirectoryOrCreate there fails read-only; and
     # /var/lib/iscsi collides with the chart's own iscsi-info mount, which
     # leaves ArgoCD unable to diff the DaemonSet at all.
+    # Same image and reasoning as controller.driver.image above; the chart
+    # defaults this key to `latest` independently of the controller's.
+    image:
+      tag: latest@sha256:944d0e65077efbd9c1fdf23997eec8fac4b4bfb7c3de400f63e33a0a849c5ced
     iscsiDirHostPath: /var/etc/iscsi
     iscsiDirHostPathType: DirectoryOrCreate
     extraEnv:
