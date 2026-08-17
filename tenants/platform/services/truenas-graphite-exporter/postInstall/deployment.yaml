@@ -38,10 +38,11 @@ spec:
             # Prometheus.
             - --graphite.mapping-strict-match
             # Samples must outlive a scrape interval or every scrape races the
-            # push. Prometheus scrapes this cluster at 60s; 10m tolerates a
-            # short NAS-side hiccup without dropping series, while still
-            # letting them expire fast enough for the absent() alerts in
-            # rules-truenas.yaml to mean something.
+            # push. Prometheus scrapes this cluster at 60s and the NAS pushes
+            # every 30s, so 10m tolerates a long NAS-side hiccup without
+            # dropping series. Staleness is detected by
+            # graphite_last_processed_timestamp_seconds rather than by series
+            # expiry (see TrueNASMetricsStale), so this value can be generous.
             - --graphite.sample-expiry=10m
           ports:
             - name: ingest

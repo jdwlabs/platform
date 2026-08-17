@@ -13,6 +13,7 @@ spec:
   endpoints:
     - port: metrics
       # Left at the global 60s rather than the 30s other ServiceMonitors here
-      # use. The NAS pushes on netdata's own cadence, so scraping faster only
-      # re-reads the same samples.
+      # use. The NAS pushes every 30s (exporter id=1, update_every), so a 60s
+      # scrape reads every other sample and a faster one would mostly re-read
+      # the same values.
       interval: 60s
