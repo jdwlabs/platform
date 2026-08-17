@@ -703,3 +703,45 @@ func TestParseMajorMinor(t *testing.T) {
 		}
 	}
 }
+
+func newRcloneSecret(conf string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "rclone-gdrive", Namespace: "database"},
+		Data:       map[string][]byte{"rclone.conf": []byte(conf)},
+	}
+}
+
+// The remote runs on the shared client today and uploads still succeed, so this
+// check must not turn `cluster check` red before the credential is minted.
+func TestCheckRcloneOwnClientID_SharedClientWarnsOnly(t *testing.T) {
+	kube := fake.NewSimpleClientset(newRcloneSecret("[gdrive]\ntype = drive\ntoken = {}\n"))
+	r := checkRcloneOwnClientID(context.Background(), kube, "database", "rclone-gdrive")
+	if r.Status != StatusWarn {
+		t.Fatalf("expected warn, got %s: %s", r.Status, r.Message)
+	}
+}
+
+func TestCheckRcloneOwnClientID_DedicatedClientPasses(t *testing.T) {
+	kube := fake.NewSimpleClientset(newRcloneSecret(
+		"[gdrive]\ntype = drive\nclient_id = 1.apps.googleusercontent.com\nclient_secret = s\ntoken = {}\n"))
+	r := checkRcloneOwnClientID(context.Background(), kube, "database", "rclone-gdrive")
+	if r.Status != StatusPass {
+		t.Fatalf("expected pass, got %s: %s", r.Status, r.Message)
+	}
+}
+
+func TestCheckRcloneOwnClientID_HalfCredentialFails(t *testing.T) {
+	kube := fake.NewSimpleClientset(newRcloneSecret(
+		"[gdrive]\ntype = drive\nclient_id = 1.apps.googleusercontent.com\ntoken = {}\n"))
+	r := checkRcloneOwnClientID(context.Background(), kube, "database", "rclone-gdrive")
+	if r.Status != StatusFail {
+		t.Fatalf("expected fail, got %s: %s", r.Status, r.Message)
+	}
+}
+
+func TestCheckRcloneOwnClientID_MissingSecretFails(t *testing.T) {
+	r := checkRcloneOwnClientID(context.Background(), fake.NewSimpleClientset(), "database", "rclone-gdrive")
+	if r.Status != StatusFail {
+		t.Fatalf("expected fail, got %s: %s", r.Status, r.Message)
+	}
+}

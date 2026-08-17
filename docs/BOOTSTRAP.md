@@ -74,7 +74,7 @@ platformctl bootstrap --branch feature/my-change
 | 2 | `root-apply`     | Apply `bootstrap/root-app.yaml`; wait AppProjects + governance AppSet | —                          |
 | 3 | `vault-init`     | `vault operator init`, unseal, store keys/token, enable kv-v2     | Save `vault-init.json` offline (interactive prompt) |
 | 4 | `vault-seed`     | Write all platform + tenant kv paths                              | Provide secret values via prompts or `PLATFORMCTL_*` env |
-| 5 | `backups-init`   | Capture rclone Google Drive OAuth token                           | Run `rclone authorize "drive"` out-of-band, paste block |
+| 5 | `backups-init`   | Capture rclone Google Drive OAuth token                           | Run `rclone authorize "drive" "<client-id>" "<client-secret>"` out-of-band, paste block. Minting the client is [OPERATIONS.md §3.1](OPERATIONS.md#31-moving-the-backup-drive-remote-off-rclones-shared-client_id) |
 
 After all five phases, run:
 

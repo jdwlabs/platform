@@ -15,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/jdwlabs/platform/internal/rclone"
 )
 
 var (
@@ -111,7 +113,45 @@ func secretChecks(kube kubernetes.Interface, dyn dynamic.Interface) []Check {
 			},
 		}
 	}
+	checks = append(checks, Check{
+		Layer: 3,
+		Group: "Secrets",
+		Name:  "rclone-gdrive-client-id",
+		Run: func(ctx context.Context) Result {
+			return checkRcloneOwnClientID(ctx, kube, "database", "rclone-gdrive")
+		},
+	})
 	return checks
+}
+
+// checkRcloneOwnClientID reports whether the Drive remote backing the postgres
+// backups authenticates as its own OAuth application. Google is retiring the
+// credentials rclone bundles, and the only warning before that is a NOTICE in
+// backup job logs that are garbage-collected within a day — so the state is
+// asserted here instead, where it survives.
+//
+// Warn rather than fail while the remote is still on the shared client: uploads
+// work until the retirement lands, and a red check would say otherwise.
+func checkRcloneOwnClientID(ctx context.Context, kube kubernetes.Interface, ns, name string) Result {
+	secret, err := kube.CoreV1().Secrets(ns).Get(ctx, name, metav1.GetOptions{})
+	if k8serrors.IsNotFound(err) {
+		return Fail("secret not found")
+	}
+	if err != nil {
+		return Failf("get error: %v", err)
+	}
+	conf, ok := secret.Data["rclone.conf"]
+	if !ok {
+		return Fail("secret has no rclone.conf key")
+	}
+	switch rclone.InspectRemote(string(conf), "gdrive") {
+	case rclone.OwnClient:
+		return Pass("dedicated OAuth client_id")
+	case rclone.PartialClient:
+		return Fail("client_id and client_secret must both be set; the remote will fail at its next token refresh")
+	default:
+		return Warn("using rclone's shared client_id, which Google is retiring during 2026")
+	}
 }
 
 // --- Layer 4: TLS / Gateway routing ---

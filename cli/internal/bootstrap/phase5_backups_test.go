@@ -48,3 +48,17 @@ token = {"access_token":"x"}
 		t.Fatal("expected error for missing refresh_token")
 	}
 }
+
+func TestValidateRcloneBlock_OwnClientOK(t *testing.T) {
+	in := validRcloneBlock + "client_id = 1.apps.googleusercontent.com\nclient_secret = s\n"
+	if err := validateRcloneBlock(in); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+}
+
+func TestValidateRcloneBlock_RejectsHalfCredential(t *testing.T) {
+	in := validRcloneBlock + "client_id = 1.apps.googleusercontent.com\n"
+	if err := validateRcloneBlock(in); err == nil {
+		t.Fatal("expected error for client_id without client_secret")
+	}
+}
