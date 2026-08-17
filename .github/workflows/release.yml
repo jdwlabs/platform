@@ -10,6 +10,36 @@ permissions:
   pages: write
   id-token: write
 
+# Two tags pushed close together (releasing more than one chart in a batch)
+# can trigger concurrent runs, and the reusable release-helm.yml workflow
+# writes the shared Helm repo index by fetching gh-pages, editing it, and
+# pushing HEAD:gh-pages without force. A racing non-fast-forward push runs
+# under Actions' default `bash -eo pipefail`, so it fails that step loudly -
+# the run goes red, it does not fail silently. The GitHub Release and .tgz
+# asset from the earlier step still exist either way; only the index entry
+# is missing, and nothing retries it. This group is shared with Update Chart
+# Index Page, since both write to gh-pages and neither may race the other,
+# not just itself.
+#
+# cancel-in-progress must stay false: cancelling a run mid-push to a shared
+# ref is worse than the race it would prevent.
+#
+# KNOWN LIMITATION: cancel-in-progress: false holds exactly one *pending*
+# run per group, not an unbounded queue - it does not turn racing runs into
+# a full queue. A 3rd concurrent entrant (3+ tags pushed close together, or
+# this workflow and Update Chart Index Page both landing a pending run at
+# once) CANCELS the previously-pending run rather than queuing behind it,
+# and a cancelled conclusion is `cancelled`, not `failure` - it reads as
+# success to anything matching only on `failure`. A batch of 3+ releases can
+# therefore still silently drop a middle release's index entry, with no
+# retry. Not fixed by this group: fixing it needs either deeper per-group
+# queuing than Actions offers, or release-helm.yml (jdwlabs/.github,
+# upstream, out of scope for this repo) to retry/rebase its push instead of
+# a single non-retrying attempt.
+concurrency:
+  group: gh-pages-write
+  cancel-in-progress: false
+
 jobs:
   release:
     uses: jdwlabs/.github/.github/workflows/release-helm.yml@main
