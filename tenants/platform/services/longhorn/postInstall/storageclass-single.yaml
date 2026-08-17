@@ -10,8 +10,9 @@ metadata:
     # application node — the app's own quorum handles durability. Retain so the
     # volume is not auto-deleted on PVC churn.
     #
-    # Distinct from longhorn-ephemeral-local (Delete) which is for throwaway CI
-    # scratch. Do NOT use for apps without their own replication.
+    # Throwaway CI scratch is not a use case here — runner `_work` is provisioned
+    # node-locally by `local-path`, off Longhorn entirely. Do NOT use for apps
+    # without their own replication.
     storageclass.kubernetes.io/is-default-class: "false"
 provisioner: driver.longhorn.io
 allowVolumeExpansion: true

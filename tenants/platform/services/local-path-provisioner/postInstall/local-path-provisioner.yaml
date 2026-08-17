@@ -148,10 +148,26 @@ data:
         }
       ]
     }
+  # 0777 is load-bearing, not sloppiness: the volume is a hostPath, and kubelet
+  # does not apply a pod's fsGroup to hostPath volumes, so there is no group
+  # ownership to narrow to and a non-root runner can only write into a
+  # world-writable directory. 0770 plus a matching fsGroup was considered and
+  # rejected for that reason — it breaks CI writes without closing the hole.
+  #
+  # Accepted exposure: every CI checkout under the node path is world-readable
+  # on the node filesystem. Tenant runner namespaces run PSA restricted with
+  # enforce: true and cannot mount hostPath, so reach is bounded to
+  # platform-tier namespaces, where a workload could read any tenant's
+  # checked-out source. Narrowing it needs a different mechanism (privileged
+  # per-volume chown, or moving _work off hostPath), not a mode change here.
   setup: |-
     #!/bin/sh
     set -eu
     mkdir -m 0777 -p "$VOL_DIR"
+  # Reclaim runs this in a helper pod pinned to the volume's node. The pod
+  # tolerates everything, so a cordoned node still reclaims, but a NotReady or
+  # removed node strands the PV and its on-disk data indefinitely — see the
+  # OPERATIONS runbook entry on orphaned local-path PVs after node loss.
   teardown: |-
     #!/bin/sh
     set -eu
