@@ -33,7 +33,21 @@ spec:
           jqPathExpressions:
             - .spec.persistentVolumeClaimRetentionPolicy
             - .spec.podManagementPolicy
-            - .spec.updateStrategy
+            {{- /*
+            .spec.updateStrategy is deliberately NOT ignored here, unlike in
+            services-appset.yaml. Ignoring it does not merely hide drift: with
+            ServerSideApply and RespectIgnoreDifferences both set, ArgoCD strips
+            the path before diffing and applying, so it never claims ownership
+            of the field and the live value can never converge on the manifest.
+            A tenant declaring RollingUpdate silently stayed OnDelete forever,
+            making every image bump a merge plus a manual pod delete.
+
+            The services appset keeps the ignore because Vault depends on it —
+            three replicas, each returning sealed, where an automatic roll risks
+            quorum (adr/0007-vault-stays-on-ondelete.md). No workload under a
+            tenant deployment repo has that shape today, so the two appsets
+            differ on purpose.
+            */}}
             - .spec.template.metadata.annotations
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
