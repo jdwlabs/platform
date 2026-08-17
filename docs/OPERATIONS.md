@@ -58,7 +58,7 @@ in place removes the ambiguity.
 | Grafana   | `https://grafana.jdwlabs.com` | `admin` / value at `kv/grafana` field `admin_password`                                                                |
 | db-ui     | `https://db.jdwlabs.com`      | Cluster-side OAuth via gitops-managed config                                                                          |
 | Vault     | `https://vault.jdwlabs.com`   | Root token in `secret/vault/vault-init` (offline copy required for break-glass)                                       |
-| Proxmox   | `https://pve<1-5>.attlocal.net:8006` (LAN); Tailscale subnet router off-LAN, once live (§1.3) | Proxmox's own local auth — not gitops-managed |
+| Proxmox   | `https://pve<1-5>.attlocal.net:8006` (LAN); Tailscale subnet router off-LAN — route live, off-LAN access not yet demonstrated (§1.3) | Proxmox's own local auth — not gitops-managed |
 
 > `platformctl` does not currently expose URL/credential lookup commands.
 > Adding `platformctl access <service>` is a tracked v2 feature.
@@ -163,12 +163,12 @@ Reasoning:
   backups, cluster settings) — the same category of exposure risk as the
   Kubernetes (`6443`) and Talos (`50000`) APIs, which were deliberately
   pulled off the public internet, with a Tailscale subnet router on the
-  HAProxy VM as the planned replacement path. Reversing that call for
+  HAProxy VM as the replacement path. Reversing that call for
   Proxmox — a surface with *more*
   blast radius than either API — would be inconsistent with that posture.
 - The subnet router advertises the whole `192.168.1.0/24` LAN, not just the
-  HAProxy VM. Once it is live, every `pve*` host's `:8006` is already
-  reachable over the tailnet by IP — a second, separate access mechanism
+  HAProxy VM. Every `pve*` host's `:8006` is therefore covered by the same
+  approved route — a second, separate access mechanism
   (reverse proxy + its own auth layer, a second TLS cert, a second set of
   credentials to rotate) would duplicate a path that standing up the subnet
   router already provides for free.
@@ -189,15 +189,18 @@ for the full host/address table. The `pve5` record currently answers with
 two addresses; only `192.168.1.204` is live — retry if a `pve5` connection
 is refused.
 
-**How to reach it off-LAN, once available:** over the same Tailscale subnet
-router being stood up for cluster admin — see
+**How to reach it off-LAN:** over the same Tailscale subnet router stood up for
+cluster admin — see
 [`infrastructure/docs/tailscale-subnet-router.md`](https://github.com/jdwlabs/infrastructure/blob/main/docs/tailscale-subnet-router.md).
-That work is not yet live (no infrastructure host has joined the tailnet or
-advertised a route as of this writing), so off-LAN Proxmox access does not
-exist yet either — this is a documented dependency, not a gap in this repo.
+As of 2026-08-13 the HAProxy VM (`192.168.1.199`) is on the tailnet as
+`haproxy-1` and its `192.168.1.0/24` route is approved, so the path exists on
+paper. It has **not** been exercised from off-LAN yet — no tailnet device on a
+different network has used the route — so treat off-LAN Proxmox access as
+unproven rather than working, and expect to debug it on first use. This is a
+documented dependency, not a gap in this repo.
 
-**What "reachable via a stable domain name" still needs, once the subnet
-router is live:** the `pve*.attlocal.net` names only resolve when a client
+**What "reachable via a stable domain name" still needs:** the
+`pve*.attlocal.net` names only resolve when a client
 queries the gateway (`192.168.1.254`) directly; Tailscale does not forward
 DNS queries to it by default (the subnet router install intentionally sets
 `--accept-dns=false`). An off-LAN tailnet client therefore needs either a

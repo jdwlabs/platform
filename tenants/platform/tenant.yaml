@@ -110,9 +110,12 @@ services:
     syncWave: 0
 
   # Wave 1: Core infrastructure (Networking, TLS, Storage)
-  # Policy engine only — Flannel keeps the CNI slot and the datapath. Installed
-  # in audit mode, so it enforces nothing until the allow-set has been
-  # corrected against observed traffic.
+  # Policy engine only — Flannel keeps the CNI slot and the datapath. Audit
+  # mode is off, but that does not mean workloads are isolated: pods predating
+  # this DaemonSet have no CiliumEndpoint, so no identity, so no policy is
+  # evaluated against them — which today is every pod in every namespace that
+  # enforces. See docs/TENANT-MODEL.md for the measured coverage; enforce: true
+  # on a namespace is not on its own evidence that its pods are isolated.
   #
   # Reverted once on 2026-08-13 (root cause not yet isolated at the time) and
   # re-enabled the same day once it was: ADR 0019 identifies and fixes the
