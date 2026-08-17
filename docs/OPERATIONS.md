@@ -476,6 +476,44 @@ kubectl -n monitoring exec deploy/platform-grafana -c grafana -- curl -sG \
    replacement — do not silence the alert. An empty tracing backend that nobody
    is told about is the exact condition this rule exists to surface.
 
+**AI-SRE relay (`AiSreRelay*` alerts):**
+
+The relay receives every critical/warning alert from Alertmanager and decides
+whether it becomes an investigation, a Jira ticket, and possibly a remediation
+PR. It exposes hand-written counters on `:8080/metrics` — no `go_*` or
+`process_*` series, so `up` is the only health signal about the target itself.
+
+Every `Handle()` increments exactly one of two counters, so their sum is
+"alerts the relay processed" and the pair partitions every delivery:
+
+| Metric | Meaning |
+|---|---|
+| `ai_sre_relay_investigations_run_total` | Alerts investigated |
+| `ai_sre_relay_repeats_skipped_total` | Refires deduplicated against an open ticket |
+| `ai_sre_relay_repo_rejections_total` | Remediations discarded at the repository allowlist |
+
+Diagnosing a quiet relay — the three states look identical from Discord, and
+these queries separate them:
+
+```
+up{job="ai-sre-relay", namespace="ai-sre"}                          # 1 = scraped
+sum(increase(ai_sre_relay_investigations_run_total[6h]))            # work done
+sum(increase(ai_sre_relay_repeats_skipped_total[6h]))               # work deduplicated
+```
+
+- Both counters flat while alerts fire → the webhook path is broken. Check the
+  Alertmanager `ai-sre` receiver and the relay's bearer token, not the relay's
+  own logic.
+- Skips climbing, investigations flat → dedupe is swallowing everything,
+  usually a Jira ticket left open past the end of its firing episode. Close it.
+- `up` empty rather than 0 → the ServiceMonitor has stopped selecting the
+  Service; every other relay alert is blind until it is restored.
+
+A dark relay costs automated remediation, not visibility: the Alertmanager
+route mirrors alerts to it with `continue: true`, so Discord notification is
+unaffected either way. That is why these alerts are `warning` and not
+`critical`.
+
 **Where to look first when X is broken:**
 
 | Subsystem        | Start here                                           |
@@ -487,6 +525,7 @@ kubectl -n monitoring exec deploy/platform-grafana -c grafana -- curl -sG \
 | ARC runners      | Dormant by default — `arc-systems` should be empty; see "Self-hosted CI runners (ARC)" |
 | Gateway (NGF)    | `kubectl get pods -n nginx-gateway`, then check `NginxGatewayFabricDown`/`NginxGatewayFabricReconcileErrorsHigh` alerts (control-plane health only, not request-level) |
 | Tracing (Tempo)  | `sum(tempo_distributor_traces_per_batch_count)` — 0 means nothing is emitting, empty vector means the metric itself is gone; see the `TempoNoSpansReceived` steps above |
+| AI-SRE relay     | `up{job="ai-sre-relay", namespace="ai-sre"}` first, then the two processing counters; see the `AiSreRelay*` steps above |
 
 **Control-plane metrics — etcd, kube-scheduler, kube-controller-manager:**
 

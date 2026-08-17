@@ -1,0 +1,122 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ai-sre-relay-rules
+  namespace: monitoring
+spec:
+  groups:
+    # The relay is the last link in the AI-SRE chain: it receives every
+    # critical/warning alert from Alertmanager, investigates it, and may open a
+    # remediation PR. Its silence is the hardest failure in the stack to read —
+    # a relay that discards every proposed fix looks, from outside, exactly
+    # like a cluster with no drift. Twelve consecutive rejected remediations
+    # went unnoticed for two weeks for precisely that reason.
+    #
+    # Every one of these alerts is severity warning, not critical, and that is
+    # deliberate: the Alertmanager route mirrors alerts to the relay with
+    # `continue: true`, so humans keep receiving every alert on Discord whether
+    # or not the relay works. A dark relay costs automated remediation, not
+    # visibility. It also means these alerts still reach a human when the
+    # subject of the alert is the relay's own inability to process them.
+    #
+    # Each Handle() increments exactly one of investigations_run or
+    # repeats_skipped, so their sum is "alerts the relay processed" and the two
+    # counters partition every delivery. The rules below rely on that.
+    - name: ai-sre-relay
+      rules:
+        # A rejection means the relay produced a remediation and then threw it
+        # away at the repository allowlist — a fix that was written and never
+        # shipped. Any occurrence is worth a notification; there is no healthy
+        # rate of this. The 1h window is smoothing, not a threshold: it holds
+        # the alert up long enough to be read rather than resolving between two
+        # scrapes of a counter that moves a few times a day.
+        #
+        # INERT until the relay image that emits this counter is built and its
+        # digest bumped in the deployment. The series does not exist today, so
+        # this rule cannot fire and must not be read as coverage in the
+        # meantime — AiSreRelayProcessingNothing below is what covers the gap,
+        # and it keys on counters the running image already emits.
+        - alert: AiSreRelayRemediationsRejected
+          expr: increase(ai_sre_relay_repo_rejections_total[1h]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "AI-SRE relay discarded {{ $value }} proposed remediation(s)"
+            description: "The relay generated remediation patches and dropped them at the repository allowlist in the last hour. Each is a fix written and never opened as a PR — check the relay logs for the repository it aimed at, then decide whether the allowlist or the prompt is wrong."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+        # Dead-man's-switch. Zero alerts processed is only a fault if alerts
+        # were there to process, so the third clause is what separates "the
+        # relay is broken" from "the cluster is quiet" — without it this fires
+        # on every healthy weekend.
+        #
+        # 6h exceeds Alertmanager's 4h repeat_interval with margin: a single
+        # alert firing continuously re-notifies the relay at least every 4h, so
+        # a 6h window containing no deliveries at all means the webhook path is
+        # broken (relay wedged, token mismatch, Alertmanager not routing) and
+        # not that nothing needed doing.
+        #
+        # Watchdog is excluded by the severity matcher, which is the same
+        # matcher the Alertmanager ai-sre route uses — the condition therefore
+        # reads "alerts that should have reached the relay", not "any series in
+        # ALERTS". Note this alert satisfies its own precondition once firing;
+        # it clears on the first processed alert, not on the cluster going
+        # quiet, which is the correct behaviour for a dead-man's-switch.
+        - alert: AiSreRelayProcessingNothing
+          expr: |
+            sum(increase(ai_sre_relay_investigations_run_total[6h])) == 0
+            and sum(increase(ai_sre_relay_repeats_skipped_total[6h])) == 0
+            and on() count(ALERTS{alertstate="firing", severity=~"critical|warning"}) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "AI-SRE relay has processed no alerts while alerts are firing"
+            description: "The relay has neither investigated nor deduplicated an alert in 6h, while critical/warning alerts kept firing and re-notifying. Alerts are not reaching it, or it is not handling them. Automated investigation and remediation are stopped; Discord notification is unaffected."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+        # The other half of "processed zero": traffic is arriving and every
+        # piece of it is being deduplicated away. The switch above cannot see
+        # this, because repeats_skipped is climbing — the relay looks busy
+        # while investigating nothing. The usual cause is a Jira ticket left
+        # open long after its episode ended, which makes every subsequent
+        # refire of that alert a skip forever.
+        #
+        # 12h and a floor of 5 rather than the 6h above: at the observed rate
+        # (~4.5 alerts processed a day) a short all-skips run is ordinary — one
+        # flapping alert deduplicating against its own ticket produces exactly
+        # that. Half a day in which everything the relay saw was a skip, and
+        # there were several, is not.
+        - alert: AiSreRelayInvestigatingNothing
+          expr: |
+            sum(increase(ai_sre_relay_repeats_skipped_total[12h])) >= 5
+            and sum(increase(ai_sre_relay_investigations_run_total[12h])) == 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "AI-SRE relay is deduplicating every alert and investigating none"
+            description: "The relay skipped {{ $value }} alerts as repeats in 12h and investigated none. It is receiving traffic, so the webhook path is healthy — an open Jira ticket is likely suppressing an alert that has since become new work. Close the stale ticket or check the dedupe state."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+        # Every rule above reads relay counters, so a broken scrape silences
+        # all three at once — the same "signal exists, nobody receives it" gap
+        # this ruleset closes, moved up one layer. absent() is the load-bearing
+        # half: if the ServiceMonitor stops selecting the Service, `up` for
+        # this job disappears entirely and the == 0 comparison matches nothing.
+        #
+        # The 15m `for` also absorbs sync skew. The ServiceMonitor and these
+        # rules are reconciled by two different ArgoCD Applications, so on a
+        # fresh rollout this rule can briefly exist before the monitor does.
+        - alert: AiSreRelayMetricsTargetDown
+          expr: |
+            up{job="ai-sre-relay", namespace="ai-sre"} == 0
+            or absent(up{job="ai-sre-relay", namespace="ai-sre"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "AI-SRE relay metrics are not being scraped"
+            description: "Prometheus has not scraped ai-sre-relay for 15m, or the target has vanished from service discovery. Every other relay alert is keyed on these counters and is blind until this is fixed."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
