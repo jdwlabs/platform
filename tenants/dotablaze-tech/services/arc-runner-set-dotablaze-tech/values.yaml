@@ -368,6 +368,18 @@ template:
       - name: runner
         image: docker.io/jdwlabs/agents:1.0.0
         command: ["/home/runner/run.sh"]
+        # Same ceiling as the jdwlabs runner, stated here rather than inherited:
+        # without it the `ci` LimitRange defaults apply, which is half this
+        # memory and would silently move the moment the tier is retuned for some
+        # unrelated workload. Heavy builds run on GitHub-hosted runners; these
+        # stay small enough that a runaway cannot OOM a node.
+        resources:
+          limits:
+            cpu: "1"
+            memory: 1Gi
+          requests:
+            cpu: 250m
+            memory: 512Mi
         env:
           - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
             value: "false"

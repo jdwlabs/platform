@@ -311,6 +311,7 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | `image-drift` warns `declared X, running Y` for a workload         | An ArgoCD Application's Deployment/StatefulSet/DaemonSet spec asks for one image tag, but a pod matched by that workload's own selector is still running another. ArgoCD reports the Application Synced regardless — sync only confirms the spec was applied, not that any pod picked it up. Same root cause class as `statefulset-revisions` (stuck rollout, `OnDelete`, or an evicted-but-not-recreated DaemonSet pod), generalized to every workload kind. Fix by recreating the stale pod(s) (`kubectl delete pod <name> -n <ns>`) and re-running `cluster status` to confirm the running tag now matches. |
 | `limitrange-adoption` warns `N container(s) predate their namespace LimitRange` | A namespace's `LimitRange` only defaults `resources.requests`/`limits` at pod admission — a one-time mutation on create, not a continuously enforced rule. Pods that existed before the `LimitRange` was applied keep running without the default forever; nothing later reconciles them, and ArgoCD reports the `LimitRange` resource itself Synced regardless. The listed pods are naked (often `BestEffort`) despite the namespace looking policy-governed. Fix by recreating the named pod(s) so they re-admit under the current `LimitRange` — for a Deployment/StatefulSet-owned pod, `kubectl delete pod <name> -n <ns>` is enough; for Longhorn `engine-image-*`/`instance-manager-*` pods this happens naturally on the next node drain or Longhorn manager restart. |
 | Detached Longhorn volumes accumulate after a StatefulSet is rebuilt | `longhorn-single` uses `Retain`, so a volume outlives the claim it was created for and never ages out. `platformctl cluster volumes list --class orphaned` reports which are genuinely unclaimed; `platformctl cluster volumes reclaim --all-orphaned --dry-run` shows exactly what a reclaim would delete and mutates nothing; re-run with `--confirm` to delete. Do **not** identify candidates by name or by the volume's own `status.kubernetesStatus.pvcName` — that field records the claim the volume was created for and repeats across every generation of the same StatefulSet, so several volumes carry the identical name and only one is live. The command resolves the claim the other way round, from each PVC's `spec.volumeName`, and refuses any volume a PVC or a `Bound` PersistentVolume still points at. Deleting the `volumes.longhorn.io` object cascades to its replicas and its `Released` PV. |
+| `Released` PVs on `local-path` linger after a node is lost | The provisioner reclaims by scheduling a busybox helper pod **onto the volume's own node** to `rm -rf` the directory. The helper tolerates everything, so a cordoned or tainted node still reclaims normally, but a node that is `NotReady` or removed from the cluster can never run it — the PV stays `Released` and the on-disk `_work` stays on that node's `/var` forever. Longhorn's `Delete` needed no node scheduling, so this failure mode is new since CI `_work` moved to `local-path`. See "Self-hosted CI runners (ARC)" below for the post-incident check. |
 | Grafana dashboards stop syncing from git, or `platform-grafana` goes red with `never became healthy` in the hook log | `platformctl gitsync status` reports each Connection and Repository with `health` and `sync.state`; it exits non-zero when any is unhealthy and prints the full health message. These resources live in Grafana's own API server, so `kubectl` and ArgoCD cannot see them and a red `platform-grafana` sync here means Git Sync is reporting itself broken, not that the deploy failed. Read the message on the **repository**, not the connection: a connection saying `GitHub App lacks required 'webhooks' permission` is describing a requirement derived from a bound repository's `write` workflow, and the App needs no webhooks grant. An empty result means Git Sync is credentialed but not connected. |
 | An edit to `gitsync-resources.yaml` merged but changed nothing | The apply Job creates and never updates, so the next run finds both resources present and skips them. `platformctl gitsync recreate --dry-run`, then `--confirm`, deletes the repository **before** the connection (the repository references it) and requests an ArgoCD refresh of `platform-grafana` so the Job re-runs. Both delete paths refuse while the repository still owns dashboards, because its remove-orphan-resources finalizer collects whatever it owns — `--allow-owned-dashboards` overrides that only when losing them is intended. |
 | A new field must be added to an already-seeded Vault path | `platformctl bootstrap seed <spec> --field <name>` writes that property alone, merging over what is there, so the other credentials are neither re-supplied nor prompted for. An unknown spec key or field name is refused with the valid set listed — a mistyped key used to select an empty spec, write nothing and still report success. |
@@ -616,3 +617,52 @@ rebuilding to come back.
 6. Smoke-test with the apps repo `ARC Test kubernetes Workflow`
    (workflow_dispatch, input `arc_name`), and confirm runners appear in the
    GitHub org under Settings > Actions > Runners
+
+**Post-incident: orphaned `local-path` PVs after node loss**
+
+Run this after any incident that took a worker node `NotReady`, replaced it, or
+removed it from the cluster — node loss is exactly the scenario runner `_work`
+was moved onto `local-path` to survive, and it is also the one case
+`local-path` cannot clean up after itself.
+
+`local-path` reclaims a `Delete` volume by scheduling a helper pod onto the
+node that holds the directory. The helper tolerates every taint, so a cordon or
+a drain is fine, but an unreachable or deleted node leaves nothing to schedule
+onto: the PV sits `Released` indefinitely and the checked-out source stays on
+that node's disk.
+
+1. List volumes the provisioner could not reclaim:
+
+   ```bash
+   kubectl get pv | grep Released
+   ```
+
+   Cross-check `STORAGECLASS` — `Released` on `longhorn`/`longhorn-single` is
+   the expected steady state for `Retain` classes and is handled separately
+   (see "Detached Longhorn volumes accumulate…" above). Only `local-path` rows
+   are orphans.
+
+2. For each, read `spec.nodeAffinity` to find the node that holds the data:
+
+   ```bash
+   kubectl get pv <name> -o jsonpath='{.spec.nodeAffinity}{"\n"}'
+   ```
+
+3. If the node is back and healthy, delete the PV and let the provisioner run
+   its helper pod. If the node is gone for good, delete the PV directly — the
+   directory went with the node:
+
+   ```bash
+   kubectl delete pv <name>
+   ```
+
+4. If the node came back with its disk intact, the directories the provisioner
+   never got to reclaim are still there. Confirm and clear them on the node:
+
+   ```bash
+   talosctl -n <node> ls /var/local-path-provisioner
+   ```
+
+   Anything under that path with no matching PV is dead CI scratch. Reclaiming
+   it matters beyond tidiness: it is what the re-enable pre-flight in step 1
+   above measures free space against.
