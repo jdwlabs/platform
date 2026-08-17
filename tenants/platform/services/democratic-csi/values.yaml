@@ -46,6 +46,28 @@ controller:
     enabled: false
   # democratic-csi driver container carries most of the controller pod's usage.
   driver:
+    # Chart 0.15.1 defaults both this and node.driver.image.tag to `latest`
+    # (the chart renders "{{ .image.registry }}:{{ .image.tag }}", so the tag
+    # key is the whole pin), and nothing here overrode it -- so the driver
+    # that actually runs was whatever `latest` resolved to at the last pull.
+    # Upstream's next release drops the HTTP API code path and requires
+    # TrueNAS 26.x; this cluster's backend is 25.10, so the first pod restart
+    # after that publishes would have pulled a driver unable to talk to the
+    # NAS at all, breaking provisioning on both storage classes with no commit
+    # here to point at. Restarts are not rare for this pod -- see the
+    # livenessProbe note above.
+    #
+    # The digest is the OCI *index* digest of `latest` (verified equal to the
+    # docker-content-digest ghcr.io serves for the tag, so multi-arch
+    # selection still happens at pull time), and is byte-identical to the
+    # imageID every controller and node pod of both releases was already
+    # running when this was pinned -- this changes nothing about what
+    # executes, only that it can no longer drift. The `latest` tag is kept in
+    # the reference purely so the line stays readable; the digest is what
+    # resolves. Bump deliberately, after confirming the release still
+    # supports the TrueNAS version in tenants/platform/services/*/postInstall.
+    image:
+      tag: latest@sha256:944d0e65077efbd9c1fdf23997eec8fac4b4bfb7c3de400f63e33a0a849c5ced
     resources:
       requests:
         memory: 96Mi
@@ -81,6 +103,11 @@ node:
   # NFS driver container does the actual mount work and carries most of the
   # node pod's ~86Mi observed usage.
   driver:
+    # Same image and same reasoning as controller.driver.image above; the
+    # chart defaults this key to `latest` independently, so pinning one does
+    # not pin the other.
+    image:
+      tag: latest@sha256:944d0e65077efbd9c1fdf23997eec8fac4b4bfb7c3de400f63e33a0a849c5ced
     resources:
       requests:
         memory: 96Mi

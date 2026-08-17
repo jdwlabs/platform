@@ -359,6 +359,65 @@ class StructuredImageBlocks(CheckerHarness):
         self.assertEqual(exit_code, 0)
         self.assertEqual(violations, [])
 
+    def test_registry_holding_the_whole_path_with_no_repository_is_reported(self):
+        """Defect 5 (JDWLABS-369): the democratic-csi chart has no
+        `repository` key at all and renders "{{ .registry }}:{{ .tag }}", so
+        keying only on `repository` made the block invisible."""
+        self.write(
+            "helm-charts/probe/values.yaml",
+            """
+            controller:
+              driver:
+                image:
+                  registry: ghcr.io/democratic-csi/democratic-csi
+                  tag: latest
+            """,
+        )
+        exit_code, violations, _ = self.run_checker()
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(violations, ["ghcr.io/democratic-csi/democratic-csi:latest"])
+
+    def test_a_registry_holding_only_a_host_is_not_a_reference_on_its_own(self):
+        self.write(
+            "helm-charts/probe/values.yaml",
+            """
+            image:
+              registry: docker.io
+              pullPolicy: IfNotPresent
+            """,
+        )
+        exit_code, violations, _ = self.run_checker()
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(violations, [])
+
+    def test_a_registry_and_repository_pair_is_still_reported_once(self):
+        """The registry-only fallback must not double-count the common shape."""
+        self.write(
+            "helm-charts/probe/values.yaml",
+            """
+            image:
+              registry: docker.io/library
+              repository: nginx
+              tag: 1.29.4
+            """,
+        )
+        self.assertEqual(
+            self.refs_in("helm-charts/probe/values.yaml"), ["docker.io/library/nginx:1.29.4"]
+        )
+
+    def test_a_registry_only_block_carrying_a_digest_is_pinned(self):
+        self.write(
+            "helm-charts/probe/values.yaml",
+            f"""
+            image:
+              registry: ghcr.io/democratic-csi/democratic-csi
+              tag: latest@{PINNED_NGINX.split('@')[1]}
+            """,
+        )
+        exit_code, violations, _ = self.run_checker()
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(violations, [])
+
     def test_helm_chart_repository_url_is_not_an_image(self):
         # Chart.yaml dependencies use the same key name for an HTTP/OCI repo.
         self.write(

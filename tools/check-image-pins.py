@@ -169,6 +169,33 @@ def has_tag_or_digest(image_ref: str) -> bool:
     return ":" in image_ref[image_ref.rfind("/") + 1 :]
 
 
+def structured_repository(node: dict) -> tuple[str, str] | None:
+    """The (key, value) holding the repository path of a structured image
+    block, or None if this mapping is not one.
+
+    Two shapes occur. The common one splits the reference across
+    `repository` (path) and an optional `registry` (host). The other, used
+    by the democratic-csi chart among others, has no `repository` at all and
+    puts the *whole* path in `registry`, which the template renders as
+    `{{ .registry }}:{{ .tag }}`. Keying only on `repository` makes that
+    second shape invisible — the exact hole through which an unpinned
+    `latest` reached this cluster (JDWLABS-369).
+
+    A `registry` holding a bare host (`docker.io`, `registry.k8s.io`) is not
+    a reference on its own, so the fallback requires a path separator. That
+    also keeps a normal {registry, repository} pair from being counted
+    twice, since those only reach the fallback when `repository` is absent.
+    """
+    repository = node.get("repository")
+    if looks_like_image_reference(repository):
+        return "repository", as_str(repository)
+    if repository is None:
+        registry = node.get("registry")
+        if looks_like_image_reference(registry) and "/" in as_str(registry):
+            return "registry", as_str(registry)
+    return None
+
+
 def compose_reference(registry: str, repository: str, tag: str, digest: str) -> str:
     """Rebuild the reference a chart template renders from a structured
     {registry, repository, tag, digest} block (the Bitnami/common shape).
@@ -215,15 +242,16 @@ TEMPLATE_IMAGE_RE = re.compile(
 
 def walk(node, refs: list) -> None:
     if isinstance(node, dict):
-        repository = node.get("repository")
-        if looks_like_image_reference(repository):
+        structured = structured_repository(node)
+        if structured is not None:
             # A structured image block is a reference whether or not it
             # carries a `tag` key: a missing tag means the chart template
             # falls back to appVersion or to an implicit `latest`, which is
             # the most mutable case of all, not an exempt one.
-            repository = as_str(repository)
+            repo_key, repository = structured
+            registry = "" if repo_key == "registry" else as_str(node.get("registry")).strip()
             full_ref = compose_reference(
-                as_str(node.get("registry")).strip(),
+                registry,
                 repository,
                 as_str(node.get("tag")).strip(),
                 as_str(node.get("digest")).strip(),
@@ -231,7 +259,7 @@ def walk(node, refs: list) -> None:
             refs.append(
                 {
                     "kind": "helm",
-                    "key": "repository",
+                    "key": repo_key,
                     "needle": repository,
                     "full_ref": full_ref,
                 }

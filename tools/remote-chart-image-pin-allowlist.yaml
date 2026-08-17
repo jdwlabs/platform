@@ -1,0 +1,64 @@
+# Documented exceptions to tools/check-remote-chart-image-pins.py.
+#
+# That check reads the *remote* chart defaults a service renders from, merges
+# this repo's overlay on top the way Helm does, and reports any image whose
+# resulting tag can still move (`latest`, `main`, a truncated `v1`, or no tag
+# at all). This file is where a mutable tag that is deliberately left mutable
+# gets recorded.
+#
+# Schema is the same as tools/image-pin-allowlist.yaml and is validated by the
+# same loader:
+#   - `path` is the tenant overlay where the fix would go, repo-relative
+#     (tenants/<tenant>/services/<name>/values.yaml) — the checker prints
+#     exactly this path next to each finding.
+#   - `ref` is the FULL reference the checker composed from the merged values,
+#     tag included, so a chart bump that changes the reference re-opens the
+#     question instead of inheriting the old reason.
+#   - `reason` is required and must be non-empty.
+#
+# An entry that no longer matches a mutable reference fails the check as
+# stale — remove it once the chart is bumped or the tag is pinned.
+#
+# The two references that motivated this check (democratic-csi 0.15.1's
+# controller.driver.image.tag and node.driver.image.tag, both defaulting to
+# `latest`) are absent below because they were pinned rather than exempted,
+# in tenants/platform/services/democratic-csi{,-iscsi}/values.yaml.
+#
+# Every entry below was verified by rendering the chart with its tenant
+# overlay and confirming the reference does not appear in the output. They
+# are recorded rather than pinned because pinning a container that is never
+# created buys nothing and dates immediately; if one is ever enabled, the
+# render starts producing it, and the entry above it is the note explaining
+# that enabling it means pinning it.
+exceptions:
+  - path: tenants/platform/services/grafana/values.yaml
+    ref: docker.io/grafana/grafana-image-renderer:latest
+    reason: >-
+      not-rendered: chart grafana 12.10.4 gates this on imageRenderer.enabled,
+      which is false by default and is not overridden in the overlay. Verified
+      absent from `helm template` output with the overlay applied. Pin the tag
+      in the overlay at the same time as enabling the renderer.
+  - path: tenants/platform/services/loki/values.yaml
+    ref: docker.io/grafana/loki-helm-test:latest
+    reason: >-
+      not-rendered: this is the chart's `helm.sh/hook: test` canary Pod. It is
+      the one entry here that `helm template` does emit (test.enabled defaults
+      true), but ArgoCD does not apply Helm test hooks, so the Pod is never
+      created -- confirmed by its absence from the monitoring namespace. It
+      runs no workload and touches no data path.
+  - path: tenants/platform/services/loki/values.yaml
+    ref: us-docker.pkg.dev/grafanalabs-global/docker-enterprise-provisioner-prod/enterprise-provisioner:latest
+    reason: >-
+      not-rendered: chart loki 7.3.0 gates this on enterprise.provisioner.enabled,
+      which is false by default and is not overridden in the overlay. This
+      deployment runs OSS Loki; the enterprise provisioner is never created.
+      Verified absent from `helm template` output with the overlay applied.
+  - path: tenants/platform/services/kube-prometheus-stack/values.yaml
+    ref: docker.io/busybox:latest
+    reason: >-
+      not-rendered: chart kube-prometheus-stack 88.3.0 gates this on
+      crds.upgradeJob.enabled, which is false by default and is not overridden
+      in the overlay -- this repo vendors the CRDs it needs at sync-wave -1
+      (see tools/sync-monitoring-crds.py) rather than letting the chart manage
+      them. Verified absent from `helm template` output with the overlay
+      applied.
