@@ -78,6 +78,13 @@ var staticSeedSpecs = map[string]seedSpec{
 	"truenas-csi": {Path: "truenas-csi", Fields: []seedField{
 		{"api_key", "PLATFORMCTL_TRUENAS_CSI_API_KEY", true, false},
 	}},
+	// Phase 5 captures this block on a fresh cluster; the spec exists so it can
+	// also be re-supplied later without hand-writing KV, which is what rotating
+	// the Drive OAuth credential needs. Optional, so a bootstrap that is not
+	// rotating it neither prompts nor overwrites.
+	"rclone-gdrive": {Path: "rclone-gdrive", Fields: []seedField{
+		{"rclone_conf", "PLATFORMCTL_RCLONE_CONF", true, true},
+	}},
 	// LLM gateway credentials. Every field is optional so a partial re-seed
 	// (e.g. adding one provider key) merges over what's already in Vault.
 	"litellm": {Path: "litellm", Fields: []seedField{
@@ -253,9 +260,13 @@ func (p *VaultSeedPhase) Apply(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("seed %s/%s: %w", spec.Path, f.Name, err)
 			}
-			if v != "" {
-				values[f.Name] = v
+			if v == "" {
+				continue
 			}
+			if err := validateSeedValue(name, f.Name, v); err != nil {
+				return fmt.Errorf("seed %s/%s: %w", spec.Path, f.Name, err)
+			}
+			values[f.Name] = v
 		}
 		if len(values) == 0 {
 			// Only reachable when every selected field is Optional and unset. It
@@ -300,6 +311,16 @@ func (p *VaultSeedPhase) reportWrites(path string, fields []seedField, values ma
 		}
 		p.onEvent("ok", fmt.Sprintf("kv/%s/%s %s %s", p.mount, path, f.Name, verb))
 	}
+}
+
+// validateSeedValue rejects a value Vault would happily store but its consumer
+// would only choke on at runtime — for a backup credential that means the next
+// scheduled run, hours later, with the operator long gone.
+func validateSeedValue(spec, field, value string) error {
+	if spec == "rclone-gdrive" && field == "rclone_conf" {
+		return validateRcloneBlock(value)
+	}
+	return nil
 }
 
 func filterFields(all []seedField, wanted []string) []seedField {

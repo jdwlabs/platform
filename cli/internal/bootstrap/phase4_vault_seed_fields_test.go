@@ -159,3 +159,26 @@ func TestApply_UnknownSpecKeyFailsInsteadOfReportingSuccess(t *testing.T) {
 		t.Fatal("a mistyped spec key must fail, not write nothing and succeed")
 	}
 }
+
+func TestSeedSpec_RcloneGdriveRotatableByField(t *testing.T) {
+	if err := ValidateSeedSelection(nil, []string{"rclone-gdrive"}, []string{"rclone_conf"}); err != nil {
+		t.Fatalf("rotating the Drive config must be a supported seed selection: %v", err)
+	}
+}
+
+// --field overrides Optional, so the rotation path must still be gated by the
+// same block validation the first-time capture in phase 5 applies.
+func TestValidateSeedValue_RcloneConfIsValidated(t *testing.T) {
+	if err := validateSeedValue("rclone-gdrive", "rclone_conf", "[gdrive]\ntype = drive\n"); err == nil {
+		t.Fatal("expected a block with no token to be rejected")
+	}
+	if err := validateSeedValue("rclone-gdrive", "rclone_conf", validRcloneBlock); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+}
+
+func TestValidateSeedValue_UnrelatedFieldsUnaffected(t *testing.T) {
+	if err := validateSeedValue("porkbun", "api-key", "anything"); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+}

@@ -423,7 +423,8 @@ Values merge over any existing fields at the path, so a partial re-seed never
 wipes fields owned by other services. With no arguments, all specs are seeded.
 Spec keys match tenant names and static paths: porkbun, grafana, longhorn,
 alertmanager, usersrole, argocd-dex, grafana-gitsync, truenas-csi, litellm,
-holmes, <tenant>-github-app, <tenant>-ai-keys, <tenant>-discord-bot-token.
+holmes, rclone-gdrive, <tenant>-github-app, <tenant>-ai-keys,
+<tenant>-discord-bot-token.
 
 --field seeds individual properties of one spec, so a single new field can be
 written without re-supplying — or being prompted for — the credentials already

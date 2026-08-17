@@ -264,6 +264,107 @@ kubectl -n database cnpg promote <cluster-name> <replica-pod-name>
 
 (requires the `cnpg` kubectl plugin)
 
+### 3.1 Moving the backup Drive remote off rclone's shared client_id
+
+The `[gdrive]` remote that uploads the dumps carries no `client_id`, so rclone
+authenticates with the OAuth credentials bundled in its binary. Google is
+retiring those during 2026 and every backup run says so:
+
+```text
+NOTICE: gdrive: This remote uses rclone's shared Google Drive client_id, which
+is being retired and will stop working during 2026.
+```
+
+Uploads still succeed today. When the retirement lands they stop, with no
+warning beyond that NOTICE — and job logs are garbage-collected within a day,
+so `platformctl cluster status` asserts the state instead (Secrets →
+`rclone-gdrive-client-id`, ⚠ until this procedure is done).
+
+**This is one atomic credential swap, not two changes.** A Google refresh token
+is only valid for the OAuth client that issued it, so pasting a new `client_id`
+next to the existing `token` breaks the remote at its first token refresh. The
+client, the secret and a freshly authorized token are written together or not
+at all — `platformctl` rejects a block carrying only half a credential.
+
+Steps 1-6 need a browser and the Google account that owns the shared drive; the
+rest is CLI.
+
+1. **Google Cloud Console**, signed in as the Google account with at least
+   *Content manager* on the shared drive holding `postgres-backups`. Create a
+   project dedicated to this remote (e.g. `jdwlabs-backups`) — nothing else on
+   the platform uses Google Cloud, and a project of its own keeps the consent
+   screen scoped to this one job.
+2. **APIs & Services → Library → Google Drive API → Enable.**
+3. **APIs & Services → OAuth consent screen.** User type *External* (*Internal*
+   if the account is Google Workspace); fill in app name and support email.
+   Then set **Publishing status to "In production"**. Leaving it in *Testing*
+   caps refresh tokens at 7 days, which would stop the backups a week after the
+   rotation looked successful.
+4. **Data access → Add scopes:** `https://www.googleapis.com/auth/drive`
+   (matches the remote's `scope = drive`). rclone's guide also lists
+   `.../auth/docs` and `.../auth/drive.metadata.readonly`; adding all three
+   matches upstream and costs nothing.
+5. **Credentials → Create credentials → OAuth client ID → Application type
+   "Desktop app".** Desktop clients accept rclone's loopback redirect with
+   nothing to type in. If you pick *Web application* instead, you must add the
+   redirect URI `http://127.0.0.1:53682/` exactly. Copy the client ID and
+   client secret.
+6. On a workstation with `rclone` and a browser, authorize against the new
+   client and keep the token JSON it prints:
+
+   ```bash
+   rclone authorize "drive" "<client-id>" "<client-secret>"
+   ```
+
+7. Assemble the replacement block. Read the current one for the `team_drive`
+   id — it identifies the shared drive and must be carried over verbatim:
+
+   ```bash
+   kubectl -n database get secret rclone-gdrive \
+     -o jsonpath='{.data.rclone\.conf}' | base64 -d
+   ```
+
+   ```ini
+   [gdrive]
+   type = drive
+   scope = drive
+   team_drive = <existing id>
+   client_id = <new client id>
+   client_secret = <new client secret>
+   token = <JSON printed by rclone authorize>
+   ```
+
+8. Write it to `kv/rclone-gdrive` property `rclone_conf` — the only place this
+   credential lives. The seed validates the block before it reaches Vault and
+   merges over the path, so nothing else there is disturbed:
+
+   ```bash
+   PLATFORMCTL_RCLONE_CONF="$(cat gdrive.conf)" \
+     platformctl bootstrap seed rclone-gdrive --field rclone_conf --non-interactive
+   rm gdrive.conf
+   ```
+
+9. The ExternalSecret refreshes hourly; force it rather than wait:
+
+   ```bash
+   kubectl -n database annotate externalsecret rclone-gdrive \
+     force-sync="$(date +%s)" --overwrite
+   ```
+
+10. Confirm, in this order — the check reads the synced Secret, the job run
+    proves Google accepts the credential:
+
+    ```bash
+    platformctl cluster status          # Secrets → rclone-gdrive-client-id: ✓
+    job=postgres-backup-manual-$(date +%s)
+    kubectl -n database create job --from=cronjob/postgres-backup "$job"
+    kubectl -n database wait --for=condition=complete job/"$job" --timeout=10m
+    kubectl -n database logs job/"$job" -c upload
+    ```
+
+    A completed job with no `shared Google Drive client_id` NOTICE is the
+    finished state.
+
 ## 4. TLS certs
 
 **Force re-issue:**
@@ -347,7 +448,7 @@ from environment variables. The contract:
 | `kv/<tenant>-ai-keys` `openrouter_api_key` (optional) | `PLATFORMCTL_<TENANT>_OPENROUTER_API_KEY`   |
 | `kv/<tenant>-ai-keys` `nvidia_api_key` (optional) | `PLATFORMCTL_<TENANT>_NVIDIA_API_KEY`            |
 | `kv/<tenant>-discord-bot-token` `token` (optional) | `PLATFORMCTL_<TENANT>_DISCORD_BOT_TOKEN`       |
-| `kv/rclone-gdrive` `rclone_conf` (Phase 5)        | `PLATFORMCTL_RCLONE_CONF`                        |
+| `kv/rclone-gdrive` `rclone_conf` (Phase 5; re-seedable, §3.1) | `PLATFORMCTL_RCLONE_CONF`            |
 
 Tenant name in env-var keys is uppercased, with `-` → `_`. So tenant
 `dotablaze-tech` maps to `PLATFORMCTL_DOTABLAZE_TECH_GITHUB_APP_ID`.

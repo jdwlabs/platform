@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jdwlabs/platform/internal/prompt"
+	"github.com/jdwlabs/platform/internal/rclone"
 	"github.com/jdwlabs/platform/internal/vault"
 )
 
@@ -57,7 +58,7 @@ func (p *BackupsInitPhase) Apply(ctx context.Context) error {
 		return err
 	}
 	block, err := prompt.Secret(
-		"Paste the rclone config block for [gdrive] (obtain via: rclone authorize \"drive\")",
+		"Paste the rclone config block for [gdrive] (obtain via: rclone authorize \"drive\" \"<client_id>\" \"<client_secret>\")",
 		"PLATFORMCTL_RCLONE_CONF", p.nonInteractive,
 	)
 	if err != nil {
@@ -102,6 +103,13 @@ func validateRcloneBlock(s string) error {
 	}
 	if _, ok := tok["refresh_token"]; !ok {
 		return fmt.Errorf("token JSON missing refresh_token")
+	}
+	// A refresh token is bound to the OAuth client that issued it, so the
+	// credential and the token are only ever valid as a set. Half a credential
+	// means the block was hand-edited instead of re-authorized, and the remote
+	// would keep working until its first refresh and then stop.
+	if rclone.InspectRemote(s, "gdrive") == rclone.PartialClient {
+		return fmt.Errorf("client_id and client_secret must be set together; re-run `rclone authorize \"drive\"` with both")
 	}
 	return nil
 }
