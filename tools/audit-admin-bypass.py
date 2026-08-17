@@ -11,8 +11,13 @@ active ruleset requires at least one approving review — every ruleset whose
 named "Baseline"; a repo can carry several (`platform` also has "Production
 Gates", `deployments` adds "PRD Promotion Review Gate") and GitHub enforces
 whichever is strictest — and the PR's `reviewDecision` is not `APPROVED`.
-`deployments` currently requires zero by design (ADR 0018 §1), so an
-unapproved merge there is compliant, not a bypass. GitHub does not surface
+A ruleset that requires code-owner review counts as requiring one approval
+even where its own count is zero, because that is how such gates are written
+here: `deployments`' "PRD Promotion Review Gate" and `platform`'s "Change
+Class Review Gate" both leave the count at zero and carry the entire
+requirement on the code-owner flag. `deployments`' Baseline still requires
+zero by design (ADR 0018 §1), so an unapproved merge on an unowned path
+there is compliant, not a bypass. GitHub does not surface
 "this merge used --admin" directly (no audit-log API access on this org's
 plan); an already-merged PR that still reads as unapproved could only have
 landed by bypassing the requirement in force *at merge time* — this tool
@@ -74,25 +79,47 @@ def gh_json(args: list[str]) -> object:
         raise ToolError(f"gh {' '.join(args)} returned non-JSON output: {exc}") from exc
 
 
-def required_review_count(repo: str, ref: str = TARGET_REF) -> int:
-    """Max required_approving_review_count across every active ruleset
-    covering `ref`. Simplification: only checks for `ref` appearing
-    literally in a ruleset's include list — none of this org's rulesets
-    currently use the `~ALL`/`~DEFAULT_BRANCH` special values, so that case
-    isn't handled; a repo that starts using them would need this extended.
+def ruleset_review_requirement(detail: dict, ref: str) -> int | None:
+    """Approvals `detail` demands on `ref`, or None if it does not apply.
+
+    A code-owner requirement scores as one approval even when the ruleset's
+    own count is zero. GitHub folds CODEOWNERS into `reviewDecision`, so a PR
+    needing an owner's sign-off cannot read APPROVED without one; scoring the
+    flag as zero would rate an owner-gated ruleset as demanding nothing and
+    silently exempt every path it protects from this audit.
+
+    Simplification: only checks for `ref` appearing literally in the include
+    list — none of this org's rulesets currently use the `~ALL` /
+    `~DEFAULT_BRANCH` special values, so a repo that starts using them would
+    need this extended.
     """
+    if detail["enforcement"] != "active":
+        return None
+    includes = detail.get("conditions", {}).get("ref_name", {}).get("include", [])
+    if ref not in includes:
+        return None
+
+    required = None
+    for rule in detail["rules"]:
+        if rule["type"] != "pull_request":
+            continue
+        params = rule["parameters"]
+        count = params["required_approving_review_count"]
+        if params.get("require_code_owner_review"):
+            count = max(count, 1)
+        required = count if required is None else max(required, count)
+    return required
+
+
+def required_review_count(repo: str, ref: str = TARGET_REF) -> int:
+    """Strictest approval requirement across every ruleset covering `ref`."""
     rulesets = gh_json(["api", f"repos/jdwlabs/{repo}/rulesets"])
     counts = []
     for rs in rulesets:
-        if rs["enforcement"] != "active":
-            continue
         detail = gh_json(["api", f"repos/jdwlabs/{repo}/rulesets/{rs['id']}"])
-        includes = detail.get("conditions", {}).get("ref_name", {}).get("include", [])
-        if ref not in includes:
-            continue
-        for rule in detail["rules"]:
-            if rule["type"] == "pull_request":
-                counts.append(rule["parameters"]["required_approving_review_count"])
+        required = ruleset_review_requirement(detail, ref)
+        if required is not None:
+            counts.append(required)
     if not counts:
         raise ToolError(f"{repo}: no active pull_request-rule ruleset covers {ref}")
     return max(counts)

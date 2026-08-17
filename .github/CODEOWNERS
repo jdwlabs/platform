@@ -1,8 +1,41 @@
-# Last matching pattern wins; keep the catch-all first.
-* @jdwillmsen
+# Ownership here is a gate, not a notification list: the "Change Class Review
+# Gate" ruleset turns every pattern below into a required code-owner approval
+# that no OrganizationAdmin bypass clears. Deliberately no catch-all — an
+# unowned path needs only the Baseline approval, which is what makes the gate
+# class-based instead of blanket, and what keeps the set of changes that can
+# deadlock small enough for the reviewers this org actually has.
+#
+# Two owners on every line so that whoever authors a change, someone who did
+# not author it can still approve it. A GitHub App cannot appear here, so the
+# agent identity can satisfy the Baseline count but never a code-owner gate.
+#
+# Last matching pattern wins. Class definitions and the incident evidence
+# behind each one: docs/adr/0024-review-gates-by-change-class.md
 
-# Tenant platform definitions gate what runs on the cluster.
-/tenants/platform/ @jdwillmsen
+# Gate integrity and supply chain. Workflows here mint GitHub App tokens, one
+# of them scoped across all four repos; tools/ holds the scripts CI trusts to
+# fail; and this directory defines the gates themselves, which ungated can
+# quietly narrow or delete themselves.
+/.github/ @jdwillmsen @jdwlabs-root
+/tools/ @jdwillmsen @jdwlabs-root
+/renovate.json @jdwillmsen @jdwlabs-root
 
-# platformctl is an agent-facing CLI; interface changes need owner review.
-/cli/ @jdwillmsen
+# Argo CD applies everything else in this repo, and root-app.yaml is the apex
+# of that tree — a bad change here breaks the mechanism that would deploy its
+# own fix.
+/bootstrap/ @jdwillmsen @jdwlabs-root
+
+# Platform-tenant services are the cluster's own control plane, secret
+# material, and stateful storage. Owned wholesale rather than per service so a
+# service added later is gated by default instead of silently ungated.
+/tenants/platform/ @jdwillmsen @jdwlabs-root
+
+# Tenant envelope templates and the per-tenant switches that select them fan a
+# single edit out across every tenant namespace at once, including the
+# NetworkPolicy isolation those namespaces depend on.
+/helm-charts/tenant-envelope/ @jdwillmsen @jdwlabs-root
+/tenants/*/tenant.yaml @jdwillmsen @jdwlabs-root
+
+# platformctl is the interface agents drive the platform through; its lint and
+# test gates have been silently inert before.
+/cli/ @jdwillmsen @jdwlabs-root
