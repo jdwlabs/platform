@@ -29,7 +29,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: relay
-          image: jdwlabs/ai-sre-relay@sha256:f42b749bee02af923b7d57701fdfebf981fefcc748d4582df7f65b5a50e67dc2
+          image: jdwlabs/ai-sre-relay@sha256:74d98c9d151706960cc8eb697d57977f08525550a69f22e26edb45ada1778652
           ports:
             - {name: http, containerPort: 8080}
           envFrom:
