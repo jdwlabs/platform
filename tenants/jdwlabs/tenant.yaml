@@ -12,7 +12,15 @@ namespaces:
   - name: jdwlabs-non
     quotaTier: standard
     networkPolicy: default
-    enforce: true
+    # enforce is deferred: this namespace's pods predate the policy engine and
+    # carry no Cilium identity, so a restrictive set resolves against nothing
+    # today and would instead bite whichever pod restarts first — an unrelated
+    # deploy, eviction, drain or OOM kill — under an allow-set no observation
+    # window ever covered, because audit mode is per-endpoint and these
+    # endpoints did not exist. Set it once this namespace's pods are
+    # Cilium-managed and the allow-set below has been checked against their
+    # observed traffic.
+    #
     # Inter-app calls (authui/rolesui/usersui/container -> usersrole,
     # servicediscovery) go out via their public *.jdwlabs.com hostnames and
     # hairpin back through the gateway rather than using in-cluster Service
