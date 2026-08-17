@@ -692,30 +692,90 @@ has two consequences worth remembering when reading an alert:
   metrics stopped arriving.
 - **A TrueNAS update resets the reporting exporter configuration.** If NAS
   alerting goes quiet after an upgrade, re-add it under Reporting → Exporters
-  before looking anywhere else. Required settings: type `GRAPHITE`, prefix
-  `truenas`, hostname `truenas`, destination any cluster node IP, port
-  `30203`.
+  before looking anywhere else. Required settings, as carried by exporter
+  `id=1` (`prometheus-graphite-ingest`):
 
-Only pool state, per-mountpoint capacity and disk temperature are mapped —
-deliberately, since the ingest port is unauthenticated on the LAN and the
-mapping runs in strict-match mode so unmapped series are dropped. **SMART
-self-test results, reallocated-sector counts and scrub status are not
-available through this path at all**; the netdata collector behind the
-Graphite push does not export them. A pool degrading because a disk failed
-SMART is caught by `TrueNASPoolDegraded`, but only once ZFS has reacted.
+  | Field | Value | Notes |
+  |---|---|---|
+  | `exporter_type` | `GRAPHITE` | the only type this version offers |
+  | `destination_ip` | any cluster node IP | currently `192.168.1.87` |
+  | `destination_port` | `30203` | pinned NodePort, see `service.yaml` |
+  | `prefix` | `truenas` | first path segment |
+  | `namespace` | `truenas` | second path segment; **the field is `namespace`, not "hostname"** — `GraphiteExporter` has no `hostname` field. This is what the mapping captures as `host=`, which is why it matches blackbox-exporter's `host="truenas"`. |
+  | `update_every` | `30` | seconds between pushes — **not yet applied, still `1` on the NAS**, see below |
+  | `buffer_on_failures` | `10` | pushes buffered while the sink is unreachable |
+  | `send_names_instead_of_ids` | `true` | yields the `_serial_lunid_…` chart ids the mapping parses |
+  | `matching_charts` | `*` | filtering happens in the mapping, not here |
+
+  `update_every` should be `30`, not the default `1`. At 1s the NAS pushes
+  ~476 samples every second for data that changes on the order of minutes; the
+  mapping keeps 75 of those and Prometheus scrapes the result once a minute,
+  so everything pushed in between is overwritten unread. 30s keeps two samples
+  per scrape — enough that one dropped push does not open a gap — at a
+  thirtieth of the traffic. It is a NAS-side field, not a repo one, and it is
+  still at `1` because the API key needed to change it is currently invalid
+  (see `docs/adr/0025-…`). Change it alone, and read it back with
+  `GET /api/v2.0/reporting/exporters`; revert the whole exporter with
+  `DELETE /api/v2.0/reporting/exporters/id/1`.
+
+What the push carries is **not** what the alert names suggest it used to.
+TrueNAS SCALE 25.10 replaced the stock netdata collectors with
+TrueNAS-specific ones, and the charts the original mapping matched
+(`zfspool`, `disk_space`, `smart_log_smart`) are not emitted at all — 100% of
+samples were being dropped. The mapping now matches the chart names captured
+off the live stream and keeps 75 series: per-disk I/O and busy percent, ARC
+size and hit rates, per-core CPU, CPU package temperature, memory, load,
+uptime, nfsd, and per-interface throughput and drops. See
+`docs/adr/0025-truenas-metrics-what-the-graphite-push-can-and-cannot-carry.md`
+for the capture and the full reasoning.
+
+Two consequences of that, which are the reason NAS alerting is thinner than
+it looks:
+
+- **Pool health, pool/dataset capacity and SMART are not in the push on this
+  version, in any form.** They exist on the TrueNAS API (`pool.query`,
+  `pool.dataset.query`, `disk.temperatures` all return them) but nothing polls
+  it yet — that needs a read-only API key this cluster does not hold. Tracked
+  as JDWLABS-367. Until then a degrading pool reaches nobody through
+  Prometheus; TrueNAS's own alert mail is the only notification.
+- `graphite_dropped_samples_total` climbing is **normal**. The mapping ignores
+  401 of the 476 pushed paths on purpose, so that counter rises continuously
+  on a healthy pipeline and is not a health signal.
+
+Units are whatever the NAS sends, confirmed against `/reporting/graphs`
+`vertical_label`: memory and ARC are bytes, disk and NFS throughput are
+**Kibibytes/s**, interface throughput is **Kilobits/s**. netdata signs
+outbound dimensions negative, so `truenas_network_transmit_*`,
+`truenas_nfsd_write_*` and `truenas_network_transmit_drops_*` arrive as
+negative numbers — take `abs()` at query time.
 
 Verification queries:
 
 ```
-count by (pool, state) (truenas_zfs_pool_state)   # expect one series per pool per state
-truenas_disk_space_used_gib                        # expect one series per mountpoint
-truenas_disk_temperature_celsius                   # may be empty — see below
+time() - graphite_last_processed_timestamp_seconds{job="truenas-graphite-exporter"}
+# seconds since the last sample the mapping ACCEPTED. This is what
+# TrueNASMetricsStale reads. A value of time() itself means the exporter has
+# accepted nothing since it started — the mapping is matching nothing.
+
+count by (__name__) ({__name__=~"truenas_.+"})     # expect 28 metric names, 75 series
+truenas_memory_available_bytes / truenas_memory_total_bytes
+count by (serial) (truenas_disk_busy_percent)      # expect one series per physical disk
 ```
 
-If the third returns nothing while the first two have data,
-`TrueNASDiskTemperatureSignalMissing` fires: TrueNAS 25.04 dropped a number of
-default netdata metrics, and the SMART temperature chart is among those that
-may need a netdata-side collector config on the NAS to restore.
+If the first query returns a large number while
+`graphite_dropped_samples_total` is still climbing, samples are arriving and
+no longer matching — a TrueNAS upgrade renamed the charts again. Re-capture
+the stream before editing the mapping; every pattern in it was written
+against real captured path strings and a replacement should be too:
+
+```
+# temporary sink on any host the NAS can reach, then point exporter id=1 at it
+python3 -c "import socketserver
+class H(socketserver.StreamRequestHandler):
+    def handle(self):
+        for l in self.rfile: print(l.decode().rstrip())
+socketserver.ThreadingTCPServer(('0.0.0.0',2003),H).serve_forever()"
+```
 
 **Upgrade gate — the NAS does not go past 25.10.x:**
 

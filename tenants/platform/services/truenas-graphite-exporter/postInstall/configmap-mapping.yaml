@@ -4,64 +4,322 @@ metadata:
   name: truenas-graphite-exporter-mapping
   namespace: monitoring
 data:
-  # Deliberately a narrow subset of what TrueNAS pushes, not the full upstream
-  # mapping. Two reasons: Prometheus here runs with a 20GB retention cap and
-  # cardinality is already a standing concern, and the ingest port is
-  # unauthenticated (see service.yaml) — combined with
-  # --graphite.mapping-strict-match, anything that does not match one of these
-  # patterns is dropped rather than stored, so a spoofed sender cannot invent
-  # arbitrary series.
+  # Every pattern below was written against a capture of the live Graphite
+  # stream (31,968 lines, 476 distinct metric paths) taken off the NAS on
+  # 2026-08-17, not against netdata's upstream chart names. That distinction is
+  # the whole reason this file was rewritten: TrueNAS SCALE 25.10 replaced the
+  # stock netdata collectors with TrueNAS-specific ones, so the chart names the
+  # first version of this mapping used (zfspool, disk_space, smart_log_smart)
+  # are not emitted by this NAS at all and every sample was being dropped.
+  #
+  # Consequence worth keeping in mind when adding to this file: with
+  # --graphite.mapping-strict-match a pattern that does not match is silent,
+  # not loud. Verify a new pattern against a real captured path string before
+  # committing it — TrueNASMetricsStale (see rules-truenas.yaml) is what
+  # catches the case where every pattern stops matching, but it cannot tell you
+  # that one new pattern out of twenty never matched.
+  #
+  # Still a deliberate subset rather than all 476 paths. The 476 are dominated
+  # by per-service cgroup accounting (services.*, cgroup_*) and the 76-way NFSv4
+  # per-operation breakdown, none of which answers a question anyone asks about
+  # this NAS. Retention is capped at 20GB and the ingest port is unauthenticated
+  # (see service.yaml), so strict-match plus a named subset also bounds what a
+  # spoofed sender on the LAN can write.
   #
   # Names are prefixed truenas_ rather than carrying a job="truenas" label.
   # A job label set by a mapping collides with the one Prometheus attaches at
   # scrape time and silently becomes exported_job; the prefix cannot collide.
-  # host= mirrors the label blackbox-exporter already puts on this same
-  # machine, so NAS alerts from both sources join on one identifier.
   #
-  # Metric paths follow netdata's graphite naming under a "truenas" prefix,
-  # which is the prefix the TrueNAS reporting exporter must be configured with.
+  # host="${1}" captures the second path segment, which is the exporter's
+  # `namespace` field on the NAS, set to "truenas" — the same value
+  # blackbox-exporter labels 192.168.1.205 with, so NAS alerts from both
+  # sources join on one identifier.
+  #
+  # Units are whatever the NAS actually sends, confirmed against
+  # /reporting/graphs vertical_label and against sampled values:
+  #   - meminfo and arcstats are raw bytes (total = 32720100000)
+  #   - disk and NFS throughput are Kibibytes/s, NOT bytes/s
+  #   - interface throughput is Kilobits/s
+  # graphite-exporter has no scaling facility, so a name ending _bytes on a
+  # KiB/s source would be a lie. The unit in the name is the unit on the wire.
+  # `promtool check metrics` does flag the six throughput names with "use base
+  # unit bytes" — that warning is accepted knowingly rather than silenced. It
+  # is the same class of mistake as the `_gib` suffix this file replaces, and
+  # nothing alerts on throughput, so the cost is a lint note and the benefit is
+  # that a dashboard reading the series gets the right number.
+  #
+  # netdata signs "outbound" dimensions negative (net.*.sent, nfsd.io.write,
+  # net_drops.*.outbound all arrive as negative numbers). Nothing is rewritten
+  # here; take abs() at query time.
   mapping.conf: |
     mappings:
-      # netdata zfspool: one series per pool per state, 1 marks the live state.
-      - match: 'truenas\.([^.]+)\.zfspool\.state_(.+)\.(.+)'
+      # ---- Physical disks -------------------------------------------------
+      # Chart ids embed both identifiers: _serial_lunid_<serial>_<lunid>, e.g.
+      # _serial_lunid_WYE0BDPW_5000c500fd71f512. The lunid is a 16-hex-digit
+      # WWN, so it is matched by length and the serial takes the greedy
+      # remainder — that stays correct even for a serial containing "_".
+      - match: '^truenas\.([^.]+)\.truenas_disk_stats\._serial_lunid_(.+)_([0-9a-f]{16})\.reads$'
         match_type: regex
-        name: "truenas_zfs_pool_state"
-        labels:
-          host: "${1}"
-          pool: "${2}"
-          state: "${3}"
-
-      # Filesystem-level capacity per mountpoint. netdata reports these in
-      # GiB, hence the unit in the name — every rule that consumes them uses a
-      # used/(used+avail) ratio, so the unit cancels and only the naming has
-      # to stay honest.
-      - match: 'truenas\.([^.]+)\.disk_space\.(.+)\.used'
-        match_type: regex
-        name: "truenas_disk_space_used_gib"
-        labels:
-          host: "${1}"
-          mountpoint: "${2}"
-
-      - match: 'truenas\.([^.]+)\.disk_space\.(.+)\.avail'
-        match_type: regex
-        name: "truenas_disk_space_avail_gib"
-        labels:
-          host: "${1}"
-          mountpoint: "${2}"
-
-      # Drive temperature is the only SMART attribute this pipeline carries;
-      # netdata renamed the chart between releases, so both spellings are
-      # mapped to one metric name rather than betting on which one 25.10 emits.
-      - match: 'truenas\.([^.]+)\.smart_log_smart\.disktemp\.([^.]+)\.(.+)'
-        match_type: regex
-        name: "truenas_disk_temperature_celsius"
+        name: "truenas_disk_read_kibibytes_per_second"
         labels:
           host: "${1}"
           serial: "${2}"
+          lunid: "${3}"
 
-      - match: 'truenas\.([^.]+)\.smart\.log\.smart\.disktemp\.([^.]+)\.(.+)'
+      - match: '^truenas\.([^.]+)\.truenas_disk_stats\._serial_lunid_(.+)_([0-9a-f]{16})\.writes$'
         match_type: regex
-        name: "truenas_disk_temperature_celsius"
+        name: "truenas_disk_write_kibibytes_per_second"
         labels:
           host: "${1}"
           serial: "${2}"
+          lunid: "${3}"
+
+      - match: '^truenas\.([^.]+)\.truenas_disk_stats\.ops\._serial_lunid_(.+)_([0-9a-f]{16})\.read_ops$'
+        match_type: regex
+        name: "truenas_disk_read_operations_per_second"
+        labels:
+          host: "${1}"
+          serial: "${2}"
+          lunid: "${3}"
+
+      - match: '^truenas\.([^.]+)\.truenas_disk_stats\.ops\._serial_lunid_(.+)_([0-9a-f]{16})\.write_ops$'
+        match_type: regex
+        name: "truenas_disk_write_operations_per_second"
+        labels:
+          host: "${1}"
+          serial: "${2}"
+          lunid: "${3}"
+
+      # Percentage of wall time the device had at least one request in flight.
+      # Sits at 100 for the duration of a scrub or resilver, which is why
+      # nothing alerts on it.
+      - match: '^truenas\.([^.]+)\.truenas_disk_stats\.busy\._serial_lunid_(.+)_([0-9a-f]{16})\.busy$'
+        match_type: regex
+        name: "truenas_disk_busy_percent"
+        labels:
+          host: "${1}"
+          serial: "${2}"
+          lunid: "${3}"
+
+      # ---- ZFS ARC --------------------------------------------------------
+      # Six of the 25 arcstats dimensions. The omitted ones are the L2ARC
+      # family (no cache vdev on this pool — every l2* dimension is a constant
+      # zero) and the miss/io-hit counterparts of the two hit percentages,
+      # which are 100 minus a series that is already here.
+      - match: '^truenas\.([^.]+)\.truenas_arcstats\.size\.size$'
+        match_type: regex
+        name: "truenas_arc_size_bytes"
+        labels:
+          host: "${1}"
+
+      - match: '^truenas\.([^.]+)\.truenas_arcstats\.free\.free$'
+        match_type: regex
+        name: "truenas_arc_free_memory_bytes"
+        labels:
+          host: "${1}"
+
+      - match: '^truenas\.([^.]+)\.truenas_arcstats\.avail\.avail$'
+        match_type: regex
+        name: "truenas_arc_available_memory_bytes"
+        labels:
+          host: "${1}"
+
+      - match: '^truenas\.([^.]+)\.truenas_arcstats\.ddh_p\.ddh$'
+        match_type: regex
+        name: "truenas_arc_demand_data_hit_percent"
+        labels:
+          host: "${1}"
+
+      - match: '^truenas\.([^.]+)\.truenas_arcstats\.dmh_p\.dmh$'
+        match_type: regex
+        name: "truenas_arc_demand_metadata_hit_percent"
+        labels:
+          host: "${1}"
+
+      - match: '^truenas\.([^.]+)\.truenas_arcstats\.dread\.dread$'
+        match_type: regex
+        name: "truenas_arc_demand_accesses_per_second"
+        labels:
+          host: "${1}"
+
+      # ---- CPU ------------------------------------------------------------
+      # The aggregate dimension is literally "cpu" and the per-core ones are
+      # "cpu0".."cpu15", so the aggregate is matched first and relabelled to
+      # cpu="total"; without that split a sum() over the metric would count
+      # every core twice.
+      - match: '^truenas\.([^.]+)\.truenas_cpu_usage\.cpu\.cpu$'
+        match_type: regex
+        name: "truenas_cpu_usage_percent"
+        labels:
+          host: "${1}"
+          cpu: "total"
+
+      - match: '^truenas\.([^.]+)\.truenas_cpu_usage\.cpu\.cpu([0-9]+)$'
+        match_type: regex
+        name: "truenas_cpu_usage_percent"
+        labels:
+          host: "${1}"
+          cpu: "${2}"
+
+      # Package temperature only. This board reports one sensor and replicates
+      # its reading across cputemp.temperatures.cpu0..cpu15 — all seventeen
+      # dimensions carried byte-identical values through the whole capture, so
+      # the per-core paths are dropped as duplicates rather than mapped.
+      #
+      # No alert is attached. Over one hour of live reporting this sensor swung
+      # 70-105C with no matching load, which is either a genuinely hot package
+      # or an offset-encoded reading; either way there is no threshold that
+      # separates "fine" from "not fine" without knowing the part's Tjmax, and
+      # a rule that fires on a healthy NAS is worse than no rule.
+      - match: '^truenas\.([^.]+)\.cputemp\.temperatures\.cpu$'
+        match_type: regex
+        name: "truenas_cpu_temperature_celsius"
+        labels:
+          host: "${1}"
+          sensor: "package"
+
+      # ---- Memory ---------------------------------------------------------
+      - match: '^truenas\.([^.]+)\.truenas_meminfo\.total\.total$'
+        match_type: regex
+        name: "truenas_memory_total_bytes"
+        labels:
+          host: "${1}"
+
+      # "available" in the /proc/meminfo sense — reclaimable page cache and ARC
+      # included — so this is the number a capacity alert should read, not
+      # total minus ARC.
+      - match: '^truenas\.([^.]+)\.truenas_meminfo\.available\.available$'
+        match_type: regex
+        name: "truenas_memory_available_bytes"
+        labels:
+          host: "${1}"
+
+      # ---- System ---------------------------------------------------------
+      - match: '^truenas\.([^.]+)\.system\.load\.load1$'
+        match_type: regex
+        name: "truenas_load_average"
+        labels:
+          host: "${1}"
+          period: "1m"
+
+      - match: '^truenas\.([^.]+)\.system\.load\.load5$'
+        match_type: regex
+        name: "truenas_load_average"
+        labels:
+          host: "${1}"
+          period: "5m"
+
+      - match: '^truenas\.([^.]+)\.system\.load\.load15$'
+        match_type: regex
+        name: "truenas_load_average"
+        labels:
+          host: "${1}"
+          period: "15m"
+
+      - match: '^truenas\.([^.]+)\.system\.uptime\.uptime$'
+        match_type: regex
+        name: "truenas_uptime_seconds"
+        labels:
+          host: "${1}"
+
+      - match: '^truenas\.([^.]+)\.system\.active_processes\.active$'
+        match_type: regex
+        name: "truenas_active_processes"
+        labels:
+          host: "${1}"
+
+      # ---- NFS server -----------------------------------------------------
+      # Both TrueNAS-backed storage classes are NFS or iSCSI; this is the
+      # server side of the NFS one. The 76-dimension proc4ops breakdown is
+      # deliberately not mapped — per-operation NFSv4 counts diagnose nothing
+      # that rpc.calls plus io does not.
+      - match: '^truenas\.([^.]+)\.nfsd\.rpc\.calls$'
+        match_type: regex
+        name: "truenas_nfsd_rpc_calls_per_second"
+        labels:
+          host: "${1}"
+
+      - match: '^truenas\.([^.]+)\.nfsd\.rpc\.bad_auth$'
+        match_type: regex
+        name: "truenas_nfsd_rpc_bad_calls_per_second"
+        labels:
+          host: "${1}"
+          reason: "auth"
+
+      - match: '^truenas\.([^.]+)\.nfsd\.rpc\.bad_format$'
+        match_type: regex
+        name: "truenas_nfsd_rpc_bad_calls_per_second"
+        labels:
+          host: "${1}"
+          reason: "format"
+
+      - match: '^truenas\.([^.]+)\.nfsd\.threads\.threads$'
+        match_type: regex
+        name: "truenas_nfsd_threads"
+        labels:
+          host: "${1}"
+
+      - match: '^truenas\.([^.]+)\.nfsd\.io\.read$'
+        match_type: regex
+        name: "truenas_nfsd_read_kibibytes_per_second"
+        labels:
+          host: "${1}"
+
+      - match: '^truenas\.([^.]+)\.nfsd\.io\.write$'
+        match_type: regex
+        name: "truenas_nfsd_write_kibibytes_per_second"
+        labels:
+          host: "${1}"
+
+      - match: '^truenas\.([^.]+)\.nfsd\.readcache\.hits$'
+        match_type: regex
+        name: "truenas_nfsd_readcache_per_second"
+        labels:
+          host: "${1}"
+          result: "hit"
+
+      - match: '^truenas\.([^.]+)\.nfsd\.readcache\.misses$'
+        match_type: regex
+        name: "truenas_nfsd_readcache_per_second"
+        labels:
+          host: "${1}"
+          result: "miss"
+
+      - match: '^truenas\.([^.]+)\.nfsd\.readcache\.nocache$'
+        match_type: regex
+        name: "truenas_nfsd_readcache_per_second"
+        labels:
+          host: "${1}"
+          result: "nocache"
+
+      # ---- Network --------------------------------------------------------
+      # Per-interface rather than the system.net aggregate, because the docker
+      # bridges the NAS also carries are not interesting and the aggregate
+      # cannot be filtered apart from them after the fact.
+      - match: '^truenas\.([^.]+)\.net\.([^.]+)\.received$'
+        match_type: regex
+        name: "truenas_network_receive_kilobits_per_second"
+        labels:
+          host: "${1}"
+          interface: "${2}"
+
+      - match: '^truenas\.([^.]+)\.net\.([^.]+)\.sent$'
+        match_type: regex
+        name: "truenas_network_transmit_kilobits_per_second"
+        labels:
+          host: "${1}"
+          interface: "${2}"
+
+      - match: '^truenas\.([^.]+)\.net_drops\.([^.]+)\.inbound$'
+        match_type: regex
+        name: "truenas_network_receive_drops_per_second"
+        labels:
+          host: "${1}"
+          interface: "${2}"
+
+      - match: '^truenas\.([^.]+)\.net_drops\.([^.]+)\.outbound$'
+        match_type: regex
+        name: "truenas_network_transmit_drops_per_second"
+        labels:
+          host: "${1}"
+          interface: "${2}"

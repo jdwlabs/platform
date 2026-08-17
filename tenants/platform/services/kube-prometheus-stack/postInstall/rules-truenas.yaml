@@ -5,146 +5,106 @@ metadata:
   namespace: monitoring
 spec:
   groups:
-    - name: truenas-storage
+    # Every alert here was checked against a live capture of what the NAS
+    # actually pushes (476 distinct Graphite paths, 2026-08-17) and against the
+    # mapping in truenas-graphite-exporter's ConfigMap. The previous version of
+    # this file alerted on truenas_zfs_pool_state, truenas_disk_space_*_gib and
+    # truenas_disk_temperature_celsius — none of which any TrueNAS SCALE 25.10
+    # collector emits, so seven of its nine rules could not fire under any
+    # condition. They are deleted rather than left in place: a rule keyed on a
+    # series that does not exist reads as coverage on a dashboard and is worse
+    # than no rule at all.
+    #
+    # What is deliberately NOT alerted on, so the omissions are not mistaken
+    # for oversights:
+    #   - Pool health, pool/dataset capacity and SMART. The Graphite push
+    #     carries none of them on this version; they are only reachable over
+    #     the TrueNAS API, which needs a credential this cluster does not yet
+    #     hold. See docs/adr/0025 and JDWLABS-367.
+    #   - CPU package temperature. The series exists
+    #     (truenas_cpu_temperature_celsius) but swings 70-105C on an idle NAS,
+    #     so no threshold distinguishes healthy from unhealthy without knowing
+    #     the part's Tjmax.
+    #   - Disk busy percent. Pinned at ~100 for the whole duration of a scrub
+    #     or resilver, which is routine on a 20TB vdev.
+    - name: truenas-host
       rules:
-        # DEGRADED means redundancy is gone but data is still served, which is
-        # the window in which a second failure becomes fatal — warning so it
-        # reads as "act today", not "act now", and so it does not compete with
-        # the not-online case below.
-        - alert: TrueNASPoolDegraded
-          expr: max by (host, pool) (truenas_zfs_pool_state{state="degraded"}) == 1
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: "TrueNAS pool {{ $labels.pool }} is DEGRADED"
-            description: "ZFS pool {{ $labels.pool }} on {{ $labels.host }} has lost redundancy. Data is still served but a further disk failure risks the pool. Check pool status and replace the failed vdev member."
-            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
-
-        # Any state that is neither online nor degraded — faulted, unavail,
-        # suspended, removed, offline. The degraded term excludes the case
-        # above so the two alerts are mutually exclusive; Alertmanager's
-        # inhibit rule keys on alertname+namespace and these carry no
-        # namespace, so overlapping alerts would both page rather than one
-        # suppressing the other.
-        - alert: TrueNASPoolNotOnline
+        # available, not free: the NAS reports /proc/meminfo-style availability,
+        # so reclaimable ARC and page cache are already counted as available.
+        # ARC growing to fill RAM is normal ZFS behaviour and must not alert;
+        # this fires only when memory is genuinely unreclaimable, which on a NAS
+        # means services are about to be OOM-killed and NFS/iSCSI with them.
+        - alert: TrueNASMemoryAvailableLow
           expr: |
-            max by (host, pool) (truenas_zfs_pool_state{state="online"}) == 0
-            unless max by (host, pool) (truenas_zfs_pool_state{state="degraded"}) == 1
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: "TrueNAS pool {{ $labels.pool }} is not ONLINE"
-            description: "ZFS pool {{ $labels.pool }} on {{ $labels.host }} is faulted, suspended or otherwise not online. Every democratic-csi volume and the Loki chunk store on this pool are affected."
-            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
-
-        # 85% matches the threshold PVCUsageHigh and LonghornVolumeUsageHigh
-        # already use, so one number means the same thing across every storage
-        # backend here. It is also roughly where ZFS's allocator switches from
-        # best-fit to first-fit and write throughput starts degrading, so the
-        # figure is not purely conventional.
-        - alert: TrueNASPoolCapacityHigh
-          expr: |
-            truenas_disk_space_used_gib
-              / (truenas_disk_space_used_gib + truenas_disk_space_avail_gib) > 0.85
-          for: 10m
-          labels:
-            severity: warning
-          annotations:
-            summary: "TrueNAS filesystem {{ $labels.mountpoint }} above 85% full"
-            description: "{{ $labels.mountpoint }} on {{ $labels.host }} is {{ $value | humanizePercentage }} full."
-            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
-
-        # A copy-on-write filesystem cannot free space by overwriting, so a
-        # full pool fails writes *and* the deletes that would fix it. 95% is
-        # the point where that becomes a real risk rather than a theoretical
-        # one, and where democratic-csi provisioning starts failing cluster-wide.
-        - alert: TrueNASPoolCapacityCritical
-          expr: |
-            truenas_disk_space_used_gib
-              / (truenas_disk_space_used_gib + truenas_disk_space_avail_gib) > 0.95
-          for: 10m
-          labels:
-            severity: critical
-          annotations:
-            summary: "TrueNAS filesystem {{ $labels.mountpoint }} above 95% full"
-            description: "{{ $labels.mountpoint }} on {{ $labels.host }} is {{ $value | humanizePercentage }} full. ZFS needs free space to complete writes, including the deletes that would reclaim it."
-            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
-
-    - name: truenas-disks
-      rules:
-        # Drive temperature is the only SMART attribute this pipeline carries
-        # (see rules-truenas notes in docs/OPERATIONS.md §8). 50C is inside
-        # every consumer HDD's 5-60C operating spec, but sustained operation
-        # in the upper half of that range is the band where observed annual
-        # failure rates start climbing, so it is a lead indicator rather than
-        # a fault. 15m because a scrub or resilver legitimately heats drives
-        # for minutes at a time.
-        - alert: TrueNASDiskTemperatureHigh
-          expr: max by (host, serial) (truenas_disk_temperature_celsius) > 50
+            truenas_memory_available_bytes / truenas_memory_total_bytes < 0.10
           for: 15m
           labels:
             severity: warning
           annotations:
-            summary: "TrueNAS disk {{ $labels.serial }} above 50C"
-            description: "Disk {{ $labels.serial }} on {{ $labels.host }} has been at {{ $value }}C for 15m. Check chassis airflow before the drive reaches its spec limit."
-            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+            summary: "TrueNAS {{ $labels.host }} has under 10% memory available"
+            description: "{{ $labels.host }} reports {{ $value | humanizePercentage }} of RAM available. This already accounts for reclaimable ARC, so it is real pressure rather than ZFS caching. Expect NFS and iSCSI latency before anything is killed."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
 
-        # 60C is the top of the operating spec for the drive classes used
-        # here; past it the manufacturer no longer rates the drive at all.
-        # Short for: at this point the cause is cooling failure, not workload.
-        - alert: TrueNASDiskTemperatureCritical
-          expr: max by (host, serial) (truenas_disk_temperature_celsius) > 60
-          for: 5m
+        # nfsd counts RPCs it refused. Sustained non-zero means clients are
+        # being turned away — a share's allowed-networks list no longer covers
+        # a node, or mapall/maproot changed — which surfaces as PVCs failing to
+        # mount rather than as anything visible on the NAS itself. Both values
+        # were a flat zero across the whole capture, so any sustained movement
+        # is signal.
+        - alert: TrueNASNFSBadRPCCalls
+          expr: |
+            truenas_nfsd_rpc_bad_calls_per_second > 0
+          for: 15m
           labels:
-            severity: critical
+            severity: warning
           annotations:
-            summary: "TrueNAS disk {{ $labels.serial }} above 60C"
-            description: "Disk {{ $labels.serial }} on {{ $labels.host }} is at {{ $value }}C, past its rated operating range. Suspect a failed fan rather than load."
-            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+            summary: "TrueNAS is rejecting NFS RPCs ({{ $labels.reason }})"
+            description: "nfsd on {{ $labels.host }} has been refusing {{ $value }} RPC/s for 15m with reason={{ $labels.reason }}. Check the NFS share's allowed networks and mapall settings against the node addresses; PVCs on the truenas-nfs class will fail to mount."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
 
     - name: truenas-pipeline
       rules:
-        # Every rule above is a comparison against a series that only exists
-        # while TrueNAS is actively pushing. Stop the push — NAS down, exporter
-        # config wiped by an upgrade, NodePort unreachable — and those
-        # comparisons match nothing and stay silent. This is the alert that
-        # makes the silence audible, and it is also what fires until the
-        # one-time NAS-side exporter setup is done.
+        # The dead-man's switch, and the one rule that would have caught
+        # JDWLABS-335's original defect on day one.
         #
-        # Deliberately not "the NAS is down": blackbox-exporter already owns
-        # host reachability for 192.168.1.205 via HardwareHostUnreachable.
-        # This one means the NAS may be perfectly healthy and simply not
-        # telling us anything.
+        # It keys on the exporter's own graphite_last_processed_timestamp_seconds
+        # rather than on absent() over a mapped series, because that timestamp
+        # advances only when a sample is *accepted* by the mapping. Verified on
+        # the live exporter while every sample was being dropped: 455,447
+        # dropped samples and graphite_last_processed_timestamp_seconds still
+        # reading exactly 0. An absent() rule cannot make that distinction —
+        # it looks identical whether the NAS stopped pushing or the mapping
+        # stopped matching, and the previous version of this rule was keyed on
+        # a series that never existed in the first place.
+        #
+        # Not keyed on graphite_dropped_samples_total either: the mapping
+        # deliberately ignores 401 of the 476 pushed paths, so that counter
+        # climbs continuously on a perfectly healthy pipeline.
+        #
+        # The value is 0 for a freshly restarted pod, which makes the
+        # expression enormous rather than negative — a restart that cannot
+        # accept samples still fires, which is intended.
         - alert: TrueNASMetricsStale
-          expr: absent(truenas_zfs_pool_state)
+          expr: |
+            time() - graphite_last_processed_timestamp_seconds{job="truenas-graphite-exporter"} > 900
           for: 15m
           labels:
             severity: critical
           annotations:
-            summary: "TrueNAS has stopped reporting metrics"
-            description: "No truenas_zfs_pool_state series for 15m. Pool health, capacity and disk temperature alerting for the NAS is blind. Check that the TrueNAS reporting exporter still points at the cluster NodePort — a TrueNAS update resets it."
-            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
-
-        # Narrower companion to the above. Pool state and disk temperature come
-        # from different netdata collectors, and TrueNAS 25.04 dropped a number
-        # of default metrics — so temperature can go missing on its own while
-        # pool state keeps arriving, silently disabling both disk alerts. 30m
-        # and warning because this is a coverage gap, not an outage.
-        - alert: TrueNASDiskTemperatureSignalMissing
-          expr: absent(truenas_disk_temperature_celsius) and on() (count(truenas_zfs_pool_state) > 0)
-          for: 30m
-          labels:
-            severity: warning
-          annotations:
-            summary: "TrueNAS is reporting, but disk temperatures are missing"
-            description: "truenas_zfs_pool_state is arriving while truenas_disk_temperature_celsius is absent for 30m, so the SMART temperature collector is not exporting. TrueNASDiskTemperature{High,Critical} cannot fire until this is restored."
+            summary: "TrueNAS metrics have stopped being accepted"
+            description: >-
+              No Graphite sample from the NAS has matched the mapping for over
+              15m. Either the NAS stopped pushing, or a TrueNAS upgrade renamed
+              the charts and every pattern in truenas-graphite-exporter-mapping
+              now misses. Compare graphite_dropped_samples_total: climbing means
+              samples arrive but no longer match; flat means nothing is arriving
+              at all.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
 
         # The receiving half of the pipeline, as opposed to the sending half.
         # Distinguishes "the NAS stopped pushing" from "we stopped listening",
-        # which are different fixes.
+        # which are different fixes. Kept unchanged — it was one of only two
+        # rules in the original set that could actually fire.
         - alert: TrueNASGraphiteExporterDown
           expr: up{job="truenas-graphite-exporter"} == 0
           for: 10m
