@@ -13,11 +13,12 @@ namespaces:
   #
   # externalEgress declares intent rather than taking effect today. Without
   # enforce: true the envelope also renders allow-all-egress/ingress, which
-  # subsume every scoped rule, and the policy engine is running in audit mode
-  # cluster-wide regardless. It is set because a Bedrock server in online mode
-  # authenticates players against Xbox Live and will need egress the moment
-  # enforcement is real. The scoped rule opens 443 only; whether that covers
-  # Bedrock's auth path is unverified, so revisit before enabling enforce here.
+  # subsume every scoped rule — the policy engine now enforces, but it has
+  # nothing restrictive to enforce here. It is set because a Bedrock server in
+  # online mode authenticates players against Xbox Live and will need egress
+  # the moment this namespace does restrict. The scoped rule opens 443 only;
+  # whether that covers Bedrock's auth path is unverified, so revisit before
+  # enabling enforce here.
   - name: jdwillmsen-prd
     quotaTier: standard
     networkPolicy: default
