@@ -12,10 +12,16 @@ cluster:
       enabled: true
 
   affinity:
-    # required ensures replicas land on distinct nodes; 4 worker nodes > 3 replicas so
-    # there is always a free node for replacement scheduling when one node fails.
+    # required ensures replicas land on distinct nodes.
     # topologyKey: kubernetes.io/hostname is required because this homelab has no zone labels
     # (topology.kubernetes.io/zone is unset on all nodes, making zone anti-affinity a no-op).
+    #
+    # Node count is not what makes replacement scheduling work — free memory is, and there
+    # isn't any. Only two workers are large; three replicas on distinct nodes therefore force
+    # one onto a 2.31Gi worker, which sits ~78% committed on DaemonSets alone. Draining the
+    # node holding this cluster's small-worker replica currently strands it Pending, because
+    # the two large workers are excluded by this very rule and no small worker has 192Mi free.
+    # Raising instances or tightening this rule makes that strictly worse.
     podAntiAffinityType: required
     topologyKey: kubernetes.io/hostname
 
