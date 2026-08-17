@@ -126,8 +126,9 @@ See [docs/ONBOARDING.md](docs/ONBOARDING.md) for the full flow.
 1. Add a service entry to `tenants/platform/tenant.yaml` (chart, repo, revision, namespace, `syncWave` — see existing entries for wave placement)
 2. Add configuration at `tenants/platform/services/<service>/values.yaml`; extra manifests go in `tenants/platform/services/<service>/postInstall/`
 3. For a custom chart, add it under `helm-charts/` and reference it from the service entry — every image reference in that chart's values (and in the tenant overlay) must be digest-pinned or carry a documented exception in `tools/image-pin-allowlist.yaml`; `python3 tools/check-image-pins.py` gates this in CI
-4. Ensure required Vault secrets are seeded if needed
-5. Validate: `platformctl tenants validate`
+4. For a **remote** chart, the images you inherit are the chart's defaults, not anything visible in this repo. `python3 tools/check-remote-chart-image-pins.py` fetches the chart at its pinned `revision`, merges your overlay over it the way Helm does, and rejects any image whose tag can still move (`latest`, `main`, a truncated `v1`, or a tag absent with no chart `appVersion` behind it). Fix by overriding the tag in the overlay as `<tag>@sha256:<index digest>`, or record a documented exception in `tools/remote-chart-image-pin-allowlist.yaml`. Pin the **index** digest, not a per-arch child manifest
+5. Ensure required Vault secrets are seeded if needed
+6. Validate: `platformctl tenants validate`
 
 ### Troubleshooting
 
