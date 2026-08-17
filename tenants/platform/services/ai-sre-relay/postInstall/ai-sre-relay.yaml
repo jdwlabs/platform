@@ -43,12 +43,16 @@ spec:
             # 900 gives the fallback chain room to run inside one alert.
             - {name: INVESTIGATION_TIMEOUT_SECONDS, value: "900"}
             - {name: JIRA_PROJECT, value: "JDWLABS"}
-            # Bounds where a model-authored remediation patch may be written.
-            # Repo, path, and file body all come from a model prompted with
+            # Names where a model-authored remediation patch is written, and
+            # bounds it. A single entry is injected into the proposal rather
+            # than asked for, so the destination is never something the model
+            # infers from alert text; it is re-checked here before any write.
+            # Path and file body still come from a model prompted with
             # untrusted alert text, so this list — not the token's scope — is
             # the intended limit. Kept to the single repo whose manifests an
             # alert would actually remediate; every extra entry widens the
-            # blast radius of a hallucinated patch. Unset disables the arm.
+            # blast radius of a hallucinated patch and turns the destination
+            # back into a model choice. Unset disables the arm.
             - {name: GITHUB_REPO_ALLOWLIST, value: "jdwlabs/platform"}
           readinessProbe:
             httpGet: {path: /healthz, port: http}
