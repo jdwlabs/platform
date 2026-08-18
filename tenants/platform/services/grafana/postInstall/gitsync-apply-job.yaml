@@ -13,6 +13,12 @@
 # is not paired with a delete is a no-op, so the gate at the end checks health
 # rather than existence: it is the only thing standing between "the resources
 # are there" and "dashboards are actually syncing".
+#
+# Create-if-absent is per resource, which is what makes *adding* a repository
+# different from *changing* one: a new repository is absent, so this Job
+# creates it on the next sync with no delete step, while the untouched
+# connection and the repositories already present are skipped. Only an edit to
+# an existing definition needs the delete-first dance.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -162,8 +168,20 @@ spec:
                   -e "s|__PRIVATE_KEY__|$KEY|" \
                   /etc/gitsync/connection.json > /tmp/connection.json
 
+              # Name and file together, because apply_if_absent probes by name
+              # before POSTing the body: a pair that disagrees creates one
+              # resource and then health-gates a different, absent one, which
+              # fails loudly instead of passing over a repository that is not
+              # there. Adding a tenant folder is a line here plus a ConfigMap
+              # key -- the connection is shared and never repeated.
+              REPOSITORIES="platform-dashboards:/etc/gitsync/repository.json
+              jdwlabs-dashboards:/etc/gitsync/repository-jdwlabs.json
+              dotablaze-tech-dashboards:/etc/gitsync/repository-dotablaze-tech.json"
+
               apply_if_absent connections jdwlabs-platform-github /tmp/connection.json
-              apply_if_absent repositories platform-dashboards /etc/gitsync/repository.json
+              for entry in $REPOSITORIES; do
+                apply_if_absent repositories "${entry%%:*}" "${entry#*:}"
+              done
 
               # An exit 0 must mean Git Sync is actually working, not merely
               # that the resources exist. Both are reported present the moment
@@ -200,7 +218,9 @@ spec:
               }
 
               wait_healthy connections jdwlabs-platform-github
-              wait_healthy repositories platform-dashboards
+              for entry in $REPOSITORIES; do
+                wait_healthy repositories "${entry%%:*}"
+              done
               echo "git sync is connected and healthy"
           volumeMounts:
             - name: resources
