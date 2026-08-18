@@ -30,14 +30,10 @@ namespaces:
   - name: jdwlabs-prd
     quotaTier: standard
     networkPolicy: default
-    # enforce is deferred: enabling it (#281) crashlooped every pod within
-    # minutes. Root cause: kubelet's startup/liveness probe hits the pod's
-    # own IP directly (host-to-pod traffic), and the default policy tier has
-    # no allow rule for that — only allow-monitoring-ingress and
-    # allow-ingress-controller. default-deny-all blocked the probe outright.
-    # Needs a host-network/kubelet-probe allow rule in the tenant-envelope
-    # chart before this can be set again; Cilium-managed status alone (which
-    # was checked and was fine) doesn't cover this failure mode.
+    enforce: true
+    # Retried after #285 added the kubelet-probe allow that #281 was missing
+    # (root cause of the earlier crashloop). All 6 deployments' probes are
+    # plain httpGet on the "http" port, covered uniformly by that rule.
     #
     # Same hairpin egress dependency as jdwlabs-non (authui/rolesui/usersui/
     # container -> usersrole.prd.jdwlabs.com, servicediscovery.prd.jdwlabs.com).
