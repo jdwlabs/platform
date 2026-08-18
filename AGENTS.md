@@ -86,6 +86,15 @@ against it — while the namespace still reports its policies applied.
   [ADR 0028](docs/adr/0028-cilium-managed-endpoint-coverage.md); the sequenced
   remediation is [OPERATIONS.md §9](docs/OPERATIONS.md)
 
+### Drain feasibility
+
+- Ask whether every node could be drained right now: `platformctl cluster drain-check` — TOON output, five default fields (`node,verdict,movable,movableMem,blockers`), widened by `--fields <csv>` or `--full`, narrowed to one node by `--node <name>`. Read-only, and **exits non-zero when any node is blocked**, so it works as a gate before an upgrade
+- A `blocked` node also prints a `blockers` table naming the pod and why nothing will take it. The `class` column is the part to read: `hard` means no surviving node satisfies that pod's own constraints, which no packing order can change — a proof. `capacity` means eligible nodes existed but were full once the rest of the evacuation was packed, which is order-dependent and so a strong signal rather than a proof. `unmanaged` means the pod has no controller to recreate it
+- `--plan` prints the pod-to-node assignment the simulation found; `--pods` prints every pod on the reported nodes with its drain classification and disruption-budget allowance; `--usage` reads metrics-server and puts observed memory beside declared requests
+- It answers "could this node be drained **now**", not "could every node be drained in sequence" — draining one node moves everything, and the next verdict is computed against the state before that. It also does not model eviction pacing: a node can be feasible and still hang on a `PodDisruptionBudget` currently allowing no disruption, which is what the `pdbAtZero` field counts
+- Preferred affinity and topology spread constraints are not evaluated, because neither can make a placement impossible. Anything hard that the simulation cannot evaluate is named in the `unmodelled` list rather than assumed satisfied — an empty list is the claim that nothing was skipped
+- Background and the current verdict: [docs/memory-efficiency/07-drain-feasibility.md](docs/memory-efficiency/07-drain-feasibility.md)
+
 ### Grafana Git Sync
 
 Connection and Repository live in Grafana's own API server — invisible to `kubectl` and to ArgoCD — so `platformctl gitsync` is the only sanctioned way to read or reset them.

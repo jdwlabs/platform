@@ -8,4 +8,5 @@ Measured foundation for the cluster memory right-sizing effort. Captured live 20
 4. [04-hit-list.md](04-hit-list.md) — ranked actions, the numeric epic target, Phase 2 mapping
 5. [05-phase3-hpa-vpa-verdicts.md](05-phase3-hpa-vpa-verdicts.md) — Phase 3 HPA/VPA/scale-to-min-floor verdicts for the low-utilization single-replica candidates
 6. [06-node-commitment-floor.md](06-node-commitment-floor.md) — why the 2.31Gi workers' commitment is a capacity limit rather than a placement or sizing defect (**start here for what to do next**)
-7. [appendix-workloads.md](appendix-workloads.md) — full per-workload table
+7. [07-drain-feasibility.md](07-drain-feasibility.md) — which nodes could not be drained and why, the `required`-vs-`preferred` anti-affinity decision, and the standing check that keeps the answer current
+8. [appendix-workloads.md](appendix-workloads.md) — full per-workload table
