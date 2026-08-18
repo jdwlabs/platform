@@ -14,10 +14,32 @@ spec:
     #
     # defaultRequest only, deliberately: `default` would also impose a memory
     # ceiling on instance-manager, whose footprint scales with attached volumes
-    # and rebuild activity (observed 151-601Mi across nodes at rest). An OOM
-    # kill there breaks volume I/O and triggers replica rebuilds, which is a
-    # worse failure than the unbounded growth the ceiling would prevent.
-    # Containers that set their own requests are unaffected.
+    # and rebuild activity. An OOM kill there breaks volume I/O and triggers
+    # replica rebuilds, which is a worse failure than the unbounded growth the
+    # ceiling would prevent. Containers that set their own requests are
+    # unaffected.
+    #
+    # 64Mi is known to be wrong for instance-manager and is kept anyway. The
+    # busy instance-manager on each node measures 160-305Mi against this 64Mi,
+    # so the scheduler is placing it on a fiction. It cannot be corrected here:
+    #
+    #  - The chart exposes no per-component knob. guaranteedInstanceManagerCPU
+    #    is CPU-only and systemManagedCSIComponentsResourceLimits does not list
+    #    instance-manager. Raising this default is therefore the only lever.
+    #  - The lever is namespace-wide. It would also raise both engine-image
+    #    DaemonSets and the longhorn-manager pre-pull sidecar, which measure
+    #    1-3Mi and genuinely fit in 64Mi — five containers per worker charged
+    #    for a correction two of them need.
+    #  - The three 2.31Gi workers have 24Mi, 146Mi and 344Mi free. Even a
+    #    +64Mi bump costs 320Mi per worker and leaves the DaemonSets unable to
+    #    schedule on their next recreate. An honest declaration exceeds the
+    #    node, which is a capacity fact rather than a configuration one.
+    #
+    # Note also that longhorn-system carries a second LimitRange from the
+    # tenant-envelope chart, at the same 64Mi. LimitRanger merges defaults
+    # first-writer-wins over an unordered list, so raising one and not the
+    # other would make the effective default nondeterministic. Change both or
+    # neither.
     - type: Container
       defaultRequest:
         memory: 64Mi

@@ -67,10 +67,19 @@ server:
           disable_hostname = true
         }
   # Chart-default affinity is kept: REQUIRED (hard) pod anti-affinity on
-  # kubernetes.io/hostname. With 5 schedulable workers and 3 replicas this
-  # is satisfiable, and a node failure can then never take out two raft
-  # members at once — soft anti-affinity could co-locate members under
-  # memory pressure and turn one node loss into quorum loss.
+  # kubernetes.io/hostname. Worker count is not what makes that satisfiable —
+  # free memory is. It holds only because the two CNPG clusters no longer
+  # compete for the same scarce small-worker room under a rule of their own;
+  # the margin is one small worker with 192Mi to spare, and it is thin.
+  #
+  # Vault keeps the hard rule where the databases gave it up because the
+  # consequence of co-location differs. Two CNPG instances on one node means a
+  # node loss leaves one instance that the operator promotes. Two raft members
+  # on one node means a node loss leaves one of three, which is quorum lost and
+  # a sealed Vault — and Vault is a wave-2 dependency for every secret
+  # downstream of it. `platformctl cluster drain-check` fails the moment that
+  # margin stops holding, which is the signal to revisit this rather than
+  # discover it during an upgrade.
   # Request 192Mi: measured steady-state usage across all three members
   # runs 79-105Mi, so the prior 384Mi request was placing against roughly
   # 4x actual holdings. The 512Mi limit is untouched, so the cgroup ceiling

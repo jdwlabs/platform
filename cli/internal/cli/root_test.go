@@ -32,7 +32,7 @@ func TestRoot_HelpRuns(t *testing.T) {
 }
 
 // dryRunContract is the whole command tree and, for each command, whether it
-// honours --dry-run. Only the three listed as true read Globals.DryRun; every
+// honours --dry-run. Only the four listed as true read Globals.DryRun; every
 // other command mutates for real, so accepting the flag would report a preview
 // that never happened. TestDryRun_ContractCoversEveryCommand fails when a new
 // command is added without an entry, which is what stops one inheriting the
@@ -49,6 +49,7 @@ var dryRunContract = map[string]bool{
 	"platformctl cluster alerts list":             false,
 	"platformctl cluster alerts rules":            false,
 	"platformctl cluster alerts targets":          false,
+	"platformctl cluster drain-check":             false,
 	"platformctl cluster netpol":                  false,
 	"platformctl cluster netpol coverage":         false,
 	"platformctl cluster status":                  false,

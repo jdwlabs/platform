@@ -12,17 +12,27 @@ cluster:
       enabled: true
 
   affinity:
-    # required ensures replicas land on distinct nodes.
-    # topologyKey: kubernetes.io/hostname is required because this homelab has no zone labels
+    # topologyKey: kubernetes.io/hostname because this homelab has no zone labels
     # (topology.kubernetes.io/zone is unset on all nodes, making zone anti-affinity a no-op).
     #
-    # Node count is not what makes replacement scheduling work — free memory is, and there
-    # isn't any. Only two workers are large; three replicas on distinct nodes therefore force
-    # one onto a 2.31Gi worker, which sits ~78% committed on DaemonSets alone. Draining the
-    # node holding this cluster's small-worker replica currently strands it Pending, because
-    # the two large workers are excluded by this very rule and no small worker has 192Mi free.
-    # Raising instances or tightening this rule makes that strictly worse.
-    podAntiAffinityType: required
+    # preferred, not required, because free memory rather than node count is what makes
+    # replacement scheduling work and there isn't any. Only two workers are large, so three
+    # replicas on distinct nodes force one onto a 2.31Gi worker that is ~78% committed on
+    # DaemonSets alone. Under a hard rule, draining that worker excludes both large workers
+    # by the rule itself, no small worker has 192Mi free, and the replica is not relocated —
+    # it is stranded Pending until someone intervenes. A hard rule buys spreading it cannot
+    # deliver: the third replica ends up not running rather than running elsewhere, and a
+    # cluster at 2 of 3 with one dead is worse off than one at 3 of 3 with two sharing a node.
+    #
+    # The operator weights the soft rule at 100, which outranks the scheduler's default
+    # resource scoring, so placement is unchanged whenever spreading is achievable — which it
+    # is today. Co-location happens only where the alternative is a replica that does not run.
+    #
+    # The cost is that nothing undoes a co-location once made: no descheduler runs here, so a
+    # replica that doubles up during a drain stays doubled up. `platformctl cluster drain-check`
+    # reports co-located replicas against this rule; deleting the pod lets the operator place
+    # it again once there is room.
+    podAntiAffinityType: preferred
     topologyKey: kubernetes.io/hostname
 
   # Without explicit limits the instance pods run BestEffort, so Talos's
