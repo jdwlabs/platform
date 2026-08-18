@@ -1,0 +1,127 @@
+# Unit tests for the artifact-freshness alerts.
+#
+# These exist because the contract they enforce was written after two backups
+# that satisfied every check the cluster made while producing nothing, and an
+# alert nobody has watched fire is the same kind of assumption that caused
+# both. The healthy case is asserted as deliberately as the failing ones: a
+# rule that fires on everything is as useless as one that fires on nothing.
+#
+# Rule files are extracted from the PrometheusRule manifests under tenants/ by
+# run.sh, since promtool reads bare rule groups and not the CRD wrapper.
+#
+# Note the synthetic clock. promtool starts time() at the Unix epoch, so a
+# staleness test has to be evaluated past the freshness budget in absolute
+# terms rather than relative to a plausible-looking timestamp.
+rule_files:
+  - rules/job-freshness-rules.yaml
+evaluation_interval: 1m
+tests:
+  # Healthy: fresh, large, quiesced archive. Nothing should fire.
+  - interval: 1m
+    name: healthy backup is silent
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+        values: '1000000000+0x180'
+      - series: 'backup_last_artifact_bytes{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+        values: '734003200+0x180'
+      - series: 'backup_max_age_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x180'
+      - series: 'backup_last_artifact_quiesced{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+        values: '1+0x180'
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: BackupArtifactStale
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: BackupArtifactEmpty
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: BackupArtifactNotQuiesced
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: BackupFreshnessSignalMissing
+        exp_alerts: []
+
+  # The exact JDWLABS-338 shape: job completed, wrote nothing.
+  - interval: 1m
+    name: empty artifact alerts
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x3000'
+      - series: 'backup_last_artifact_bytes{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x3000'
+      - series: 'backup_max_age_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x3000'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: BackupArtifactEmpty
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              backup_job: minecraft-fwb-prd-backup
+              artifact: world
+            exp_annotations:
+              summary: "Backup minecraft-fwb-prd-backup produced an empty artifact"
+              description: "The most recent artifact for minecraft-fwb-prd-backup is zero bytes. The job completed successfully and wrote nothing."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      # An empty artifact store is also stale, by design.
+      - eval_time: 49h
+        alertname: BackupArtifactStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              backup_job: minecraft-fwb-prd-backup
+              artifact: world
+            exp_annotations:
+              summary: "Backup minecraft-fwb-prd-backup has produced no fresh artifact"
+              description: "Last verified artifact for minecraft-fwb-prd-backup is 2d 1h 0m 0s old, past the freshness budget the job publishes for itself."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # Nothing is publishing the gauges at all.
+  - interval: 1m
+    name: missing signal alerts
+    input_series:
+      - series: 'up{job="irrelevant"}'
+        values: '1+0x180'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: BackupFreshnessSignalMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "No backup freshness signal is being published"
+              description: "backup_last_success_timestamp_seconds is absent for 1h, so BackupArtifactStale and BackupArtifactEmpty cannot fire."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+  # The JDWLABS-372 shape: server down, backup took a cold copy anyway.
+  # The artifact is fine, so only the degraded-mode warning fires.
+  - interval: 1m
+    name: unquiesced fallback warns but does not page
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+        values: '1000000000+0x180'
+      - series: 'backup_last_artifact_bytes{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+        values: '734003200+0x180'
+      - series: 'backup_max_age_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x180'
+      - series: 'backup_last_artifact_quiesced{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x180'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: BackupArtifactNotQuiesced
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              backup_job: minecraft-fwb-prd-backup
+              artifact: world
+            exp_annotations:
+              summary: "Backup minecraft-fwb-prd-backup fell back to an unquiesced copy"
+              description: "The newest artifact for minecraft-fwb-prd-backup was taken without quiescing its source, so the job could not reach the application. The archive is usable; the reason the source was unreachable is what needs looking at."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 65m
+        alertname: BackupArtifactEmpty
+        exp_alerts: []
+      - eval_time: 65m
+        alertname: BackupArtifactStale
+        exp_alerts: []
