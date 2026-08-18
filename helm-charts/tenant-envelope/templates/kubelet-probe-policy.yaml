@@ -1,0 +1,30 @@
+{{- range .Values.namespaces }}
+---
+{{- /*
+kubelet's HTTP/TCP startup and liveness probes connect to the pod's own IP
+directly from the node -- host-to-pod traffic that vanilla NetworkPolicy has
+no vocabulary for (ipBlock is the only source selector it offers, and this
+cluster's nodes share a /24 with the rest of the LAN, so an ipBlock allow
+here would open every probed pod to the whole LAN, not just kubelet).
+Cilium's `host` entity is the precise equivalent: traffic originating from
+the local node's own network namespace, which is exactly what a probe is and
+nothing broader. Rendered unconditionally, independent of the enforce toggle
+above and every policy tier, so it's already validated everywhere -- non-
+enforcing namespaces still allow-all today, but the moment any of them sets
+enforce: true this rule is already in place rather than being a second thing
+to remember. Cost of enforcing jdwlabs-prd without it: every pod crashlooped
+on a failed startup probe within minutes (JDWLABS-208).
+*/}}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-kubelet-probes
+  namespace: {{ .name }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEntities:
+        - host
+{{- end }}
