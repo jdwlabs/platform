@@ -412,6 +412,7 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | `image-drift` warns `declared X, running Y` for a workload         | An ArgoCD Application's Deployment/StatefulSet/DaemonSet spec asks for one image tag, but a pod matched by that workload's own selector is still running another. ArgoCD reports the Application Synced regardless — sync only confirms the spec was applied, not that any pod picked it up. Same root cause class as `statefulset-revisions` (stuck rollout, `OnDelete`, or an evicted-but-not-recreated DaemonSet pod), generalized to every workload kind. Fix by recreating the stale pod(s) (`kubectl delete pod <name> -n <ns>`) and re-running `cluster status` to confirm the running tag now matches. |
 | `limitrange-adoption` warns `N container(s) predate their namespace LimitRange` | A namespace's `LimitRange` only defaults `resources.requests`/`limits` at pod admission — a one-time mutation on create, not a continuously enforced rule. Pods that existed before the `LimitRange` was applied keep running without the default forever; nothing later reconciles them, and ArgoCD reports the `LimitRange` resource itself Synced regardless. The listed pods are naked (often `BestEffort`) despite the namespace looking policy-governed. Fix by recreating the named pod(s) so they re-admit under the current `LimitRange` — for a Deployment/StatefulSet-owned pod, `kubectl delete pod <name> -n <ns>` is enough; for Longhorn `engine-image-*`/`instance-manager-*` pods this happens naturally on the next node drain or Longhorn manager restart. |
 | Detached Longhorn volumes accumulate after a StatefulSet is rebuilt | `longhorn-single` uses `Retain`, so a volume outlives the claim it was created for and never ages out. `platformctl cluster volumes list --class orphaned` reports which are genuinely unclaimed; `platformctl cluster volumes reclaim --all-orphaned --dry-run` shows exactly what a reclaim would delete and mutates nothing; re-run with `--confirm` to delete. Do **not** identify candidates by name or by the volume's own `status.kubernetesStatus.pvcName` — that field records the claim the volume was created for and repeats across every generation of the same StatefulSet, so several volumes carry the identical name and only one is live. The command resolves the claim the other way round, from each PVC's `spec.volumeName`, and refuses any volume a PVC or a `Bound` PersistentVolume still points at. Deleting the `volumes.longhorn.io` object cascades to its replicas and its `Released` PV. |
+| TrueNAS zvols/datasets accumulate after PVCs are deleted | Both TrueNAS classes use `Retain`, so deleting a PVC deletes nothing on the NAS: one `truenas-iscsi` PVC leaks a zvol, an extent, a target and the target-extent mapping; one `truenas-nfs` PVC leaks a dataset and its export. None of it is visible to `kubectl`. `platformctl cluster volumes truenas list --class orphaned` reports what is genuinely unreferenced, `... reclaim --all-orphaned --dry-run` prints the exact per-object delete plan and mutates nothing, and `--confirm` deletes. Do **not** identify candidates by name — a provisioned object is named for the PVC UID it was created for and that name outlives the PV, the PVC and the workload. Liveness is proved only from a PersistentVolume that names the object or an open iSCSI session on a target that exports it; if the session list is unreadable, every zvol is refused. See "Reclaiming leaked TrueNAS volumes" above. |
 | `Released` PVs on `local-path` linger after a node is lost | The provisioner reclaims by scheduling a busybox helper pod **onto the volume's own node** to `rm -rf` the directory. The helper tolerates everything, so a cordoned or tainted node still reclaims normally, but a node that is `NotReady` or removed from the cluster can never run it — the PV stays `Released` and the on-disk `_work` stays on that node's `/var` forever. Longhorn's `Delete` needed no node scheduling, so this failure mode is new since CI `_work` moved to `local-path`. See "Self-hosted CI runners (ARC)" below for the post-incident check. |
 | Grafana dashboards stop syncing from git, or `platform-grafana` goes red with `never became healthy` in the hook log | `platformctl gitsync status` reports each Connection and Repository with `health` and `sync.state`; it exits non-zero when any is unhealthy and prints the full health message. These resources live in Grafana's own API server, so `kubectl` and ArgoCD cannot see them and a red `platform-grafana` sync here means Git Sync is reporting itself broken, not that the deploy failed. Read the message on the **repository**, not the connection: a connection saying `GitHub App lacks required 'webhooks' permission` is describing a requirement derived from a bound repository's `write` workflow, and the App needs no webhooks grant. An empty result means Git Sync is credentialed but not connected. |
 | An edit to `gitsync-resources.yaml` merged but changed nothing | The apply Job creates and never updates, so the next run finds both resources present and skips them. `platformctl gitsync recreate --dry-run`, then `--confirm`, deletes the repository **before** the connection (the repository references it) and requests an ArgoCD refresh of `platform-grafana` so the Job re-runs. Both delete paths refuse while the repository still owns dashboards, because its remove-orphan-resources finalizer collects whatever it owns — `--allow-owned-dashboards` overrides that only when losing them is intended. |
@@ -825,6 +826,66 @@ class H(socketserver.StreamRequestHandler):
 socketserver.ThreadingTCPServer(('0.0.0.0',2003),H).serve_forever()"
 ```
 
+### Reclaiming leaked TrueNAS volumes
+
+Both TrueNAS classes use `reclaimPolicy: Retain`. That is the right call for
+data safety and it means **nothing is cleaned up when a PVC is deleted**.
+Deleting one `truenas-iscsi` PVC leaves four objects on the NAS — a zvol, an
+iSCSI extent, an iSCSI target and the target-extent mapping — plus a `Released`
+PV in the cluster. One `truenas-nfs` PVC leaves a dataset and its NFS export.
+None of it is visible to `kubectl`, and none of it ages out.
+
+This supersedes the manual `midclt` procedure for NFS, which had no notion of an
+extent, a target or the mapping between them and so never transferred to iSCSI.
+
+```
+# what is out there, and what the tool thinks of it
+platformctl cluster volumes truenas list
+platformctl cluster volumes truenas list --class orphaned --full
+
+# preview — mutates nothing, prints the exact per-object delete plan
+platformctl cluster volumes truenas reclaim --all-orphaned --dry-run
+
+# delete
+platformctl cluster volumes truenas reclaim --all-orphaned --confirm
+
+# one volume at a time; still checked against the same rules
+platformctl cluster volumes truenas reclaim --name pvc-<uid> --confirm
+```
+
+`--storage-class truenas-iscsi|truenas-nfs` narrows the report to one driver.
+While the NAS presents its stock self-signed certificate, add
+`--truenas-ca-file <pem>` or `--truenas-insecure-skip-tls-verify`.
+
+**Do not identify candidates by name.** Provisioned objects are named after the
+PVC UID they were created for, and that name outlives the PV, the PVC and the
+workload — the same trap as Longhorn's `status.kubernetesStatus.pvcName` above.
+The command resolves liveness from the other side, and only two things count as
+proof that storage is still in use:
+
+- a PersistentVolume whose CSI volume handle, volume attributes, NFS path or
+  iSCSI IQN names the object, with claims resolved from each PVC's
+  `spec.volumeName`, and
+- an open iSCSI session on a target that exports it — the only evidence that
+  survives the cluster having no record of the volume at all.
+
+If the session list cannot be read, every zvol is refused rather than reported
+orphaned: unknown liveness is not idle. Anything still claimed, still `Bound`,
+or reachable through a target that also exports another volume is reported as a
+`refused` row and exits non-zero — never skipped quietly.
+
+The iSCSI objects are joined by **numeric ID, not by name**. An extent's `disk`
+field is the only statement of which zvol it actually exports, and a target
+reaches its zvol only through a mapping row, so a target named for one volume
+can be mapped to an extent exporting another. Deletes run in dependency order
+(mapping → extent → target → export → dataset → `Released` PV) and every object
+is re-read and matched on its exact name immediately before it is deleted.
+
+Reclaim stays **operator-initiated**. It is not wired to a CronJob: the refusals
+above depend on live session state and on PVs that a partially-synced cluster
+may not have recreated yet, and an unattended run that guesses wrong deletes
+data no backup of the leaked object exists for.
+
 **Upgrade gate — the NAS does not go past 25.10.x:**
 
 TrueNAS removes the REST API in 26. Both democratic-csi releases reach the
@@ -851,6 +912,13 @@ kubectl -n democratic-csi get secret democratic-csi-driver-config \
 The standing REST-deprecation alert on the NAS is the live signal that the
 dependency is still there. Leave it alone — it self-clears 24h after the
 last REST call, and dismissing it destroys the only evidence available.
+
+`platformctl cluster volumes truenas` is deliberately **not** part of that
+dependency: it speaks JSON-RPC 2.0 over `wss://<host>/api/current`, the API
+that replaces REST in 26, behind a single `Caller` interface. So the reclaim
+tooling already works on a 26.x NAS, it does not reset the deprecation alert's
+24h timer, and the alert continues to measure only the CSI drivers. The gate
+above is about the drivers alone.
 
 The ADR's R1-R4 triggers say what has to become true before the gate lifts,
 and record a second, opposite hazard: the driver image runs from an unpinned
