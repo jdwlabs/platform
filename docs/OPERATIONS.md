@@ -409,6 +409,7 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | CNPG clusters not healthy                                        | Check Longhorn pods in `longhorn-system`; check PVC binding                                                |
 | Pod stuck in `CrashLoopBackOff` 100+ restarts, no logs          | Liveness restarts reuse same overlay fs; stale state survives. Full pod delete breaks the cycle: `kubectl delete pod <name> -n <ns>`. If pod is a CNPG standby with I/O errors, also delete its PVC — CNPG will pg_basebackup from primary. |
 | CNPG standby `input/output error` on pgdata chmod               | Longhorn remount stuck. Delete pod + PVC: `kubectl delete pod <name> -n database && kubectl delete pvc <name> -n database`. CNPG creates replacement via pg_basebackup automatically. |
+| Pod crashlooping on `EROFS`, PVC not full, device reads clean    | An iSCSI session drop aborted the ext4 journal and the mount latched read-only; it stays that way after the session comes back. Since Linux 6.12 the kernel no longer flips the superblock flag when it does this, so `/proc/mounts` still says `rw` and `node_filesystem_readonly` stays 0 — confirm from the node instead: `talosctl -n <node-ip> dmesg \| grep -E 'EXT4-fs error\|Remounting filesystem read-only\|session recovery timed out'`. The recurring `I/O error ... comm kubelet` lines afterwards are the volume-stats poll hitting an already-aborted filesystem, not a failing device. Recover by detaching cleanly — see "Volumes that latch read-only" in §8. |
 | `platformctl bootstrap heal --cert-approver` fails "not found"  | ArgoCD app is named `platform-kubelet-serving-cert-approver`, not `kubelet-serving-cert-approver`. Refresh directly: `kubectl annotate application platform-kubelet-serving-cert-approver -n argocd argocd.argoproj.io/refresh=normal --overwrite` |
 | `platform-nginx-gateway-fabric` stuck `OutOfSync` / `Running`   | Helm cert-generator Job TTL race; run `platformctl bootstrap heal --stuck-sync --sync-app platform-nginx-gateway-fabric` |
 | Gateway HTTPS listener `InvalidListener` / all HTTPS routes failing | `wildcard-jdwlabs-tls` secret missing; `kubectl apply -f tenants/platform/services/nginx-gateway-fabric/postInstall/certificate.yaml` then wait 5–15 min for DNS-01 |
@@ -730,6 +731,71 @@ above). No warning currently shares an `alertname` with either, so nothing is
 suppressed in practice today — but the promotion is a change to the inhibit
 graph, not only to the route tree.
 
+**Volumes that latch read-only — `FilesystemReadOnly`, `CSIVolumeStagingFailing`:**
+
+A filesystem that has gone read-only under its workload is close to invisible
+here, and the shape of that blind spot decides how you diagnose it.
+
+When an iSCSI session drops for longer than the initiator's replacement
+window, the SCSI layer stops queueing and starts returning `EIO`. ext4 reacts
+by aborting its journal and refusing further writes. Nothing undoes that when
+the session recovers — the filesystem stays unwritable until it is unmounted
+and the journal replayed — so a network-length event becomes an outage that
+lasts until someone intervenes.
+
+The obvious detector does not work. Since Linux 6.12 ext4's error handler sets
+an internal emergency-read-only flag rather than `SB_RDONLY`, because flipping
+the superblock needs a lock it cannot safely take from an error path. Writes
+fail with `EROFS` exactly as before, but `/proc/mounts` still reports `rw`, and
+node-exporter builds `node_filesystem_readonly` from that string. The
+`FilesystemReadOnly` alert is therefore real but partial: it covers a genuine
+remount and a LUN presented read-only, not this. Treat a firing
+`FilesystemReadOnly` as conclusive and a silent one as no evidence either way.
+
+What does surface it is `CSIVolumeStagingFailing`, one step later. The iSCSI
+driver preens the filesystem with `fsck -f -p` before mounting, so once the pod
+is deleted the damage stops being silent: either the repair succeeds and the
+volume mounts, or staging keeps failing and the alert fires. That converts a
+condition with no signal into one with a bounded delay.
+
+To confirm it directly, read the node's kernel ring buffer — this is the only
+place the evidence exists, since node logs are not shipped to Loki:
+
+```
+talosctl -n <node-ip> dmesg | grep -E 'EXT4-fs error|Remounting filesystem read-only|Journal has aborted|detected conn error|session recovery timed out'
+```
+
+Recovery, in order:
+
+1. Suspend auto-sync on the workload's ArgoCD Application, so scaling it down
+   is not immediately reverted.
+2. Scale the workload to 0 and wait for its `VolumeAttachment` to disappear.
+   The unmount is what makes repair possible; nothing can fix the filesystem
+   while it is still mounted.
+3. Scale back up. The driver runs `fsck -f -p` before mounting. A journal
+   replay reports "errors corrected", which is a non-zero exit and fails that
+   staging attempt — the retry then finds a clean filesystem and mounts it, so
+   the volume returns after one backoff without anyone touching it.
+4. Only if staging keeps failing does the filesystem need `e2fsck -fy` by hand
+   against the LUN. `fsck -p` deliberately refuses anything requiring a
+   decision, so persistent failure means real damage, not a stuck retry.
+5. Restore auto-sync.
+
+Note that the automatic repair in step 3 is a configuration choice, not driver
+default behaviour: this driver's fsck-before-mount is opt-in and is enabled in
+the iSCSI driver config. It is not the Go mount helper that does this for
+in-tree volumes — that code is not on this driver's path at all, so do not
+assume a clean detach repairs anything on a driver where the option is off.
+
+Closing the remaining gap needs node-level logs. Talos kernel messages reach
+nothing queryable today: `nodeLogs` is disabled in the monitoring collector
+(and Talos has no journald for it to read anyway), and Loki's ruler has
+`enable_api` but no rule storage and no Alertmanager URL. Shipping Talos logs
+to Loki and wiring the ruler would let the kernel's own `EXT4-fs error` line
+page directly, at the moment it happens, instead of one pod restart later. A
+node-level exporter for `/sys/fs/ext4/<dev>/errors_count` would do the same job
+with a metric rather than a log.
+
 **Where to look first when X is broken:**
 
 | Subsystem        | Start here                                           |
@@ -740,6 +806,7 @@ graph, not only to the route tree.
 | Postgres         | `kubectl get cluster -n database -o wide` (CNPG plugin) |
 | ARC runners      | Dormant by default — `arc-systems` should be empty; see "Self-hosted CI runners (ARC)" |
 | Gateway (NGF)    | `kubectl get pods -n nginx-gateway`, then check `NginxGatewayFabricDown`/`NginxGatewayFabricReconcileErrorsHigh` alerts (control-plane health only, not request-level) |
+| Read-only volume | `talosctl -n <node-ip> dmesg` for `EXT4-fs error` — `node_filesystem_readonly` cannot see ext4's emergency read-only state; see "Volumes that latch read-only" above |
 | Tracing (Tempo)  | `sum(tempo_distributor_traces_per_batch_count)` — 0 means nothing is emitting, empty vector means the metric itself is gone; see the `TempoNoSpansReceived` steps above |
 | AI-SRE relay     | `up{job="ai-sre-relay", namespace="ai-sre"}` first, then the two processing counters; see the `AiSreRelay*` steps above |
 

@@ -1,0 +1,61 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: storage-integrity-rules
+  namespace: monitoring
+spec:
+  groups:
+    # Capacity is already covered by storage-capacity-rules. This group is about
+    # a volume that is present and the right size but no longer writable, which
+    # until now produced no signal at all: an iSCSI session dropped, ext4 aborted
+    # its journal and latched the mount read-only, and the first anyone knew was
+    # the application crashlooping on EROFS.
+    - name: storage-integrity
+      rules:
+        # Reads the ro flag on the CSI staging mounts. Those are the right
+        # mountpoints to watch: node-exporter's default exclusions drop
+        # /var/lib/kubelet/pods/... — the per-pod bind mount — but not
+        # /var/lib/kubelet/plugins/kubernetes.io/csi/.../globalmount, where every
+        # attached PVC is staged first. Both views share one superblock, so the
+        # staging mount is the complete picture, not a sample.
+        #
+        # What this does NOT catch, and the reason the runbook entry matters more
+        # than the rule: since Linux 6.12 ext4's error handler no longer sets
+        # SB_RDONLY when it gives up on a filesystem — it sets an internal
+        # emergency-read-only flag instead, because flipping the superblock needs
+        # a lock it cannot safely take from an error path. Writes fail with EROFS
+        # exactly as before, but /proc/mounts still says rw, so this expression
+        # stays 0 through the whole event. It fires for a genuine remount, and
+        # for a target that presents its LUN read-only. It did not, and could
+        # not, fire for the incident that prompted it.
+        - alert: FilesystemReadOnly
+          expr: node_filesystem_readonly{mountpoint=~"/var/lib/kubelet/plugins/kubernetes.io/csi/.+/globalmount"} == 1
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "CSI volume mounted read-only on {{ $labels.instance }}"
+            description: "{{ $labels.mountpoint }} on {{ $labels.instance }} ({{ $labels.device }}) is mounted read-only. Writes to the workload using it are failing with EROFS."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+        # The signal that does survive the gap above. A filesystem left damaged
+        # by an aborted journal cannot be staged: the iSCSI driver preens it with
+        # fsck before mounting, and fsck refuses anything needing a decision, so
+        # the volume fails to stage over and over instead of mounting and going
+        # unwritable again. Any driver's staging failures are worth the same
+        # alert, so this is deliberately not scoped to one.
+        #
+        # The window and the hold are what separate a stuck volume from an
+        # ordinary one. A single failure — a journal replay reporting "errors
+        # corrected", which is a success the driver surfaces as an error — keeps
+        # the rate positive for ten minutes and then stops, short of the hold. A
+        # volume that cannot be staged is retried on kubelet's backoff well
+        # inside that window, so the rate never falls back to zero.
+        - alert: CSIVolumeStagingFailing
+          expr: sum by (driver_name, method_name) (rate(csi_operations_seconds_count{method_name=~".*/Node(Stage|Publish)Volume", grpc_status_code!="OK"}[10m])) > 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.driver_name }} cannot stage a volume"
+            description: "{{ $labels.method_name }} has been failing for 15m at {{ $value | humanize }}/s. A workload is stuck without its volume; if the driver runs fsck on stage, the filesystem likely needs manual repair."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
