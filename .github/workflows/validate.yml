@@ -84,6 +84,28 @@ jobs:
               -ignore-missing-schemas \
               -summary
 
+  # Alert rules are the one thing here that fails by staying silent, so they
+  # get unit tests rather than a syntax check alone. Pinned: promtool's test
+  # semantics are what the assertions are written against, and a floating
+  # version would turn an upstream change into a failure on an unrelated PR.
+  prometheus-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.x"
+      - name: Install dependencies
+        run: pip install PyYAML
+      - name: Install promtool
+        run: |
+          curl -sSLo prometheus.tar.gz \
+            https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz
+          tar -xzf prometheus.tar.gz --wildcards '*/promtool' --strip-components=1
+          sudo mv promtool /usr/local/bin/
+      - name: Check and unit-test PrometheusRules
+        run: tests/prometheus-rules/run.sh
+
   foundation-crds-freshness:
     runs-on: ubuntu-latest
     steps:

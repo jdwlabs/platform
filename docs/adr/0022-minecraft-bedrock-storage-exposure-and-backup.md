@@ -162,6 +162,67 @@ what failed on the VM:
   never been restored is an assumption. The chart's restore mode recovers data without
   an active server process and is the intended vehicle.
 
+### 4. The backup degrades rather than aborts when the server is unreachable
+
+Added after the mechanism above failed in exactly the situation it was built for. On
+2026-08-17 the Bedrock pod crashlooped when its ext4 volume latched read-only after an
+iSCSI session drop, and the scheduled backup failed with
+`unable to upgrade connection: container not found`. The world was unprotected during
+the one incident that threatened it, and survived only because the filesystem failed
+read-only rather than corrupt.
+
+Two dependencies on a healthy server were at fault, and the scheduling one was the
+worse of the two because it was silent:
+
+- A **required** `podAffinity` on the server pod. It reads as "run beside the server"
+  but means "run only if a server pod exists" — with the StatefulSet scaled to zero or
+  its pod Terminating, nothing matched and the job never left `Pending`. It could not
+  even start in order to report why.
+- `save hold` driven over `kubectl exec` with no alternative path.
+
+**Decision: when the server cannot be reached, take the copy anyway and record that it
+was degraded. Do not abandon the run.**
+
+The justification is that quiescing is a consistency optimisation and not a correctness
+requirement. Bedrock's LevelDB replays its write-ahead log on open — the same recovery
+path an unclean shutdown takes — so a copy taken without a hold is restorable, merely
+slightly further behind. Weighing a marginally staler archive against no archive at all
+is not a close call, and the failure being designed against is specifically the case
+where the server is already in trouble.
+
+Failing loudly and snapshotting anyway are not alternatives here, which is the part the
+original framing got wrong. The run produces the artifact **and** publishes
+`backup_last_artifact_quiesced=0`, which raises `BackupArtifactNotQuiesced`. The
+operator learns the server was unreachable at backup time and still has a restorable
+world. Silence in either direction is the only outcome ruled out.
+
+### 5. CSI volume snapshots evaluated and rejected for now
+
+A snapshot taken through the CSI driver is the one design that depends on nothing
+inside the application: `truenas-iscsi` is a ZFS zvol, and a ZFS snapshot is atomic,
+instant, and consistent regardless of what the server is doing. On the merits it is a
+better primitive than any copy loop.
+
+It is rejected for now on availability, not on design:
+
+- **The cluster has no snapshot machinery at all.** There is no `VolumeSnapshotClass`,
+  no `snapshot-controller`, and the `VolumeSnapshot` CRDs are not in `bootstrap/crds/`.
+  This is a platform-level addition, not a chart change.
+- **The path it would run over is broken.** `democratic-csi` drives `freenas-api-iscsi`,
+  so `CreateSnapshot` goes through the TrueNAS API — the same API whose stored
+  credential currently carries literal quotes and returns 401. That break is already
+  why a PVC on this class sits `Terminating`. **The snapshot path therefore cannot be
+  tested today**, and nothing here should be read as a claim that it works.
+- **A snapshot is not an archive.** It lives in the same pool as the volume it was taken
+  from, so it protects against deletion and corruption but not against losing the pool.
+  It complements the off-volume tarball rather than replacing it.
+
+The sequencing that follows: fix the TrueNAS API credential, then add the
+snapshot-controller and a `VolumeSnapshotClass`, then take a snapshot immediately before
+the copy so the copy has an atomic point-in-time source and the `save hold` protocol
+becomes unnecessary rather than merely optional. Until the first of those lands, the
+degrade-and-record behaviour above is what protects the world.
+
 ## Consequences
 
 - The workload gains a dependency on TrueNAS that it does not have today, and the work

@@ -81,3 +81,72 @@ spec:
             summary: "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} fired but has not succeeded since"
             description: "{{ $labels.cronjob }} was last scheduled {{ $value | humanizeDuration }} after its last success, and has stayed that way for an hour. The most recent run is failing or hanging."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # Everything above reads kube-state-metrics, so it can only ever
+        # describe the process: whether a job ran and what it exited with. The
+        # rules below read the artifact instead, and they exist because this
+        # cluster has now twice had a backup that satisfied every process-level
+        # check while producing nothing.
+        #
+        # They were held back until something emitted the metrics rather than
+        # shipped in advance, because a rule matching no series looks exactly
+        # like a rule that is passing — the same false assurance that caused
+        # the original incident. The first producer is the Minecraft world
+        # backup in the jdwillmsen tenant's deployment repo, whose exporter
+        # derives all three gauges from the archive directory itself.
+        #
+        # The thresholds are not restated here. Each producer publishes its own
+        # budget as backup_max_age_seconds, so adopting this needs three
+        # numbers from a new job and no change to these rules.
+        - alert: BackupArtifactStale
+          expr: |
+            (time() - max by (backup_job, artifact) (backup_last_success_timestamp_seconds))
+            > max by (backup_job, artifact) (backup_max_age_seconds)
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Backup {{ $labels.backup_job }} has produced no fresh artifact"
+            description: "Last verified artifact for {{ $labels.backup_job }} is {{ $value | humanizeDuration }} old, past the freshness budget the job publishes for itself."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        - alert: BackupArtifactEmpty
+          expr: max by (backup_job, artifact) (backup_last_artifact_bytes) == 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Backup {{ $labels.backup_job }} produced an empty artifact"
+            description: "The most recent artifact for {{ $labels.backup_job }} is zero bytes. The job completed successfully and wrote nothing."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # Without this, deleting the exporter that publishes the two metrics
+        # above silently disables both — the same disappearing-series problem
+        # the alerts themselves exist to catch, moved up one layer.
+        - alert: BackupFreshnessSignalMissing
+          expr: absent(backup_last_success_timestamp_seconds)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "No backup freshness signal is being published"
+            description: "backup_last_success_timestamp_seconds is absent for 1h, so BackupArtifactStale and BackupArtifactEmpty cannot fire."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+        # A producer that can quiesce its source publishes whether it managed
+        # to. The Minecraft backup deliberately degrades to an unquiesced copy
+        # rather than abandoning the run when the server is unreachable, on the
+        # grounds that a slightly staler archive beats no archive — but a
+        # degraded run must not be indistinguishable from a clean one, or the
+        # fallback quietly becomes the permanent state. Warning, not critical:
+        # the artifact exists and is restorable, which is the difference
+        # between this and the two rules above.
+        - alert: BackupArtifactNotQuiesced
+          expr: max by (backup_job, artifact) (backup_last_artifact_quiesced) == 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Backup {{ $labels.backup_job }} fell back to an unquiesced copy"
+            description: "The newest artifact for {{ $labels.backup_job }} was taken without quiescing its source, so the job could not reach the application. The archive is usable; the reason the source was unreachable is what needs looking at."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
