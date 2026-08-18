@@ -38,6 +38,19 @@ const healthyConnections = `{"items":[{
 	"metadata":{"name":"jdwlabs-platform-github"},
 	"status":{"health":{"healthy":true},"sync":{"state":"success"}}}]}`
 
+// Three repositories on one connection is the per-tenant folder shape: one
+// GitHub App reaching one repo, a separate Repository per synced path.
+const sharedConnectionRepositories = `{"items":[{
+	"metadata":{"name":"platform-dashboards"},
+	"spec":{"connection":{"name":"jdwlabs-platform-github"}},
+	"status":{"health":{"healthy":true},"sync":{"state":"success"}}},{
+	"metadata":{"name":"jdwlabs-dashboards"},
+	"spec":{"connection":{"name":"jdwlabs-platform-github"}},
+	"status":{"health":{"healthy":true},"sync":{"state":"success"}}},{
+	"metadata":{"name":"dotablaze-tech-dashboards"},
+	"spec":{"connection":{"name":"jdwlabs-platform-github"}},
+	"status":{"health":{"healthy":true},"sync":{"state":"success"}}}]}`
+
 const noDashboards = `{"items":[]}`
 
 const ownedDashboards = `{"items":[{"metadata":{"name":"vault-overview",
@@ -370,6 +383,42 @@ func TestGitSyncRecreate_RefusesWhenRepositoryOwnsDashboards(t *testing.T) {
 	}
 	if len(stub.deleted) != 0 {
 		t.Fatalf("nothing should have been deleted: %v", stub.deleted)
+	}
+}
+
+func TestGitSyncRecreate_SharedConnectionSurvivesRecreatingOneRepository(t *testing.T) {
+	stub := &grafanaStub{repositories: sharedConnectionRepositories, connections: healthyConnections, dashboards: noDashboards}
+	out, err := runGitSync(t, stub, "gitsync", "recreate", "--repository", "jdwlabs-dashboards", "--confirm")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if len(stub.deleted) != 1 {
+		t.Fatalf("only the named repository should be deleted, got %v", stub.deleted)
+	}
+	if !strings.HasSuffix(stub.deleted[0], "/repositories/jdwlabs-dashboards") {
+		t.Errorf("wrong resource deleted: %v", stub.deleted)
+	}
+	for _, name := range []string{"platform-dashboards", "dotablaze-tech-dashboards"} {
+		if !strings.Contains(out, name) {
+			t.Errorf("the stranded-sibling reason should name %s:\n%s", name, out)
+		}
+	}
+	if !strings.Contains(out, "retained:") {
+		t.Errorf("keeping the shared connection should be reported, not inferred:\n%s", out)
+	}
+}
+
+func TestGitSyncRecreate_LastRepositoryStillTakesTheConnection(t *testing.T) {
+	stub := &grafanaStub{repositories: healthyRepositories, connections: healthyConnections, dashboards: noDashboards}
+	out, err := runGitSync(t, stub, "gitsync", "recreate", "--dry-run")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "order[2]{step,kind,name}:") {
+		t.Errorf("a sole repository must still plan the connection delete:\n%s", out)
+	}
+	if strings.Contains(out, "retained:") {
+		t.Errorf("nothing is shared here, so nothing should be retained:\n%s", out)
 	}
 }
 

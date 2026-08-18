@@ -51,9 +51,12 @@ Run `platformctl bootstrap` from the repo root. See [docs/BOOTSTRAP.md](docs/BOO
 Connection and Repository live in Grafana's own API server — invisible to `kubectl` and to ArgoCD — so `platformctl gitsync` is the only sanctioned way to read or reset them.
 
 - Diagnose: `platformctl gitsync status` — TOON output, four default fields (`kind,name,healthy,syncState`); the full health message is printed for anything not healthy, and `--full` adds it for everything. Exits non-zero when any resource is unhealthy, when a resource reports no health at all, or when no resources exist (credentialed but not connected)
-- Change a definition: merging an edit to `gitsync-resources.yaml` alone does nothing, because the apply Job creates but never updates. `platformctl gitsync recreate --dry-run` then `--confirm` deletes the repository **before** the connection and asks ArgoCD to re-run the apply Job
+- Change a definition: merging an edit to `gitsync-resources.yaml` alone does nothing, because the apply Job creates but never updates. `platformctl gitsync recreate --repository <n> --dry-run` then `--confirm` deletes the repository **before** the connection and asks ArgoCD to re-run the apply Job. `--repository` is required whenever more than one exists
+- Adding is not changing: a repository that does not exist yet is created by the ordinary sync, so a **new** folder needs no `recreate` — only an edit to an existing definition does
+- One connection serves many repositories, so `recreate` deletes the connection only when no other repository still binds to it, and reports the one it retained. Do not read a single-delete plan as a missed step
 - Single resource: `platformctl gitsync delete --kind repository|connection --name <n> --confirm`
 - Both delete paths refuse a repository that still owns dashboards (its remove-orphan-resources finalizer would collect them; override with `--allow-owned-dashboards`) and refuse a connection a repository still references
+- With `sync.target: folder` a repository's `metadata.name` **is** the created folder's UID and `spec.title` its title. Nothing aims a repository at an existing folder, and one whose name collides with a folder created outside provisioning cannot adopt it — it stops with an unmanaged-collision error and syncs nothing. `status` reports neither the path nor the folder, so this is not visible from the CLI
 - A health message never names its own cause: a connection reporting `GitHub App lacks required 'webhooks' permission` is describing a requirement derived from a bound repository's `write` workflow, not a missing grant on the App
 
 ### Seeding one Vault field

@@ -72,11 +72,26 @@ anywhere.
 
 Instead:
 
-- `postInstall/gitsync-resources.yaml` holds both resource definitions as the
+- `postInstall/gitsync-resources.yaml` holds every resource definition as the
   reviewable source of truth. The private key is deliberately absent.
 - `postInstall/gitsync-apply-job.yaml` runs on every ArgoCD sync, injects the key
   from the `grafana-gitsync-github-app` secret, and creates whichever resource is
   missing.
+
+There is one `Connection` and one `Repository` per synced path —
+`platform-dashboards`, `jdwlabs-dashboards`, `dotablaze-tech-dashboards` — all
+bound to the same connection, because `spec.connection.name` is a many-to-one
+reference and a repository syncs exactly one path. Adding a folder is a new
+repository definition plus a line in the Job's `REPOSITORIES` list; the name in
+the two must match, since the Job probes by name before it POSTs.
+
+With `sync.target: folder` a repository's `metadata.name` becomes the created
+folder's UID, and a repository cannot adopt a folder that already exists
+outside provisioning. The tenant repositories therefore carry a
+`-dashboards` suffix — the bare tenant name collides with the folder
+tenant-envelope creates through the classic folders API, and that collision
+stops the sync outright. See `observability/README.md` for the full
+consequence, including the RBAC gap it leaves open.
 
 The Job **creates but never updates**. An existing connection is left untouched,
 because the stored private key is write-once and re-applying it would disturb a
@@ -87,27 +102,35 @@ the next sync recreate it.
 #### Changing a resource definition (manual, attended)
 
 Merging an edit to `gitsync-resources.yaml` on its own changes nothing: the next
-Job run finds both resources present and skips them. ArgoCD cannot help here —
+Job run finds the resources present and skips them. ArgoCD cannot help here —
 these live in Grafana's API server, so `prune`/`selfHeal` on `platform-grafana`
 neither manages nor removes them. Delete them, then let the sync recreate them:
 
 ```sh
-platformctl gitsync recreate --dry-run   # prints the delete order, mutates nothing
-platformctl gitsync recreate --confirm
-platformctl gitsync status               # after the sync: both healthy again?
+platformctl gitsync recreate --repository <name> --dry-run   # prints the delete order, mutates nothing
+platformctl gitsync recreate --repository <name> --confirm
+platformctl gitsync status                                   # after the sync: everything healthy again?
 ```
 
 `recreate` deletes the repository **before** the connection, because the
 repository references it, and then asks ArgoCD to refresh `platform-grafana` so
-the apply Job re-runs. To reset one resource on its own use
+the apply Job re-runs. `--repository` is required now that more than one
+exists. The connection is deleted only when no other repository still binds to
+it, so recreating one folder leaves the other two syncing and the plan is a
+single delete; the retained connection is reported rather than left to be
+inferred from the short plan. To reset one resource on its own use
 `platformctl gitsync delete --kind repository --name platform-dashboards --confirm`.
 
-Both paths refuse while a dashboard is owned by `platform-dashboards`, because
-the repository's remove-orphan-resources finalizer collects whatever it owns;
-the refusal names the dashboards at risk. `--allow-owned-dashboards` proceeds
+Both paths refuse while a dashboard is owned by the repository being deleted,
+because its remove-orphan-resources finalizer collects whatever it owns; the
+refusal names the dashboards at risk. `--allow-owned-dashboards` proceeds
 anyway and is only correct when losing them is intended. Dashboards annotated
 `grafana.app/managedBy: classic-file-provisioning` belong to the ConfigMap
-sidecar, are never owned by the repository, and are unaffected.
+sidecar, are never owned by a repository, and are unaffected.
+
+**Adding** a folder is not this procedure. A repository that does not exist yet
+is created by the ordinary apply Job on the next sync, so a new definition
+needs no delete and no `recreate` — merge it and let ArgoCD sync.
 
 #### Inspecting current state
 

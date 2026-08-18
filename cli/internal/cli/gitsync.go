@@ -159,6 +159,10 @@ both from the definitions in git.
 This is the only supported way to change a Git Sync resource definition: the
 apply Job creates but never updates, so merging an edit alone changes nothing.
 
+The connection is deleted only when no other repository still binds to it. One
+connection serves many repositories, so recreating one of them leaves a shared
+connection in place and the plan is a single delete.
+
 Destructive, so --confirm is required and --dry-run previews. The repository is
 resolved automatically when exactly one exists; otherwise name it with
 --repository.`,
@@ -370,8 +374,16 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 	// Ordering is the whole reason this command exists: the repository
 	// references the connection, so deleting the connection first strands it.
 	steps := [][]string{{"1", gitsync.KindRepository, repo.Name}}
+	// A connection serves every repository bound to it, so tearing it down for
+	// one of them strands the rest — and it strands them silently, because the
+	// damage shows up on the siblings rather than on the resource that was
+	// named. Only the last repository on a connection may take it with it.
+	var stillBound []string
 	if repo.ConnectionRef != "" {
-		steps = append(steps, []string{"2", gitsync.KindConnection, repo.ConnectionRef})
+		stillBound = siblingRepositories(repos, repo.ConnectionRef, repo.Name)
+		if len(stillBound) == 0 {
+			steps = append(steps, []string{"2", gitsync.KindConnection, repo.ConnectionRef})
+		}
 	}
 
 	mode := "delete"
@@ -383,6 +395,16 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 	}
 	if err := display.ToonTable(out, "order", []string{"step", "kind", "name"}, steps); err != nil {
 		return err
+	}
+	// Said out loud rather than left to be inferred from a one-row order table:
+	// an operator who expected two deletes needs to know which resource was held
+	// back and why, or the short plan reads as the command having missed a step.
+	if len(stillBound) > 0 {
+		if err := display.ToonScalar(out, "retained",
+			fmt.Sprintf("connection %s stays: still used by repository %s",
+				repo.ConnectionRef, strings.Join(stillBound, " "))); err != nil {
+			return err
+		}
 	}
 	if g.DryRun {
 		if err := display.ToonScalar(out, "result",
@@ -417,7 +439,7 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 		return err
 	}
 	return display.ToonList(out, "help", []string{
-		"Run `platformctl gitsync status` after the sync to confirm both are healthy again",
+		"Run `platformctl gitsync status` after the sync to confirm everything is healthy again",
 		"A definition change only takes effect if it is merged before the apply Job re-runs",
 	})
 }
@@ -457,6 +479,19 @@ func checkGitSyncDeletable(ctx context.Context, client *gitsync.Client, resource
 		}
 	}
 	return nil
+}
+
+// siblingRepositories names the other repositories bound to a connection. It is
+// what separates "this connection has no user left" from "this connection is
+// shared", which the single-repository era never had to distinguish.
+func siblingRepositories(repos []gitsync.Resource, connection, excluding string) []string {
+	var out []string
+	for _, name := range gitsync.RepositoriesUsingConnection(repos, connection) {
+		if name != excluding {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func gitSyncRefusalHelp(kind string) string {
