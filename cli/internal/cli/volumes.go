@@ -42,7 +42,12 @@ the claim a volume was created for and survives on later generations, so
 several volumes of one StatefulSet carry the same name. A claim is resolved from
 the PersistentVolumeClaim's spec.volumeName instead.
 
-Run with no subcommand to list every volume.`,
+The TrueNAS-backed classes leak objects the cluster cannot see at all — a zvol,
+an iSCSI target, an extent and their mapping, or a dataset and its NFS export.
+Those live under "volumes truenas", which applies the same classification and
+the same --dry-run/--confirm rules to the NAS.
+
+Run with no subcommand to list every Longhorn volume.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runVolumeList(cmd, g, &volumeListOptions{Class: "all"})
@@ -50,6 +55,7 @@ Run with no subcommand to list every volume.`,
 	}
 	cmd.AddCommand(newVolumesListCmd(g))
 	cmd.AddCommand(newVolumesReclaimCmd(g))
+	cmd.AddCommand(newTrueNASVolumesCmd(g))
 	return cmd
 }
 

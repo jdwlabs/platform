@@ -46,6 +46,22 @@ Run `platformctl bootstrap` from the repo root. See [docs/BOOTSTRAP.md](docs/BOO
 - Delete: `platformctl cluster volumes reclaim --all-orphaned --confirm`, or `--name <volume>` (repeatable) for specific ones. Reclaim refuses to run without `--confirm` or `--dry-run`, never reads stdin, and refuses any volume still claimed by a PVC or by a `Bound` PersistentVolume — a refusal is reported as a `refused` row and exits non-zero rather than being skipped quietly
 - `--class` is the tool's verdict, not Longhorn's `state`. A claim is resolved from the PersistentVolumeClaim's `spec.volumeName`; the volume's own `status.kubernetesStatus.pvcName` is historical and repeats across generations of the same StatefulSet, so it never proves a volume is live. The `longhorn-single` class uses `Retain`, so detached volumes never age out on their own
 
+### Storage (TrueNAS volumes)
+
+`platformctl cluster volumes truenas` covers what Longhorn's backend cannot see: the objects the two democratic-csi drivers leave on the NAS. Both TrueNAS classes use `Retain`, so deleting a PVC deletes nothing there — one `truenas-iscsi` PVC leaks a zvol, an iSCSI extent, an iSCSI target and the target-extent mapping; one `truenas-nfs` PVC leaks a dataset and its NFS export. None of it is visible to the cluster.
+
+- Same UX as the Longhorn backend: `list` emits TOON with four default fields (`name,kind,class,size`), widened by `--fields <csv>` or `--full`, narrowed by `--class orphaned|claimed|attached|other`. `--storage-class truenas-iscsi|truenas-nfs` narrows to one driver
+- `platformctl cluster volumes truenas reclaim --all-orphaned --dry-run` previews; `--confirm` deletes; neither is assumed and stdin is never read. `--name <name>` is repeatable and is still checked against the same rules
+- A refusal is a `refused` row and a non-zero exit, never a quiet skip
+- **A zvol's own name never proves it is live.** Provisioned objects are named for the PVC UID they were created for, and that name outlives the PV, the PVC and the workload — the same trap as Longhorn's recorded `pvcName`. Liveness is only ever read from the other side: a PersistentVolume whose CSI volume handle, volume attributes, NFS path or iSCSI IQN names the object (claims resolved from each PVC's `spec.volumeName`), or an open iSCSI session on a target that exports it. If the session list cannot be read, every zvol is refused — unknown liveness is not idle
+- The iSCSI objects are joined by **numeric ID, not by name**: an extent's `disk` field is the only statement of which zvol it exports, and a target reaches its zvol only through a mapping row. A target named for volume A can be mapped to an extent exporting volume B, so every hop is resolved through IDs, and a target that also exports something else is refused
+- Deletes run in dependency order (mapping → extent → target → export → dataset → `Released` PV) and each object is re-read and matched on its exact name immediately before the delete, because middleware row IDs are small and get reused
+- The driver configs are read from the rendered `democratic-csi` Secrets, so the NAS address, dataset parents and iSCSI naming affixes follow the config rather than being hard-coded. `--truenas-ca-file` or `--truenas-insecure-skip-tls-verify` is required while the NAS presents its stock self-signed certificate
+
+`platformctl` reaches the NAS over **JSON-RPC 2.0 on `wss://<host>/api/current`** — the API that replaces REST in TrueNAS 26, isolated behind one `Caller` interface. This is deliberately not the transport the CSI drivers use: they are stuck on REST and gate the NAS at 25.10.x (`docs/adr/0024-truenas-rest-removal-blocks-democratic-csi.md`), and every REST call also keeps the NAS's deprecation alert alive, which is the only live evidence that the drivers still depend on the removed transport.
+
+**An authentication attempt is a mutation, not a read.** Repeated failures invalidate the `truenas-csi` key and take provisioning down for every class at once. Never probe or retry auth in a loop — fail fast on a rejection and report it.
+
 ### Grafana Git Sync
 
 Connection and Repository live in Grafana's own API server — invisible to `kubectl` and to ArgoCD — so `platformctl gitsync` is the only sanctioned way to read or reset them.
@@ -60,7 +76,7 @@ Connection and Repository live in Grafana's own API server — invisible to `kub
 
 - `platformctl bootstrap seed <spec> --field <name>` writes individual properties of one spec, so a new field can be added without re-supplying or being prompted for the credentials already at that path. Repeatable; requires exactly one spec argument; a field named explicitly is written even where the spec marks it optional
 - An unknown spec key or field name is now an error listing the valid set. Previously an unrecognised key selected an empty spec, wrote nothing, and still reported success — which is how a binary older than the seed spec it is asked to write skips the field silently
-- Seeding has no preview mode. `--dry-run` is accepted **only** by `cluster volumes reclaim`, `gitsync delete`, and `gitsync recreate` — the three commands that implement it. Every other command, `bootstrap seed` included, rejects the flag with an unknown-flag error rather than mutating while reporting a preview
+- Seeding has no preview mode. `--dry-run` is accepted **only** by `cluster volumes reclaim`, `cluster volumes truenas reclaim`, `gitsync delete`, and `gitsync recreate` — the four commands that implement it. Every other command, `bootstrap seed` included, rejects the flag with an unknown-flag error rather than mutating while reporting a preview
 
 ## Architecture Overview
 
