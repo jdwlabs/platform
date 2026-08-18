@@ -30,6 +30,10 @@ namespaces:
   - name: jdwlabs-prd
     quotaTier: standard
     networkPolicy: default
+    enforce: true
+    # Same hairpin egress dependency as jdwlabs-non (authui/rolesui/usersui/
+    # container -> usersrole.prd.jdwlabs.com, servicediscovery.prd.jdwlabs.com).
+    externalEgress: true
   - name: jdwlabs-runners
     quotaTier: ci
     networkPolicy: ci
