@@ -1,0 +1,101 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: porkbun-ddns
+  namespace: porkbun-webhook
+spec:
+  # Every 15 minutes. The WAN address changes rarely but without warning, and
+  # the cost of a check is one API call; the cost of missing one is that every
+  # externally published service is unreachable until a human notices.
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      # No retries. A failure that eventually succeeds on retry hides that DNS
+      # was stale in between, which is the whole thing being guarded against.
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: ddns
+              image: curlimages/curl:8.11.1
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  memory: 32Mi
+                  cpu: 10m
+                limits:
+                  memory: 128Mi
+                  cpu: 200m
+              env:
+                - name: DOMAIN
+                  value: jdwlabs.com
+                - name: API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: porkbun-ddns
+                      key: api-key
+                - name: SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: porkbun-ddns
+                      key: secret-key
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  # -4 on every call is load-bearing, not defensive. This network
+                  # has working IPv6, so an unforced request egresses over v6 and
+                  # Porkbun's ping then reports the v6 address — which, written
+                  # into an A record, breaks DNS for the whole zone. Observed:
+                  # ping returned 2600:1700:3b40:cd0::41 while the A record held
+                  # 104.53.12.62.
+                  CURL="curl -4 -sS --max-time 20"
+                  API="https://api.porkbun.com/api/json/v3"
+                  AUTH="{\"apikey\":\"$API_KEY\",\"secretapikey\":\"$SECRET_KEY\"}"
+
+                  # Porkbun's ping reports the address it sees the request coming
+                  # from, so the WAN address and the DNS provider agree by
+                  # construction. A third-party IP service would be a second
+                  # opinion that can disagree.
+                  PING=$($CURL -X POST "$API/ping" -d "$AUTH")
+                  echo "$PING" | grep -q '"status":"SUCCESS"' || {
+                    echo "FATAL: porkbun ping failed: $PING" >&2; exit 1; }
+                  WAN=$(echo "$PING" | sed -n 's/.*"yourIp":"\([^"]*\)".*/\1/p')
+                  # Refuse anything that is not dotted-quad. An A record holding
+                  # an IPv6 address takes the zone down, so a bad parse must stop
+                  # here rather than be written.
+                  case "$WAN" in
+                    *:*) echo "FATAL: ping returned an IPv6 address ($WAN); need -4" >&2; exit 1 ;;
+                    *.*.*.*) ;;
+                    *) echo "FATAL: could not parse an IPv4 address from: $PING" >&2; exit 1 ;;
+                  esac
+
+                  CUR=$($CURL -X POST "$API/dns/retrieveByNameType/$DOMAIN/A/" -d "$AUTH")
+                  echo "$CUR" | grep -q '"status":"SUCCESS"' || {
+                    echo "FATAL: retrieving A record failed: $CUR" >&2; exit 1; }
+                  HAVE=$(echo "$CUR" | sed -n 's/.*"content":"\([^"]*\)".*/\1/p')
+
+                  if [ "$WAN" = "$HAVE" ]; then
+                    echo "$DOMAIN A record already $WAN, nothing to do"
+                    exit 0
+                  fi
+
+                  echo "WAN address changed: $HAVE -> $WAN, updating $DOMAIN"
+                  RES=$($CURL -X POST "$API/dns/editByNameType/$DOMAIN/A/" \
+                    -d "{\"apikey\":\"$API_KEY\",\"secretapikey\":\"$SECRET_KEY\",\"content\":\"$WAN\",\"ttl\":\"600\"}")
+                  echo "$RES" | grep -q '"status":"SUCCESS"' || {
+                    echo "FATAL: updating A record failed: $RES" >&2; exit 1; }
+                  echo "updated $DOMAIN A record to $WAN"

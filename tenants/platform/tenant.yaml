@@ -282,6 +282,17 @@ services:
   # metrics export its API offers, so the receiving half has to live here.
   # rawManifests because no upstream chart models a push-ingest target that is
   # scraped from one port and written to on another.
+  # Keeps the apex A record pointing at the current WAN address. The zone is a
+  # wildcard CNAME onto the apex, so every published name follows this record.
+  - name: porkbun-ddns
+    chart: ""
+    repo: ""
+    revision: ""
+    namespace: porkbun-webhook
+    postInstall: false
+    rawManifests: true
+    syncWave: 2
+
   - name: truenas-graphite-exporter
     chart: ""
     repo: ""
