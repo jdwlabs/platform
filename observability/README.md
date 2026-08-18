@@ -20,30 +20,53 @@ for the full design, rationale, and migration path.
 ```
 observability/
 ├── dashboards/
-│   ├── platform/         # the ONLY synced path -> Grafana folder "Platform dashboards"
-│   ├── jdwlabs/           # scaffolded; folder+team+RBAC exist, Git Sync not wired yet
-│   └── dotablaze-tech/    # scaffolded; folder+team+RBAC exist, Git Sync not wired yet
+│   ├── platform/         # synced path -> Grafana folder "Platform dashboards"
+│   ├── jdwlabs/           # synced path -> Grafana folder "Jdwlabs dashboards"
+│   └── dotablaze-tech/    # synced path -> Grafana folder "Dotablaze Tech dashboards"
 └── jsonnet/              # uncompiled illustrative skeleton, not wired to anything
 ```
 
-One Git Sync `Repository` resource exists, `platform-dashboards`. It tracks
-`main` at `observability/dashboards/platform`, polls every 60s, and syncs with
-`target: folder`, so everything under that path lands in a single Grafana
-folder. Webhooks are disabled — this cluster guarantees no inbound path from
-GitHub — and the only offered workflow is `branch`, because `main` is a merge
-target only.
+Each top-level directory under `dashboards/` has its own Git Sync `Repository`
+resource — `platform-dashboards`, `jdwlabs-dashboards`,
+`dotablaze-tech-dashboards`. A repository syncs exactly one path
+(`spec.github.path` is a single string), so one repository per folder is the
+only available shape; there is no multi-path form. All three track `main`, poll
+every 60s, and sync with `target: folder`, so everything under a path lands in
+that repository's own Grafana folder. Webhooks are disabled — this cluster
+guarantees no inbound path from GitHub — and the only offered workflow is
+`branch`, because `main` is a merge target only.
 
-A per-tenant folder is therefore not just a new subdirectory here: it needs its
-own `Repository` resource pointing at its own path, plus the folder RBAC and
-Grafana team to go with it. The jdwlabs and dotablaze-tech folders + teams +
-RBAC now render from each tenant's `observability` block in `tenant.yaml` (see
-`helm-charts/tenant-envelope/templates/observability.yaml`), so the RBAC half
-of that pair exists — but no `Repository` resource points at either tenant
-path yet, so `dashboards/jdwlabs/` and `dashboards/dotablaze-tech/` are still
-inert from Git Sync's perspective until that follow-up wiring lands (tracked
-under the JDWLABS-67 parent). The dashboard JSON committed for each tenant is
-still real — the queries match this cluster's live series — it just isn't
-reachable through Grafana's UI yet.
+All three share the single `Connection`, `jdwlabs-platform-github`:
+`spec.connection.name` is a many-to-one reference, so one GitHub App serves
+every path rather than each repository carrying its own credential. Keeping
+every repository on `branch` is what makes adding one harmless to the others —
+the connection's required permissions are derived from the union of its bound
+repositories' workflows, so a set that does not change cannot change what the
+App is asked for. Grafana allows several connections onto the same GitHub repo
+as long as their paths are **siblings**; nested or overlapping paths are
+rejected, which is why the tree is flat under `dashboards/`.
+
+### Folder identity is the repository's name
+
+With `target: folder`, the created folder's **UID is the repository's
+`metadata.name`** and its title is `spec.title`. There is no field to aim a
+repository at a folder that already exists, and a repository whose name
+collides with a folder created outside provisioning cannot take that folder
+over — it stops with an unmanaged-collision error and syncs nothing.
+
+That is the reason the tenant repositories are named `<tenant>-dashboards`
+rather than `<tenant>`: each tenant already has a folder whose UID is the bare
+tenant name, created through the classic folders API by
+`helm-charts/tenant-envelope/templates/observability.yaml`, and that folder is
+exactly the kind Git Sync may not adopt. The bare name is the one choice
+guaranteed to fail.
+
+**Known gap.** Because of that, the tenant dashboards land in their own Git
+Sync folder, not inside the tenant folder that carries the tenant team's
+folder-RBAC — so the per-tenant RBAC from `tenant.yaml` does not currently
+cover them. Unifying the two needs a folder Git Sync owns from creation, which
+means tenant-envelope no longer creating it and the existing unmanaged folders
+being removed first. That is a deliberate follow-up, not part of the wiring.
 
 Resource definitions live in
 `tenants/platform/services/grafana/postInstall/gitsync-resources.yaml`. They are
@@ -51,6 +74,12 @@ Grafana app-platform objects, not Kubernetes ones, so `kubectl` and ArgoCD
 cannot see them. Editing that file alone changes nothing in the cluster — the
 apply Job creates but never updates, so a definition change has to go through
 `platformctl gitsync recreate --dry-run` and then `--confirm`.
+
+Create-if-absent is per resource, so *adding* a folder is not a definition
+change: a new repository is absent, the next sync creates it, and no `recreate`
+is involved. Only editing a repository that already exists needs the
+delete-first dance — and with several repositories on one connection,
+`recreate` now takes `--repository` and leaves the shared connection alone.
 
 ## Conventions
 
@@ -71,8 +100,10 @@ apply Job creates but never updates, so a definition change has to go through
 - **Folder = tenant** is the intended end state, enforced by folder-level RBAC
   and a per-tenant Grafana team derived from the tenant's `observability` block
   in `tenants/<tenant>/tenant.yaml`. The platform folder predates this model
-  and stays as-is; jdwlabs and dotablaze-tech now render their folder + team +
-  RBAC from that block (Git Sync wiring is the remaining piece — see above).
+  and stays as-is. It is not reached yet for the tenants: their folder + team +
+  RBAC render from that block, but their dashboards sync into a separate Git
+  Sync folder because a repository cannot adopt a folder it did not create —
+  see "Folder identity is the repository's name" above.
 - **One owner per dashboard.** A dashboard is provisioned by Git Sync *or* by a
   ConfigMap sidecar, never both — see the migration rule in the design doc.
 - **Every committed dashboard is a real dashboard.** A panel query that matches

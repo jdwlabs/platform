@@ -9,12 +9,38 @@
 # apply time from the Vault-backed grafana-gitsync-github-app secret, so the
 # credential never lands in a ConfigMap.
 #
-# Webhooks are disabled on both resources so Grafana registers no inbound hook
-# and polls on the repository's sync.intervalSeconds instead -- a hook is only
+# Webhooks are disabled on every resource so Grafana registers no inbound hook
+# and polls on each repository's sync.intervalSeconds instead -- a hook is only
 # useful if GitHub can reach this instance inbound, which this cluster does not
 # guarantee.
 #
-# The repository offers only the "branch" workflow, and that single choice is
+# One connection, one repository per synced path. spec.connection.name is a
+# many-to-one reference, so all three repositories share the single GitHub App
+# rather than each carrying its own credential. A repository syncs exactly one
+# path (spec.github.path is a scalar), so a second folder is necessarily a
+# second repository -- there is no multi-path form. Sibling paths are the
+# supported way to split one GitHub repo across connections; overlapping or
+# nested paths are rejected outright, which these three are not.
+#
+# The repository names are not cosmetic: with sync.target "folder" the created
+# folder's UID is the repository's own name, and its title is spec.title. There
+# is no field to point a repository at an existing folder. That is why these
+# are named "<tenant>-dashboards" and not "<tenant>": each tenant already has an
+# unmanaged folder whose UID is the bare tenant name, created through the
+# classic folders API by tenant-envelope, and a repository whose name collides
+# with an unmanaged folder cannot take it over outside a migration job -- it
+# stops with an unmanaged-collision error and syncs nothing at all. The bare
+# name is the one choice guaranteed to fail; the suffixed name works whether or
+# not that folder is there. The consequence is that these dashboards land in
+# their own Git Sync folder rather than inside the tenant folder that carries
+# the tenant team's RBAC, and unifying the two needs a folder Git Sync owns
+# from the start.
+#
+# "folderless" is rejected for the same reason: it promotes each subdirectory
+# to a top-level folder, which walks straight into the same collision against
+# the existing tenant folders.
+#
+# Every repository offers only the "branch" workflow, and that single choice is
 # load-bearing twice over. "write" commits straight to the configured branch,
 # and main is a merge target only -- a ruleset requires a pull request. Grafana
 # validates that up front rather than degrading to a pull request, so offering
@@ -24,6 +50,11 @@
 # and report unhealthy without it. Neither failure names the workflow as the
 # cause, and the connection error in particular reads as a connection-level
 # permission problem. The App holds no webhooks grant and needs none.
+#
+# Because that requirement is derived from every repository bound to the
+# connection, keeping all three on "branch" is what makes adding them a no-op
+# for the connection: the union of the offered workflows is unchanged, so the
+# permissions it demands are unchanged.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -80,6 +111,66 @@ data:
           "url": "https://github.com/jdwlabs/platform",
           "branch": "main",
           "path": "observability/dashboards/platform"
+        },
+        "connection": {
+          "name": "jdwlabs-platform-github"
+        }
+      }
+    }
+  repository-jdwlabs.json: |
+    {
+      "apiVersion": "provisioning.grafana.app/v0alpha1",
+      "kind": "Repository",
+      "metadata": {
+        "name": "jdwlabs-dashboards",
+        "namespace": "default"
+      },
+      "spec": {
+        "title": "Jdwlabs dashboards",
+        "type": "github",
+        "sync": {
+          "enabled": true,
+          "intervalSeconds": 60,
+          "target": "folder"
+        },
+        "workflows": ["branch"],
+        "webhook": {
+          "disabled": true
+        },
+        "github": {
+          "url": "https://github.com/jdwlabs/platform",
+          "branch": "main",
+          "path": "observability/dashboards/jdwlabs"
+        },
+        "connection": {
+          "name": "jdwlabs-platform-github"
+        }
+      }
+    }
+  repository-dotablaze-tech.json: |
+    {
+      "apiVersion": "provisioning.grafana.app/v0alpha1",
+      "kind": "Repository",
+      "metadata": {
+        "name": "dotablaze-tech-dashboards",
+        "namespace": "default"
+      },
+      "spec": {
+        "title": "Dotablaze Tech dashboards",
+        "type": "github",
+        "sync": {
+          "enabled": true,
+          "intervalSeconds": 60,
+          "target": "folder"
+        },
+        "workflows": ["branch"],
+        "webhook": {
+          "disabled": true
+        },
+        "github": {
+          "url": "https://github.com/jdwlabs/platform",
+          "branch": "main",
+          "path": "observability/dashboards/dotablaze-tech"
         },
         "connection": {
           "name": "jdwlabs-platform-github"
