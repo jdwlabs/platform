@@ -24,6 +24,11 @@ namespaces:
   - name: dotablaze-tech-prd
     quotaTier: standard
     networkPolicy: default
+    # enforce is deferred: dotablaze-tech-meowbot-prd is not Cilium-managed
+    # (confirmed via cilium-dbg endpoint list — its pod predates or straddles
+    # the 2026-08-13 policy-engine install), so the same trap as -non applies
+    # here. Set it once this pod has restarted under Cilium management and
+    # the allow-set has been checked against its observed traffic.
     externalEgress: true
   - name: dotablaze-tech-runners
     quotaTier: ci
