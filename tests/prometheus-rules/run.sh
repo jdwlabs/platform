@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
-# Runs promtool's rule checks and unit tests against every alert rule in the
-# tree. Kept out of the tenants/ directories on purpose: anything under a
+# Runs promtool's rule checks and unit tests against every PromQL alert rule in
+# the tree. Kept out of the tenants/ directories on purpose: anything under a
 # service's postInstall/ is applied to the cluster by ArgoCD, and a promtool
 # test file is not a Kubernetes object.
+#
+# PromQL is the boundary. Loki ruler rules are LogQL shipped in a ConfigMap for
+# the ruler sidecar, so promtool cannot parse them and this gate never sees
+# them — "every alert rule" above means every rule promtool can read, not every
+# rule in the cluster. Validating LogQL needs a different tool against the
+# Loki ruler, which nothing here does yet.
 set -euo pipefail
 
 if ! command -v promtool >/dev/null 2>&1; then

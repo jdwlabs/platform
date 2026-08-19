@@ -401,7 +401,50 @@ tests:
           - exp_labels:
               severity: warning
               backup_job: half-adopted-backup
+              artifact: world
             exp_annotations:
-              summary: "Backup half-adopted-backup publishes no artifact size"
-              description: "half-adopted-backup reports a success timestamp but no backup_last_artifact_bytes, so BackupArtifactEmpty can never fire for it — the zero-byte artifact case is unmonitored for this producer."
+              summary: "Backup half-adopted-backup publishes no artifact size for world"
+              description: "half-adopted-backup reports a success timestamp but no backup_last_artifact_bytes for artifact class world, so BackupArtifactEmpty can never fire for it — the zero-byte artifact case is unmonitored there."
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # Partial coverage across artifact classes, which the job-level form of this
+  # guard could not see: collapsing both sides to backup_job matches the job
+  # through its one good artifact and removes it whole, so the guard says
+  # nothing while BackupArtifactEmpty is blind to the other class. Unlike the
+  # budget, size has no job-level fallback anywhere to cover the gap — a rule
+  # that matches nothing looking exactly like a rule that passes, inside the
+  # rule added to stop that happening.
+  - interval: 1m
+    name: size gauge covering only one artifact class is reported
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="partial-coverage-backup",artifact="base"}'
+        values: '1000000000+0x180'
+      - series: 'backup_last_success_timestamp_seconds{backup_job="partial-coverage-backup",artifact="wal"}'
+        values: '1000000000+0x180'
+      - series: 'backup_max_age_seconds{backup_job="partial-coverage-backup",artifact="base"}'
+        values: '172800+0x180'
+      - series: 'backup_max_age_seconds{backup_job="partial-coverage-backup",artifact="wal"}'
+        values: '172800+0x180'
+      # Only one of the two classes reports a size.
+      - series: 'backup_last_artifact_bytes{backup_job="partial-coverage-backup",artifact="base"}'
+        values: '734003200+0x180'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: BackupArtifactSizeMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              backup_job: partial-coverage-backup
+              artifact: wal
+            exp_annotations:
+              summary: "Backup partial-coverage-backup publishes no artifact size for wal"
+              description: "partial-coverage-backup reports a success timestamp but no backup_last_artifact_bytes for artifact class wal, so BackupArtifactEmpty can never fire for it — the zero-byte artifact case is unmonitored there."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      # A job-level budget shape is legitimate, so the budget guard must stay
+      # quiet here — the two rules aggregate differently on purpose.
+      - eval_time: 65m
+        alertname: BackupBudgetMissing
+        exp_alerts: []
+      - eval_time: 65m
+        alertname: BackupArtifactEmpty
+        exp_alerts: []

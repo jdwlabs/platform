@@ -33,6 +33,15 @@ spec:
         # specific backup must exist". Decommissioning the world backup means
         # deleting this rule in the same change, which is exactly the review
         # step that silently skipping it is meant to force.
+        #
+        # Living in the tenant namespace does couple the guard to it: deleting
+        # jdwillmsen-prd removes this rule at the same moment it removes the
+        # producer. Putting it in monitoring/ alongside the platform rules
+        # would be namespace-independent and was considered. It sits here
+        # because deleting a tenant namespace is loud in a dozen other ways and
+        # is never accidental, and because keeping tenant alerts with their
+        # tenant matches jdwlabs-alerts and dotablaze-tech-alerts. Worth
+        # revisiting if a tenant is ever torn down and rebuilt routinely.
         - alert: JdwillmsenMinecraftBackupProducerAbsent
           expr: absent(backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup"})
           for: 1h
