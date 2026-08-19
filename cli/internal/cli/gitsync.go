@@ -20,13 +20,19 @@ import (
 )
 
 const (
-	grafanaNamespace     = "monitoring"
-	grafanaPodSelector   = "app.kubernetes.io/name=grafana"
-	grafanaPort          = 3000
-	grafanaDefaultAddr   = "http://platform-grafana.monitoring.svc"
-	grafanaAdminSecret   = "grafana-admin-credentials"
-	grafanaApplication   = "platform-grafana"
-	grafanaAddrEnv       = "PLATFORMCTL_GRAFANA_ADDR"
+	grafanaNamespace   = "monitoring"
+	grafanaPodSelector = "app.kubernetes.io/name=grafana"
+	grafanaPort        = 3000
+	grafanaDefaultAddr = "http://platform-grafana.monitoring.svc"
+	grafanaAdminSecret = "grafana-admin-credentials"
+	grafanaApplication = "platform-grafana"
+	grafanaAddrEnv     = "PLATFORMCTL_GRAFANA_ADDR"
+	// Where a tenant records the git sync folder its team is granted on, and
+	// the Application whose PostSync hook is the only thing that re-applies
+	// that grant. Both are rendered by helm-charts/tenant-envelope.
+	tenantLabel          = "platform.jdwlabs.io/tenant"
+	tenantGitSyncFolder  = "gitsync-folder"
+	governanceAppPrefix  = "governance-"
 	grafanaUserEnv       = "PLATFORMCTL_GRAFANA_ADMIN_USER"
 	grafanaPasswordEnv   = "PLATFORMCTL_GRAFANA_ADMIN_PASSWORD"
 	gitSyncDefaultFields = "kind,name,healthy,syncState"
@@ -107,6 +113,7 @@ type gitSyncDeleteOptions struct {
 	Name                string
 	Confirm             bool
 	AllowOwnedDashboard bool
+	AcceptOpenFolder    bool
 }
 
 func newGitSyncDeleteCmd(g *Globals, shared *gitSyncGlobals) *cobra.Command {
@@ -123,6 +130,9 @@ Two preconditions are enforced rather than documented:
     remove-orphan-resources finalizer collects whatever it owns on delete
   * a connection still referenced by a repository is refused, because every
     repository on it must be deleted first, and the refusal names them
+  * a repository whose folder carries a tenant's RBAC is refused, because the
+    folder is deleted with it and comes back with Grafana's inherited grants —
+    readable by every user — until that tenant's envelope syncs again
 
 Recreation is the apply Job's job — it runs on the next sync of the Grafana
 Application. Use "gitsync recreate" to delete in the enforced order, with
@@ -139,6 +149,8 @@ Application. Use "gitsync recreate" to delete in the enforced order, with
 	cmd.Flags().BoolVar(&opts.Confirm, "confirm", false, "actually delete the resource")
 	cmd.Flags().BoolVar(&opts.AllowOwnedDashboard, "allow-owned-dashboards", false,
 		"proceed even though the repository owns dashboards the finalizer will collect")
+	cmd.Flags().BoolVar(&opts.AcceptOpenFolder, "accept-open-folder", false,
+		"proceed even though the repository's folder carries a tenant's RBAC and will come back without it")
 	bindDryRun(cmd, g)
 	return cmd
 }
@@ -264,7 +276,7 @@ func runGitSyncStatus(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, op
 		if unhealthy+unknown > 0 {
 			if err := display.ToonList(out, "help", []string{
 				"Run `platformctl gitsync status --full` for the whole health and sync payload",
-				"Run `platformctl gitsync recreate --dry-run` if the fix is a definition change",
+				"Run `platformctl gitsync recreate --repository <name> --dry-run` if the fix is a definition change",
 			}); err != nil {
 				return err
 			}
@@ -321,6 +333,27 @@ func runGitSyncDelete(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, op
 			gitSyncRefusalHelp(opts.Kind, repositoriesBlockingConnection(resources, opts.Name)))
 	}
 
+	// Refused rather than repaired, because this command deliberately requests
+	// no resync: the folder is recreated whenever platform-grafana next syncs,
+	// and only the tenant's own envelope puts the team-only permission list
+	// back. `recreate` sequences both, so it is the way through rather than a
+	// consolation. A cluster this cannot read is reported, never assumed empty.
+	claims, claimErr := readTenantFolderClaims(cmd.Context())
+	switch {
+	case claimErr != nil:
+		if err := display.ToonScalar(out, "warning",
+			"tenant folder RBAC could not be checked: "+claimErr.Error()); err != nil {
+			return err
+		}
+	case opts.Kind == gitsync.KindRepository && claims[opts.Name] != "" && !opts.AcceptOpenFolder:
+		return reportCLIError(out,
+			fmt.Errorf("folder %s carries RBAC for tenant %s, which only %s%s re-applies",
+				opts.Name, claims[opts.Name], governanceAppPrefix, claims[opts.Name]),
+			fmt.Sprintf("Run `platformctl gitsync recreate --repository %s --confirm`, which re-syncs %s%s too; "+
+				"pass --accept-open-folder only if the folder being world-readable until that sync is intended",
+				opts.Name, governanceAppPrefix, claims[opts.Name]))
+	}
+
 	mode := "delete"
 	if g.DryRun {
 		mode = "dry-run"
@@ -344,10 +377,17 @@ func runGitSyncDelete(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, op
 	if err := display.ToonScalar(out, "result", fmt.Sprintf("deleted %s/%s", opts.Kind, opts.Name)); err != nil {
 		return err
 	}
-	return display.ToonList(out, "help", []string{
+	help := []string{
 		"The apply Job recreates it on the next sync of the Grafana Application",
 		"Run `platformctl gitsync status` afterwards to confirm it came back healthy",
-	})
+	}
+	if tenant := claims[opts.Name]; tenant != "" {
+		help = append(help,
+			fmt.Sprintf("Folder %s comes back readable by every grafana user until %s%s syncs — "+
+				"re-sync it once the repository is healthy again",
+				opts.Name, governanceAppPrefix, tenant))
+	}
+	return display.ToonList(out, "help", help)
 }
 
 func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, opts *gitSyncRecreateOptions) error {
@@ -355,7 +395,7 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 
 	if err := requireGitSyncIntent(opts.Confirm, g.DryRun); err != nil {
 		return reportCLIError(out, err,
-			"Run `platformctl gitsync recreate --dry-run` first, then re-run with --confirm")
+			"Run `platformctl gitsync recreate --repository <name> --dry-run` first, then re-run with --confirm")
 	}
 
 	client, stop, err := newGitSyncClient(cmd.Context(), shared)
@@ -409,6 +449,17 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 		}
 	}
 
+	// Read before the plan is printed, so a dry-run says which tenant envelopes
+	// a confirmed run would re-sync rather than leaving that to be discovered
+	// afterwards.
+	claims, claimErr := readTenantFolderClaims(cmd.Context())
+	if claimErr != nil {
+		if err := display.ToonScalar(out, "warning",
+			"tenant folder RBAC could not be checked: "+claimErr.Error()); err != nil {
+			return err
+		}
+	}
+
 	// Ordering is the whole reason this command exists: the repository
 	// references the connection, so deleting the connection first strands it.
 	var steps [][]string
@@ -453,8 +504,15 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 			fmt.Sprintf("would delete %d resource(s) in this order — nothing was mutated", len(steps))); err != nil {
 			return err
 		}
-		return display.ToonList(out, "help", append(
-			[]string{"Re-run with --confirm to delete them and request a resync"},
+		plan := []string{"Re-run with --confirm to delete them and request a resync"}
+		for _, name := range deleting {
+			if tenant := claims[name]; tenant != "" {
+				plan = append(plan, fmt.Sprintf(
+					"Folder %s carries tenant %s's RBAC, so %s%s is re-synced too — without that the folder comes back readable by every grafana user",
+					name, tenant, governanceAppPrefix, tenant))
+			}
+		}
+		return display.ToonList(out, "help", append(plan,
 			gitSyncConnectionChangeHelp(repo.Name, stillBound, opts.WithConnection)...))
 	}
 
@@ -465,6 +523,12 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 	}
 
 	resync := "skipped (--no-sync)"
+	// A deleted repository takes its folder with it, and the folder Grafana
+	// recreates carries the inherited Admin/Editor/Viewer grants until the
+	// tenant's own PostSync hook replaces them. Refreshing only the Grafana
+	// Application recreates the folder and stops there, which is a reopened
+	// tenant boundary with nothing reporting it. Both Applications, or neither.
+	envelopes := "skipped (--no-sync)"
 	if !opts.NoSync {
 		dc, derr := volumeDynamicClient()
 		if derr == nil {
@@ -477,9 +541,17 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 		} else {
 			resync = "requested for " + grafanaApplication
 		}
+		if claimErr != nil {
+			envelopes = "not checked: " + claimErr.Error()
+		} else {
+			envelopes = refreshTenantEnvelopes(cmd.Context(), deleting, claims)
+		}
 	}
 	if err := display.ToonScalar(out, "result",
 		fmt.Sprintf("deleted %d resource(s) in order; ArgoCD refresh %s", len(steps), resync)); err != nil {
+		return err
+	}
+	if err := display.ToonScalar(out, "envelopes", envelopes); err != nil {
 		return err
 	}
 	return display.ToonList(out, "help", append([]string{
@@ -802,4 +874,71 @@ func containsString(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// tenantFolderClaims maps a git sync repository name to the tenant whose team
+// is granted on the folder that repository creates. Deleting such a repository
+// takes the folder with it (the remove-orphan-resources finalizer owns it), and
+// the folder Grafana recreates comes back with the inherited Admin/Editor/Viewer
+// grants — readable by every user in the instance — until the tenant's PostSync
+// hook runs again. Nothing else in the cluster can answer this: the hook Job
+// carrying the UID is garbage collected minutes after it runs, so the claim is
+// read from the ConfigMap tenant-envelope leaves behind.
+func tenantFolderClaims(ctx context.Context, kc kubernetes.Interface) (map[string]string, error) {
+	list, err := kc.CoreV1().ConfigMaps(grafanaNamespace).List(ctx, metav1.ListOptions{LabelSelector: tenantLabel})
+	if err != nil {
+		return nil, err
+	}
+	claims := make(map[string]string, len(list.Items))
+	for _, cm := range list.Items {
+		if folder := cm.Data[tenantGitSyncFolder]; folder != "" {
+			claims[folder] = cm.Labels[tenantLabel]
+		}
+	}
+	return claims, nil
+}
+
+// readTenantFolderClaims answers with the claims and, separately, with why it
+// could not. A cluster it cannot read is reported rather than treated as "no
+// tenant claims anything" — that mistake is how a missing grant looks exactly
+// like an absent one.
+func readTenantFolderClaims(ctx context.Context) (map[string]string, error) {
+	kc, err := volumeKubeClient()
+	if err != nil {
+		return nil, err
+	}
+	return tenantFolderClaims(ctx, kc)
+}
+
+// refreshTenantEnvelopes asks ArgoCD to re-run the hook that re-grants each
+// deleted repository's folder to its tenant team. Returned as a message rather
+// than an error: the deletes already happened, so an unrefreshed envelope is a
+// follow-up the operator must see, not a reason to report the command failed.
+func refreshTenantEnvelopes(ctx context.Context, deleted []string, claims map[string]string) string {
+	var apps, missed []string
+	for _, name := range deleted {
+		tenant, ok := claims[name]
+		if !ok {
+			continue
+		}
+		app := governanceAppPrefix + tenant
+		dc, err := volumeDynamicClient()
+		if err == nil {
+			err = heal.RefreshApp(ctx, dc, app)
+		}
+		if err != nil {
+			missed = append(missed, app)
+			continue
+		}
+		apps = append(apps, app)
+	}
+	switch {
+	case len(missed) > 0:
+		return fmt.Sprintf("not requested for %s — re-sync it or its folder stays readable by every grafana user",
+			strings.Join(sortedNames(missed), " "))
+	case len(apps) > 0:
+		return "requested for " + strings.Join(sortedNames(apps), " ")
+	default:
+		return "none needed: no deleted repository carries tenant folder RBAC"
+	}
 }
