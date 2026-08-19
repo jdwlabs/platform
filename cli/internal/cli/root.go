@@ -162,11 +162,11 @@ func bindDryRun(cmd *cobra.Command, g *Globals) {
 // reading stdout sees why the command refused and what to run instead. The
 // returned error carries the reportedError marker so Execute does not print it
 // a second time.
-func reportCLIError(out io.Writer, err error, help string) error {
+func reportCLIError(out io.Writer, err error, help ...string) error {
 	if serr := display.ToonScalar(out, "error", err.Error()); serr != nil {
 		return serr
 	}
-	if serr := display.ToonList(out, "help", []string{help}); serr != nil {
+	if serr := display.ToonList(out, "help", help); serr != nil {
 		return serr
 	}
 	return &reportedError{err: err}

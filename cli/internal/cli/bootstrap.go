@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -413,7 +414,11 @@ func newBootstrapHealCmd(g *Globals) *cobra.Command {
 }
 
 func newBootstrapSeedCmd(g *Globals) *cobra.Command {
-	var fields []string
+	var (
+		fields              []string
+		fromFile            string
+		keepTrailingNewline bool
+	)
 	cmd := &cobra.Command{
 		Use:   "seed [spec-key...]",
 		Short: "Seed Vault kv paths, bypassing phase detection",
@@ -431,11 +436,26 @@ written without re-supplying — or being prompted for — the credentials alrea
 at that path. It requires exactly one spec argument, and a field named
 explicitly is written even where the spec marks it optional.
 
+--from-file reads one field's value from a file, or from stdin when given "-",
+so a seed runs with no terminal attached. It needs exactly one spec argument,
+and exactly one field — named with --field, or inferred when the spec has only
+one. It takes precedence over that field's PLATFORMCTL_* env var, since it names
+the source explicitly. There is deliberately no --value flag: argv is readable by
+every process on the host and is kept by the shell history, so a credential
+passed that way outlives the rotation meant to retire it.
+
+The bytes are stored exactly as given, except for one trailing line terminator,
+which is dropped unless --keep-trailing-newline is passed. Quotes and leading
+or interior whitespace are never stripped, because they can be part of a
+secret; wrap nothing in quotes that the shell will not remove.
+
 An unknown spec key or field name is an error, not a narrower seed: selecting a
 spec this binary does not know would otherwise write nothing and still report
 success, which is how a binary older than the spec it was asked to seed skips
 the field silently.`,
 		Example: `  platformctl bootstrap seed holmes --field webhook_token
+  platformctl bootstrap seed truenas-csi --from-file ./api-key
+  platformctl bootstrap seed holmes --field github_token --from-file -
   platformctl bootstrap seed grafana-gitsync
   platformctl bootstrap seed`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -451,9 +471,22 @@ the field silently.`,
 			if err != nil {
 				return fmt.Errorf("collect tenants: %w", err)
 			}
-			if err := bootstrap.ValidateSeedSelection(tenantNamesForValidation, args, fields); err != nil {
+			fail := func(err error) error {
 				em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: "failed", Message: err.Error()})
-				return err
+				return reportSeedError(cmd, err)
+			}
+			if err := bootstrap.ValidateSeedSelection(tenantNamesForValidation, args, fields); err != nil {
+				return fail(err)
+			}
+			valueSource, err := bootstrap.NewSeedValueSource(fromFile, keepTrailingNewline, tenantNamesForValidation, args, fields)
+			if err != nil {
+				return fail(err)
+			}
+			if valueSource != nil {
+				fields = []string{valueSource.Field}
+			}
+			if err := bootstrap.PreflightSeedInput(tenantNamesForValidation, args, fields, valueSource, g.NonInteractive); err != nil {
+				return fail(err)
 			}
 
 			vaultAddr := os.Getenv("PLATFORMCTL_VAULT_ADDR")
@@ -482,13 +515,13 @@ the field silently.`,
 
 			phase := bootstrap.NewVaultSeedPhase(resolver, g.NonInteractive, "kv", tenantNames, args)
 			phase.SelectFields(fields)
+			phase.SetValueSource(valueSource)
 			phase.SetOnEvent(func(status, msg string) {
 				em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: status, Message: msg})
 			})
 			em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: "progressing", Message: "seeding vault kv paths"})
 			if err := phase.Apply(ctx); err != nil {
-				em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: "failed", Message: err.Error()})
-				return err
+				return fail(err)
 			}
 			em.Emit(Event{Phase: "seed", Name: "vault-seed", Status: "ok", Message: seedSummary(args, fields)})
 			return nil
@@ -496,7 +529,21 @@ the field silently.`,
 	}
 	cmd.Flags().StringArrayVar(&fields, "field", nil,
 		"seed only this field of the single named spec, repeatable")
+	cmd.Flags().StringVar(&fromFile, "from-file", "",
+		`read the field value from this file, or from stdin when "-"; requires one spec and one field`)
+	cmd.Flags().BoolVar(&keepTrailingNewline, "keep-trailing-newline", false,
+		"store the value's trailing newline instead of dropping it")
 	return cmd
+}
+
+// reportSeedError prints a refusal's own fix as the help line. The generic
+// "run --help" fallback would point away from the flag the refusal just named.
+func reportSeedError(cmd *cobra.Command, err error) error {
+	var input *bootstrap.SeedInputError
+	if !errors.As(err, &input) || len(input.Help()) == 0 {
+		return err
+	}
+	return reportCLIError(cmd.OutOrStdout(), err, input.Help()...)
 }
 
 func seedSummary(specs, fields []string) string {

@@ -123,6 +123,7 @@ type VaultSeedPhase struct {
 	tenants        []string
 	selected       []string // if non-empty, run only these spec keys
 	fields         []string // if non-empty, seed only these fields of the single selected spec
+	valueSource    *SeedValueSource
 	onEvent        func(status, msg string)
 }
 
@@ -136,6 +137,21 @@ func (p *VaultSeedPhase) SetOnEvent(f func(status, msg string)) { p.onEvent = f 
 // so a single property can be written without re-supplying — or being prompted
 // for — every other field at that path.
 func (p *VaultSeedPhase) SelectFields(fields []string) { p.fields = fields }
+
+// SetValueSource makes the seed read its one value from a file or stdin
+// instead of a terminal, which is what lets an automated caller rotate a
+// credential at all.
+func (p *VaultSeedPhase) SetValueSource(src *SeedValueSource) { p.valueSource = src }
+
+// fieldValue supplies one field's value from whichever source is in play. The
+// value never reaches an event or an error message: a credential echoed once
+// is a credential in a log, a scrollback and a session transcript.
+func (p *VaultSeedPhase) fieldValue(f seedField, specName string) (string, error) {
+	if p.valueSource != nil {
+		return p.valueSource.Read()
+	}
+	return promptField(f, specName, p.nonInteractive)
+}
 
 // SeedSpecKeys lists every spec key this binary knows, given the tenant list.
 func SeedSpecKeys(tenants []string) []string {
@@ -256,7 +272,7 @@ func (p *VaultSeedPhase) Apply(ctx context.Context) error {
 		}
 		values := map[string]any{}
 		for _, f := range fields {
-			v, err := promptField(f, name, p.nonInteractive)
+			v, err := p.fieldValue(f, name)
 			if err != nil {
 				return fmt.Errorf("seed %s/%s: %w", spec.Path, f.Name, err)
 			}
