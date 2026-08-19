@@ -70,7 +70,7 @@ server:
   # kubernetes.io/hostname. Worker count is not what makes that satisfiable —
   # free memory is. It holds only because the two CNPG clusters no longer
   # compete for the same scarce small-worker room under a rule of their own;
-  # the margin is one small worker with 192Mi to spare, and it is thin.
+  # the margin is one small worker with 152Mi to spare, and it is thin.
   #
   # Vault keeps the hard rule where the databases gave it up because the
   # consequence of co-location differs. Two CNPG instances on one node means a

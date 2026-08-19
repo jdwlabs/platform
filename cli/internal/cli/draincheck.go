@@ -49,7 +49,8 @@ set of targets, and packs them onto the rest under the predicates that decide
 real placements: readiness and cordon state, taints and tolerations,
 nodeSelector and required node affinity, required pod affinity and
 anti-affinity, PersistentVolume node affinity, and memory/CPU/pod-count
-capacity. DaemonSet and static pods are skipped, as kubectl drain skips them.
+capacity. Anti-affinity is read in both directions, as the scheduler reads it.
+DaemonSet and static pods are skipped, as kubectl drain skips them.
 
 Verdicts:
   drainable  an assignment for every evicted pod was found
@@ -57,10 +58,12 @@ Verdicts:
   empty      the drain evicts nothing
   skipped    the node is already cordoned or not ready
 
-A blocked node reports a reason class. "hard" means no surviving node satisfies
-that pod's own constraints at all, which no packing order can change — a proof.
-"capacity" means eligible nodes existed but were full once the rest of the
-evacuation was packed, which is order-dependent and so a strong signal rather
+A blocked node reports a reason class. "hard" means every surviving node was
+excluded by something no packing order can change — a taint, node or volume
+affinity, or an anti-affinity rule against a pod that was already resident — so
+it is a proof. "capacity" means the refusal is order-dependent: nodes were full
+once the rest of the evacuation was packed, or were excluded only by what this
+same evacuation had already placed there, which makes it a strong signal rather
 than a proof. "unmanaged" means the pod has no controller to recreate it.
 
 Preferred affinity and topology spread constraints are not evaluated: they never
@@ -137,7 +140,7 @@ func runDrainCheck(cmd *cobra.Command, g *Globals, opts *drainCheckOptions) erro
 	}
 
 	if g.JSON {
-		if err := emitDrainEvents(out, g, result, fields, usageNote); err != nil {
+		if err := emitDrainEvents(out, g, result, fields, opts, usageNote); err != nil {
 			return err
 		}
 	} else if err := writeDrainReport(out, result, fields, opts, usageNote); err != nil {
@@ -301,6 +304,11 @@ func drainFieldValue(n drain.NodeResult, field string) string {
 	case "pinnedMem":
 		return drain.FormatMemory(n.PinnedMemory)
 	case "tightestAfter":
+		// Negative is the "not computed" sentinel here, not a quantity: a
+		// blocked node never got as far as packing a survivor.
+		if n.TightestAfter < 0 {
+			return "-"
+		}
 		return drain.FormatMemory(n.TightestAfter)
 	case "pdbAtZero":
 		return strconv.Itoa(n.PDBAtZero)
@@ -383,8 +391,9 @@ func drainColocationRows(result drain.Result) [][]string {
 
 // emitDrainEvents mirrors the TOON report onto the newline-delimited event
 // stream the repo's --json contract defines, so an agent parsing events sees
-// the same verdicts and the same aggregate line.
-func emitDrainEvents(out io.Writer, g *Globals, result drain.Result, fields []string, usageNote string) error {
+// the same verdicts, the same aggregate line, and the same extra tables the
+// report flags ask for.
+func emitDrainEvents(out io.Writer, g *Globals, result drain.Result, fields []string, opts *drainCheckOptions, usageNote string) error {
 	em := NewEmitter(out, g.JSON)
 	if g.Session != nil {
 		em.SetSession(g.Session)
@@ -405,17 +414,79 @@ func emitDrainEvents(out io.Writer, g *Globals, result drain.Result, fields []st
 		em.Emit(Event{Phase: "drain-check", Name: n.Node.Name, Status: status, Message: message, Detail: detail})
 	}
 	if usageNote != "" {
-		em.Emit(Event{Phase: "drain-check", Name: "usage", Status: "broken", Message: usageNote})
+		// Every verdict stands without observed memory, so an absent
+		// metrics-server narrows the report rather than breaking it. The human
+		// path calls this a warning; `broken` here would tell an agent the
+		// feasibility answer itself is untrustworthy.
+		em.Emit(Event{Phase: "drain-check", Name: "usage", Status: "info", Message: usageNote})
+	}
+	if opts.Plan {
+		emitDrainPlan(em, result)
+	}
+	if opts.Pods {
+		emitDrainPods(em, result)
 	}
 	for _, c := range result.Colocations {
-		em.Emit(Event{Phase: "drain-check", Name: c.Workload, Status: "broken",
+		// A required rule that live placement is breaking is a broken promise;
+		// under a preferred rule co-location is the documented cost of the
+		// choice, and reporting it as broken would make the expected state
+		// indistinguishable from the surprising one.
+		status := "info"
+		if c.Rule == "required" {
+			status = "broken"
+		}
+		em.Emit(Event{Phase: "drain-check", Name: c.Workload, Status: status,
 			Message: fmt.Sprintf("%d replicas share %s against %s anti-affinity", c.Replicas, c.Node, c.Rule)})
 	}
 	for _, u := range result.UnmodelledConstraints {
 		em.Emit(Event{Phase: "drain-check", Name: "unmodelled", Status: "info", Message: u})
 	}
-	em.Emit(Event{Phase: "drain-check", Name: "summary", Status: "ok", Message: drainResultLine(result)})
+	status := "ok"
+	if len(result.Blocked()) > 0 {
+		status = "broken"
+	}
+	em.Emit(Event{Phase: "drain-check", Name: "summary", Status: status, Message: drainResultLine(result)})
 	return nil
+}
+
+func emitDrainPlan(em *Emitter, result drain.Result) {
+	for _, n := range result.Nodes {
+		for _, p := range n.Placements {
+			em.Emit(Event{Phase: "drain-check", Name: "plan", Status: "info",
+				Message: fmt.Sprintf("draining %s moves %s to %s", n.Node.Name, p.Pod.Ref(), p.Target),
+				Detail: map[string]string{
+					"node":    n.Node.Name,
+					"pod":     p.Pod.Ref(),
+					"request": drain.FormatMemory(p.Pod.Memory),
+					"target":  p.Target,
+				}})
+		}
+	}
+}
+
+func emitDrainPods(em *Emitter, result drain.Result) {
+	for _, n := range result.Nodes {
+		for _, p := range n.Pods {
+			// Unknown figures are left out rather than sent as the report's
+			// "-", which an agent would have to know to read as absent.
+			detail := map[string]string{
+				"node":    n.Node.Name,
+				"pod":     p.Ref(),
+				"class":   string(p.Class),
+				"request": drain.FormatMemory(p.Memory),
+			}
+			if p.HasPDB {
+				detail["pdb"] = p.PDB
+				detail["allowed"] = strconv.Itoa(int(p.DisruptionsAllowed))
+			}
+			if p.UsageKnown {
+				detail["used"] = drain.FormatMemory(p.UsedMemory)
+			}
+			em.Emit(Event{Phase: "drain-check", Name: "pod", Status: "info",
+				Message: fmt.Sprintf("%s on %s class=%s", p.Ref(), n.Node.Name, p.Class),
+				Detail:  detail})
+		}
+	}
 }
 
 func resolveDrainFields(csv string, full bool) ([]string, error) {

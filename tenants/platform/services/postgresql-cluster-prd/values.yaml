@@ -32,6 +32,15 @@ cluster:
     # replica that doubles up during a drain stays doubled up. `platformctl cluster drain-check`
     # reports co-located replicas against this rule; deleting the pod lets the operator place
     # it again once there is room.
+    #
+    # Applying this rolls the cluster. podAntiAffinityType is part of the pod spec CNPG
+    # generates, so a sync marks all three instances for update: replicas are recreated
+    # one at a time, then — primaryUpdateStrategy being unset, so unsupervised — the
+    # operator promotes an in-sync replica and restarts the old primary without asking.
+    # supervised was considered and rejected: it would not avoid the roll, only stop it
+    # after the replicas, leaving the primary on the hard rule and un-relocatable until
+    # a human promoted it. docs/memory-efficiency/07-drain-feasibility.md carries the
+    # sequence and the reasoning.
     podAntiAffinityType: preferred
     topologyKey: kubernetes.io/hostname
 

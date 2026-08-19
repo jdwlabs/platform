@@ -327,3 +327,70 @@ func TestDrainCheck_UsageSummarisesTheShortfallPerNode(t *testing.T) {
 		t.Errorf("a node metrics-server said nothing about should read as unmeasured, not zero:\n%s", out)
 	}
 }
+
+// An agent branching on `status` must not read the opposite of the message
+// beside it: the summary carries the whole-cluster answer.
+func TestDrainCheck_JSONSummaryIsBrokenWhenANodeCannotBeDrained(t *testing.T) {
+	out, _ := runDrain(t, "--json", "cluster", "drain-check")
+	summary := jsonEventNamed(t, out, "summary")
+	if !strings.Contains(summary, `"status":"broken"`) {
+		t.Errorf("summary should be broken while nodes are blocked:\n%s", summary)
+	}
+
+	ok, _ := runDrain(t, "--json", "cluster", "drain-check", "--node", "cp")
+	if s := jsonEventNamed(t, ok, "summary"); !strings.Contains(s, `"status":"ok"`) {
+		t.Errorf("summary should be ok when nothing is blocked:\n%s", s)
+	}
+}
+
+// Usage never decides a verdict, so its absence narrows the report rather than
+// breaking it — the same thing the human path says with "warning:".
+func TestDrainCheck_JSONMissingMetricsIsNotReportedAsBroken(t *testing.T) {
+	out, err := runDrainWithMetrics(t, false, "--json", "cluster", "drain-check", "--node", "cp", "--usage")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if ev := jsonEventNamed(t, out, "usage"); !strings.Contains(ev, `"status":"info"`) {
+		t.Errorf("an absent metrics-server is not a broken cluster:\n%s", ev)
+	}
+}
+
+// A flag that changes the report has to change it under --json too; silently
+// dropping it hands an agent output it believes is complete.
+func TestDrainCheck_JSONHonoursPlanAndPods(t *testing.T) {
+	out, err := runDrain(t, "--json", "cluster", "drain-check", "--node", "cp", "--plan", "--pods")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	plan := jsonEventNamed(t, out, "plan")
+	if !strings.Contains(plan, `"pod":"default/plain-2"`) || !strings.Contains(plan, `"target":"big-2"`) {
+		t.Errorf("plan event should carry the assignment:\n%s", plan)
+	}
+	if pod := jsonEventNamed(t, out, "pod"); !strings.Contains(pod, `"class":"movable"`) {
+		t.Errorf("pod event should carry the drain classification:\n%s", pod)
+	}
+}
+
+// tightestAfter is not computed for a blocked node, which is a different thing
+// from a node with no room left.
+func TestDrainCheck_TightestAfterIsBlankOnlyWhereItWasNeverComputed(t *testing.T) {
+	out, _ := runDrain(t, "cluster", "drain-check", "--fields", "node,tightestAfter")
+	if !strings.Contains(out, `big-1,"-"`) {
+		t.Errorf("a blocked node has no packed survivor to measure:\n%s", out)
+	}
+	if !strings.Contains(out, "cp,108Mi") {
+		t.Errorf("a drainable node should report the tightest survivor:\n%s", out)
+	}
+}
+
+// jsonEventNamed returns the first event line with the given name.
+func jsonEventNamed(t *testing.T, out, name string) string {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if strings.Contains(line, `"name":"`+name+`"`) {
+			return line
+		}
+	}
+	t.Fatalf("no %q event in:\n%s", name, out)
+	return ""
+}
