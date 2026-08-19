@@ -38,10 +38,14 @@ spec:
         # for a target that presents its LUN read-only. It did not, and could
         # not, fire for the incident that prompted it.
         #
-        # It is still the only rule here that can detect the latch at all: the
-        # staging-failure rule below sees the recovery, never the event. So the
-        # exporter override this depends on is load-bearing, not a nicety —
-        # reverting it removes the last detector rather than degrading one.
+        # Be blunt about the consequence: on these nodes NEITHER rule in this
+        # group detects an emergency-RO latch. This one reads 0 because the
+        # kernel never flips the flag, and the rule below needs a CSI call to
+        # fail while no CSI call is made at all. Both observed occurrences were
+        # caught only by the workload's own stdout, and the automation acting on
+        # that lives with the workload in the deployments repo. This rule is
+        # shipped for the read-only remounts and read-only LUNs it genuinely
+        # does cover — not as coverage for the fault that motivated it.
         - alert: FilesystemReadOnly
           expr: node_filesystem_readonly{mountpoint=~"/var/lib/kubelet/plugins/kubernetes.io/csi/.+/globalmount"} == 1
           for: 2m
