@@ -127,6 +127,11 @@ PersistentVolume is Bound, and — for the iSCSI class — the NAS reports no op
 session on any target that exports it. If the session list cannot be read at
 all, every zvol is refused: unknown liveness is not idle.
 
+The NAS reports no equivalent for NFS. It keeps no client state for an export,
+so for truenas-nfs the PersistentVolume side is the whole of the evidence and a
+dataset an outside client is reading is indistinguishable from an idle one. A
+dataset an export above it still makes reachable is refused for that reason.
+
 --name targets are checked against the same rules and refused if they fail,
 which is why "delete everything unmatched" is not offered.
 
@@ -163,7 +168,7 @@ func runTrueNASList(cmd *cobra.Command, g *Globals, shared *truenasGlobals, opts
 			"Run `platformctl cluster volumes truenas list --class orphaned` to see reclaim candidates")
 	}
 
-	cands, err := loadTrueNASCandidates(cmd.Context(), shared)
+	cands, warnings, err := loadTrueNASCandidates(cmd.Context(), shared)
 	if err != nil {
 		return reportCLIError(out, err, truenasConnectHelp(shared))
 	}
@@ -174,10 +179,13 @@ func runTrueNASList(cmd *cobra.Command, g *Globals, shared *truenasGlobals, opts
 	}
 
 	if g.JSON {
-		return emitTrueNASEvents(out, g, "list", shown, fields, truenasCountLine(cands))
+		return emitTrueNASEvents(out, g, "list", shown, fields, truenasCountLine(cands), warnings)
 	}
 
 	if err := display.ToonScalar(out, "count", truenasCountLine(cands)); err != nil {
+		return err
+	}
+	if err := writeTrueNASWarnings(out, warnings); err != nil {
 		return err
 	}
 	if err := display.ToonTable(out, "volumes", fields, truenasRows(shown, fields)); err != nil {
@@ -225,7 +233,7 @@ func runTrueNASReclaim(cmd *cobra.Command, g *Globals, shared *truenasGlobals, o
 	}
 	defer sessions.Close()
 
-	cands, err := sessions.Classify(cmd.Context())
+	cands, warnings, err := sessions.Classify(cmd.Context())
 	if err != nil {
 		return reportCLIError(out, err, truenasConnectHelp(shared))
 	}
@@ -251,10 +259,10 @@ func runTrueNASReclaim(cmd *cobra.Command, g *Globals, shared *truenasGlobals, o
 		if opts.Confirm {
 			reported, table = deleted, "deleted"
 		}
-		if err := emitTrueNASEvents(out, g, table, reported, truenasReclaimFields, summary); err != nil {
+		if err := emitTrueNASEvents(out, g, table, reported, truenasReclaimFields, summary, warnings); err != nil {
 			return err
 		}
-	} else if err := writeTrueNASReclaimReport(out, mode, opts, selected, deleted, refused, summary); err != nil {
+	} else if err := writeTrueNASReclaimReport(out, mode, opts, selected, deleted, refused, summary, warnings); err != nil {
 		return err
 	}
 
@@ -262,14 +270,17 @@ func runTrueNASReclaim(cmd *cobra.Command, g *Globals, shared *truenasGlobals, o
 		return deleteErr
 	}
 	if len(refused) > 0 {
-		return fmt.Errorf("%d named candidate(s) are not reclaimable", len(refused))
+		return fmt.Errorf("%d candidate(s) are not reclaimable", len(refused))
 	}
 	return nil
 }
 
 func writeTrueNASReclaimReport(out io.Writer, mode string, opts *truenasReclaimOptions,
-	selected, deleted, refused []truenas.Candidate, summary string) error {
+	selected, deleted, refused []truenas.Candidate, summary string, warnings []string) error {
 	if err := display.ToonScalar(out, "mode", mode); err != nil {
+		return err
+	}
+	if err := writeTrueNASWarnings(out, warnings); err != nil {
 		return err
 	}
 	table, rows := "reclaim", selected
@@ -295,17 +306,29 @@ func writeTrueNASReclaimReport(out io.Writer, mode string, opts *truenasReclaimO
 	if err := display.ToonScalar(out, "result", summary); err != nil {
 		return err
 	}
+
+	var help []string
 	if mode == "dry-run" && len(selected) > 0 {
-		return display.ToonList(out, "help", []string{
-			fmt.Sprintf("Re-run with --confirm to delete these %d candidate(s)", len(selected)),
-		})
+		help = append(help, fmt.Sprintf("Re-run with --confirm to delete these %d candidate(s)", len(selected)))
 	}
 	if len(refused) > 0 {
-		return display.ToonList(out, "help", []string{
-			"Run `platformctl cluster volumes truenas list --fields name,class,reason` to see what holds them",
-		})
+		help = append(help,
+			"Run `platformctl cluster volumes truenas list --fields name,class,reason` to see what holds them")
 	}
-	return nil
+	if len(help) == 0 {
+		return nil
+	}
+	return display.ToonList(out, "help", help)
+}
+
+// writeTrueNASWarnings reports a read that degraded the run. It sits directly
+// under the count or the mode line so the caveat is read before the rows it
+// applies to, rather than after a table an operator may have stopped reading.
+func writeTrueNASWarnings(out io.Writer, warnings []string) error {
+	if len(warnings) == 0 {
+		return nil
+	}
+	return display.ToonList(out, "warnings", warnings)
 }
 
 // selectTrueNASTargets splits the classified candidates into what will be
@@ -336,19 +359,21 @@ func selectTrueNASTargets(cands []truenas.Candidate, opts *truenasReclaimOptions
 		}
 		return selected, refused
 	}
-	return filterTrueNASClass(cands, truenas.ClassOrphaned), nil
+	// --all-orphaned selects by verdict, so a claimed or attached candidate was
+	// never asked for and is not a refusal. A candidate classed `other` is one:
+	// it is the classifier declining to conclude, and dropping it here is how an
+	// unreadable session list becomes an exit 0 that reports nothing happened.
+	return filterTrueNASClass(cands, truenas.ClassOrphaned), filterTrueNASClass(cands, truenas.ClassOther)
 }
 
 func truenasResultLine(mode string, selected, deleted, refused []truenas.Candidate, total, orphanTotal int) string {
-	if len(selected) == 0 && len(refused) == 0 {
-		return fmt.Sprintf("0 candidates — %d orphaned of %d total", orphanTotal, total)
+	if len(selected) == 0 {
+		return fmt.Sprintf("0 candidates — %d orphaned of %d total with %d refused",
+			orphanTotal, total, len(refused))
 	}
 	if mode == "dry-run" {
-		if len(selected) == 0 {
-			return fmt.Sprintf("0 candidates — %d orphaned of %d total", orphanTotal, total)
-		}
-		return fmt.Sprintf("would delete %d object(s) across %d candidate(s) reclaiming %s — nothing was mutated",
-			countTrueNASObjects(selected), len(selected), longhorn.FormatBytes(sumTrueNASUsed(selected)))
+		return fmt.Sprintf("would delete %d object(s) across %d candidate(s) reclaiming %s with %d refused — nothing was mutated",
+			countTrueNASObjects(selected), len(selected), longhorn.FormatBytes(sumTrueNASUsed(selected)), len(refused))
 	}
 	if len(deleted) == 0 {
 		return fmt.Sprintf("0 deleted and %d refused", len(refused))
@@ -498,10 +523,13 @@ func truenasFieldValue(c truenas.Candidate, field string) string {
 // stream the repo's --json contract defines, so an agent parsing events sees the
 // same rows and the same aggregate line.
 func emitTrueNASEvents(out io.Writer, g *Globals, phaseName string,
-	cands []truenas.Candidate, fields []string, summary string) error {
+	cands []truenas.Candidate, fields []string, summary string, warnings []string) error {
 	em := NewEmitter(out, g.JSON)
 	if g.Session != nil {
 		em.SetSession(g.Session)
+	}
+	for _, w := range warnings {
+		em.Emit(Event{Phase: "truenas-volumes", Name: "warning", Status: "fail", Message: w})
 	}
 	for _, c := range cands {
 		detail := map[string]string{}
@@ -524,10 +552,10 @@ func emitTrueNASEvents(out io.Writer, g *Globals, phaseName string,
 	return nil
 }
 
-func loadTrueNASCandidates(ctx context.Context, shared *truenasGlobals) ([]truenas.Candidate, error) {
+func loadTrueNASCandidates(ctx context.Context, shared *truenasGlobals) ([]truenas.Candidate, []string, error) {
 	sessions, err := openTrueNASSessions(ctx, shared)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer sessions.Close()
 	return sessions.Classify(ctx)

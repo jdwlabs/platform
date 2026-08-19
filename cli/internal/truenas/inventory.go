@@ -18,6 +18,13 @@
 //   - an open iSCSI session on a target that exports it, which is the only
 //     evidence that survives Kubernetes having no idea the volume exists.
 //
+// Only the first of those applies to both classes. The middleware keeps no
+// client state for an NFS export, so for that class a PersistentVolume is the
+// whole of the evidence and a dataset an outside client is reading looks
+// exactly like an idle one. The classifier says so rather than implying a
+// session rung it cannot supply, and refuses a dataset that an export above it
+// still makes reachable.
+//
 // The iSCSI object graph adds a trap the NFS class does not have: the three
 // objects are joined by numeric ID, not by name. An extent's `disk` field is
 // the only statement of which zvol it actually exports, and a target reaches

@@ -147,21 +147,39 @@ func classifyDataset(cfg DriverConfig, inv Inventory, g *graph, refs []Reference
 	}
 
 	c.Objects = deletePlan(mappings, extents, targets, shares, d, c.PV)
-	c.Class, c.Reason = verdict(cfg, inv, g, c, matches, sessionTarget, targets)
+	c.Class, c.Reason = verdict(cfg, inv, g, c, d, matches, sessionTarget, targets)
 	return c
 }
 
 // verdict applies the safety ladder. Order is the safety property: every rung
 // that could mean "in use" is tested before the one that concludes "orphaned",
 // so a state this code does not understand can never fall through to a delete.
-func verdict(cfg DriverConfig, inv Inventory, g *graph, c Candidate,
+//
+// The ladder is not symmetric across the two classes, and pretending otherwise
+// is the trap. iSCSI has a liveness rung the NAS itself can answer — an open
+// session — while the middleware records no client state at all for an NFS
+// export, so a dataset an outside initiator is reading right now is
+// indistinguishable from an idle one. For that class the PersistentVolume side
+// is the only proof of use, and the single NAS-side signal that does survive is
+// an export above the dataset, which makes everything under it reachable by a
+// client this cluster never created.
+func verdict(cfg DriverConfig, inv Inventory, g *graph, c Candidate, d Dataset,
 	matches []Reference, sessionTarget string, targets []Target) (Class, string) {
 
+	if underSnapshotParent(cfg, c.DatasetID) {
+		return ClassOther, "it is the driver's detached-snapshot parent " + cfg.SnapshotParent +
+			" or lives inside it, and this command has no delete plan for a snapshot tree"
+	}
 	if cfg.StorageClass == ClassISCSI && !inv.SessionsKnown {
 		return ClassOther, "iSCSI session list unreadable, so liveness is unknown: " + inv.SessionsError
 	}
 	if c.Sessions > 0 {
 		return ClassAttached, fmt.Sprintf("%d open iSCSI session(s) on target %s", c.Sessions, sessionTarget)
+	}
+	if cfg.StorageClass == ClassNFS {
+		if path := exportCovering(inv, d.Mountpoint); path != "" {
+			return ClassOther, "NFS export " + path + " covers this dataset, so a client outside the cluster can reach it"
+		}
 	}
 	if shared := sharedTargets(g, targets, c.DatasetID); len(shared) > 0 {
 		return ClassOther, fmt.Sprintf("target %s also exports %s, so deleting it would break another volume",
@@ -230,6 +248,33 @@ func sharedTargets(g *graph, targets []Target, datasetID string) []string {
 		}
 	}
 	return nil
+}
+
+// underSnapshotParent reports whether a candidate is the driver's detached-
+// snapshot tree or something inside it. When that parent is nested under the
+// volume parent its dataset arrives here as an ordinary child that no
+// PersistentVolume names, which is the shape of an orphan; the snapshots it
+// holds are not this command's to delete.
+func underSnapshotParent(cfg DriverConfig, datasetID string) bool {
+	if cfg.SnapshotParent == "" || datasetID == "" {
+		return false
+	}
+	return datasetID == cfg.SnapshotParent || strings.HasPrefix(datasetID, cfg.SnapshotParent+"/")
+}
+
+// exportCovering returns the path of an NFS export that reaches the dataset
+// from above. Such an export is not the dataset's own, so it is not in the
+// delete plan and would survive the reclaim while the data under it disappeared.
+func exportCovering(inv Inventory, mountpoint string) string {
+	if mountpoint == "" {
+		return ""
+	}
+	for _, s := range inv.Shares {
+		if s.Path != mountpoint && strings.HasPrefix(mountpoint, s.Path+"/") {
+			return s.Path
+		}
+	}
+	return ""
 }
 
 func sharesOn(inv Inventory, d Dataset) []NFSShare {
@@ -363,7 +408,7 @@ func classifyStrays(cfg DriverConfig, inv Inventory, g *graph, refs []Reference)
 			Objects:      deletePlan(mappings, []Extent{e}, targets, nil, Dataset{}, ""),
 		}
 		c.Sessions, _ = countSessions(inv, targets)
-		c.Class, c.Reason = strayVerdict(inv, refs, c, targets, "", e.Name)
+		c.Class, c.Reason = strayVerdict(cfg, inv, refs, c, targets, "", e.Name)
 		c.Reason = withDetail(c.Reason, "extent still exports "+id+", which no longer exists")
 		out = append(out, c)
 	}
@@ -389,7 +434,7 @@ func classifyStrays(cfg DriverConfig, inv Inventory, g *graph, refs []Reference)
 			Objects:      []Object{{Kind: KindTarget, Name: t.Name, ID: strconv.Itoa(t.ID)}},
 		}
 		c.Sessions, _ = countSessions(inv, []Target{t})
-		c.Class, c.Reason = strayVerdict(inv, refs, c, []Target{t}, "", t.Name)
+		c.Class, c.Reason = strayVerdict(cfg, inv, refs, c, []Target{t}, "", t.Name)
 		c.Reason = withDetail(c.Reason, "target is mapped to no extent, so it exports nothing")
 		out = append(out, c)
 	}
@@ -416,7 +461,7 @@ func strayShares(cfg DriverConfig, inv Inventory, refs []Reference) []Candidate 
 			Share:        s.Path,
 			Objects:      []Object{{Kind: KindShare, Name: s.Path, ID: strconv.Itoa(s.ID)}},
 		}
-		c.Class, c.Reason = strayVerdict(inv, refs, c, nil, s.Path, "")
+		c.Class, c.Reason = strayVerdict(cfg, inv, refs, c, nil, s.Path, "")
 		c.Reason = withDetail(c.Reason, "export has no dataset behind it")
 		out = append(out, c)
 	}
@@ -426,9 +471,14 @@ func strayShares(cfg DriverConfig, inv Inventory, refs []Reference) []Candidate 
 // strayVerdict applies the same ladder to an object with no dataset. It cannot
 // consult a claim, because there is no volume handle to match, so a live
 // session or any PersistentVolume naming the object is the only stop.
-func strayVerdict(inv Inventory, refs []Reference, c Candidate, targets []Target,
+//
+// The unknown-session refusal keys on the storage class rather than on whether
+// a target resolved: an extent hanging off a target that is mapped to something
+// else contributes no target here, and a resolved-target test would let exactly
+// that case through with the session list unread.
+func strayVerdict(cfg DriverConfig, inv Inventory, refs []Reference, c Candidate, targets []Target,
 	sharePath, objectName string) (Class, string) {
-	if !inv.SessionsKnown && len(targets) > 0 {
+	if cfg.StorageClass == ClassISCSI && !inv.SessionsKnown {
 		return ClassOther, "iSCSI session list unreadable, so liveness is unknown: " + inv.SessionsError
 	}
 	if c.Sessions > 0 {

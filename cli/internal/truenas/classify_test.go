@@ -338,6 +338,80 @@ func TestReference_DoesNotMatchOnIncidentalAttributeValues(t *testing.T) {
 	}
 }
 
+// The detached-snapshot parent is commonly nested under the volume parent, and
+// when it is, its dataset reaches the classifier as an ordinary direct child
+// that no PersistentVolume names — the exact shape of an orphan.
+func TestClassify_DetachedSnapshotTreeIsRefused(t *testing.T) {
+	cfg := iscsiConfig()
+	cfg.SnapshotParent = iscsiParent + "/snaps"
+	inv := Inventory{
+		Datasets: []Dataset{
+			{ID: cfg.SnapshotParent, Name: "snaps", Type: "FILESYSTEM"},
+			{ID: cfg.SnapshotParent + "/pvc-snapshotted", Name: "pvc-snapshotted", Type: "VOLUME"},
+		},
+		SessionsKnown: true,
+	}
+	cands := Classify(cfg, inv, nil)
+
+	for _, name := range []string{"snaps", "pvc-snapshotted"} {
+		c := findCandidate(t, cands, name)
+		if c.Class != ClassOther {
+			t.Errorf("%s class = %s, want other — the snapshot tree is not this command's to delete", name, c.Class)
+		}
+		if !strings.Contains(c.Reason, "detached-snapshot") {
+			t.Errorf("%s reason = %q", name, c.Reason)
+		}
+	}
+}
+
+// A target mapped to more than one extent is not this extent's to delete, so it
+// contributes no target to the plan. Keying the unknown-session refusal on a
+// resolved target would let exactly that case through while a live session on
+// the very target that exports it went unread.
+func TestClassify_StrayExtentOnASharedTargetIsRefusedWhenSessionsAreUnknown(t *testing.T) {
+	inv := Inventory{
+		// Neither zvol still exists, so both extents are strays.
+		Extents: []Extent{
+			{ID: 7, Name: "pvc-gone", Disk: "zvol/" + iscsiParent + "/pvc-gone"},
+			{ID: 8, Name: "pvc-also-gone", Disk: "zvol/" + iscsiParent + "/pvc-also-gone"},
+		},
+		Targets:       []Target{{ID: 3, Name: "csi-shared-cluster"}},
+		Mappings:      []TargetExtent{{ID: 11, TargetID: 3, ExtentID: 7}, {ID: 12, TargetID: 3, ExtentID: 8}},
+		SessionsKnown: false,
+		SessionsError: "connection reset",
+	}
+
+	c := findCandidate(t, Classify(iscsiConfig(), inv, nil), "pvc-gone")
+	if c.Class != ClassOther {
+		t.Fatalf("class = %s (%s), want other — unknown liveness is not idle", c.Class, c.Reason)
+	}
+	if !strings.Contains(c.Reason, "connection reset") {
+		t.Errorf("reason must carry the read failure, got %q", c.Reason)
+	}
+}
+
+// The NFS class has no session rung, so the one NAS-side signal it does have —
+// an export above the dataset — has to be a refusal: that export is not in the
+// delete plan and would keep serving the data this reclaim destroyed.
+func TestClassify_NFSDatasetUnderACoveringExportIsRefused(t *testing.T) {
+	inv := Inventory{
+		Datasets: []Dataset{{
+			ID: "storage/k8s/vols/pvc-nfs", Name: "pvc-nfs", Type: "FILESYSTEM",
+			Mountpoint: "/mnt/storage/k8s/vols/pvc-nfs",
+		}},
+		Shares:        []NFSShare{{ID: 5, Path: "/mnt/storage/k8s/vols"}},
+		SessionsKnown: true,
+	}
+
+	c := findCandidate(t, Classify(nfsConfig(), inv, nil), "pvc-nfs")
+	if c.Class != ClassOther {
+		t.Fatalf("class = %s (%s), want other", c.Class, c.Reason)
+	}
+	if !strings.Contains(c.Reason, "/mnt/storage/k8s/vols") {
+		t.Errorf("the refusal must name the export that covers it: %q", c.Reason)
+	}
+}
+
 func planNames(c Candidate) []string {
 	out := make([]string, 0, len(c.Objects))
 	for _, o := range c.Objects {
