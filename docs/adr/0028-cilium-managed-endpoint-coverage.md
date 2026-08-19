@@ -130,14 +130,16 @@ separate decision to make.
 
 ## Consequences
 
-**A landed record is edited, narrowly and deliberately.** Records here are
-append-only, and 0017 itself pays that cost explicitly: "Anyone reading it for
-the rollout gets a sequence that cannot be executed, and only reaches this
-correction by following the reference forward." Leaving step 8 unmarked repeats
-exactly that failure on a step whose execution is now unsafe. The edit to 0017
-is therefore confined to a status marker and a forward reference — no finding,
-no argument and no conclusion in it is rewritten — which is the smallest change
-that removes the trap rather than documenting it.
+**0017 is extended, not edited.** Records here are append-only, and 0017 itself
+pays that cost explicitly: "Anyone reading it for the rollout gets a sequence
+that cannot be executed, and only reaches this correction by following the
+reference forward." Leaving step 8 unmarked repeats exactly that failure on a
+step whose execution is now unsafe — so 0017 gains an appended correction
+section carrying the block and the forward reference, and not one existing line
+of it changes. Its step 8 still reads as it did when it landed. That is the
+same shape ADR 0022 was extended in, and it removes the trap without relaxing
+the rule to do it: a reader who stops at step 8 has not yet reached the
+correction, which is the residual cost append-only always carries.
 
 **Coverage becomes a number someone has to look at.** `cluster status` reports
 it as a warning, not a failure, because partial coverage is the expected state

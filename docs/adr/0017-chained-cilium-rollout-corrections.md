@@ -1,8 +1,6 @@
 # ADR: Chained Cilium — corrections found when implementation started
 
-Status: accepted; **decision 1 step 8 is blocked** — see
-[cilium-managed-endpoint-coverage](0028-cilium-managed-endpoint-coverage.md).
-Extends
+Status: accepted. Extends
 [networkpolicy-enforcement-via-chained-cilium](0012-networkpolicy-enforcement-via-chained-cilium.md)
 and [chained-cilium-rollout-sizing-and-proof](0013-chained-cilium-rollout-sizing-and-proof.md).
 The choice of chained Cilium is settled in the first and is not reopened. The
@@ -196,12 +194,7 @@ and remain the substance of the work. Its steps 6 through 11 are replaced by:
 - **7. Turn daemon-wide audit off, once.** A no-op while every namespace
   carries an allow-all pair, and the first end-to-end proof that the
   enforcement path works. Rollback is the same single flag.
-- **8. Isolate one namespace at a time with `enforce: true`.** **BLOCKED** —
-  a namespace whose pods predate the agent has no CiliumEndpoint and no
-  identity, so opting it in protects nothing today and starts enforcing an
-  unverified allow-set at the first pod restart. 0028 adds the precondition:
-  `platformctl cluster netpol coverage -n <ns>` must report 100% before the
-  flag is set. The ordering below is unchanged. `jdwlabs-non`
+- **8. Isolate one namespace at a time with `enforce: true`.** `jdwlabs-non`
   first, then `dotablaze-tech-non`, then the two `prd` namespaces, then the
   two `ci` runner namespaces. Rollback is reverting one line of
   `tenant.yaml`. `kube-system` is a platform-tier namespace and carries
@@ -277,3 +270,20 @@ race now fails a required check instead of landing.
 that record already recorded. A `Pending` agent on one node still means that
 node silently enforces nothing, and the increased headroom on
 `talos-k3y-y3e` reduces the odds without changing the failure mode.
+
+## Correction — decision 1 step 8 is blocked pending endpoint coverage
+
+Appended after this record landed. Nothing above is amended, which is the
+append-only cost the consequences above already describe being paid again.
+
+Decision 1's **step 8** — "Isolate one namespace at a time with `enforce:
+true`" — must not be executed as written. A namespace whose pods predate the
+`cilium-agent` on their node has no `CiliumEndpoint` and no security identity,
+so opting it in protects nothing today and begins enforcing an unverified
+allow-set at the first pod restart, with no event marking the transition.
+
+The step's ordering is unchanged and still correct. What is added is a
+per-namespace precondition: `platformctl cluster netpol coverage -n <ns>` must
+report 100% before `enforce: true` is set on that namespace. The measurement,
+the precondition and the sequenced remediation are in
+[cilium-managed-endpoint-coverage](0028-cilium-managed-endpoint-coverage.md).

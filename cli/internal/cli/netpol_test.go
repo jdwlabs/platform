@@ -158,3 +158,31 @@ func TestNetpolCoverage_JSONEmitsOneEventPerGroupPlusASummary(t *testing.T) {
 		t.Errorf("summary must carry the incomplete-coverage verdict:\n%s", out)
 	}
 }
+
+// The per-namespace step gate in OPERATIONS.md advances on this command's exit
+// code, so an empty scope must not be reported as complete: 0/0 would round to
+// 100% and exit 0, and a typo mid-rollout would read as enrolled.
+func TestNetpolCoverage_RefusesANamespaceWithNoPodsInsteadOfReportingFullCoverage(t *testing.T) {
+	out, err := runNetpol(t, "cluster", "netpol", "coverage", "-n", "does-not-exist")
+	if err == nil {
+		t.Fatalf("an empty namespace scope must not exit zero:\n%s", out)
+	}
+	if !strings.Contains(out, "namespace does-not-exist has no pod-network pods to cover") {
+		t.Errorf("refusal must name the empty scope:\n%s", out)
+	}
+	if strings.Contains(out, "100%") {
+		t.Errorf("an undefined coverage must never be printed as 100%%:\n%s", out)
+	}
+}
+
+// --min-coverage 0 waives the threshold, not the empty-scope refusal: the gate
+// is that the namespace was measured at all.
+func TestNetpolCoverage_EmptyNamespaceRefusalSurvivesMinCoverageZero(t *testing.T) {
+	out, err := runNetpol(t, "cluster", "netpol", "coverage", "-n", "does-not-exist", "--min-coverage", "0")
+	if err == nil {
+		t.Fatalf("--min-coverage 0 must not turn an unmeasurable scope into a pass:\n%s", out)
+	}
+	if !strings.Contains(out, "has no pod-network pods to cover") {
+		t.Errorf("missing refusal:\n%s", out)
+	}
+}
