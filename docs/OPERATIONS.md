@@ -841,11 +841,14 @@ extent, a target or the mapping between them and so never transferred to iSCSI.
 The credential comes from `PLATFORMCTL_TRUENAS_API_KEY`, and it should be a
 throwaway read-only key minted in the TrueNAS UI. The key inside the
 `democratic-csi` driver-config Secret is **not** used unless
-`--truenas-use-csi-api-key` says so: an authentication attempt against it is a
-mutation, four rejected ones invalidated it and took provisioning, deletion,
-expansion and snapshots down on both classes, and ADR-0025 records this
-transport rejecting it outright. A rejection prints help saying not to re-run —
-follow it.
+`--truenas-use-csi-api-key` says so. An authentication attempt against it is a
+mutation with a cluster-wide blast radius: four rejected ones invalidated it and
+took provisioning, deletion, expansion and snapshots down on both classes until
+it was regenerated in the UI (ADR-0025). That is the whole reason it is opt-in,
+and it holds whether or not the attempt would succeed — ADR-0025's
+"cannot authenticate over WebSocket" finding describes the key as it was before
+that incident, not the regenerated one. A rejection prints help saying not to
+re-run — follow it.
 
 ```
 # what is out there, and what the tool thinks of it

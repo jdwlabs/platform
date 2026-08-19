@@ -123,12 +123,7 @@ func Dial(ctx context.Context, host string, apiKey string, tlsOpts TLSOptions) (
 	var ok bool
 	if err := c.Call(ctx, "auth.login_with_api_key", []any{apiKey}, &ok); err != nil {
 		_ = c.Close()
-		// The middleware answers a bad key with an error as readily as with
-		// false, so a refusal from the method itself is a rejection and
-		// carries the same "do not repeat" meaning. A transport failure does
-		// not — nothing there reached the key.
-		var rpcErr *rpcError
-		if errors.As(err, &rpcErr) {
+		if isCredentialRejection(err) {
 			return nil, fmt.Errorf("%w: %w", ErrAPIKeyRejected, err)
 		}
 		return nil, fmt.Errorf("authenticate to TrueNAS: %w", err)
@@ -190,6 +185,38 @@ func (c *WSClient) Call(ctx context.Context, method string, params []any, out an
 		}
 		return nil
 	}
+}
+
+// Standard JSON-RPC codes for a request the server rejected before dispatching
+// it. The middleware returns these for a renamed or removed method, which is
+// exactly what a future NAS release could do to auth.login_with_api_key.
+const (
+	rpcParseError     = -32700
+	rpcInvalidRequest = -32600
+	rpcMethodNotFound = -32601
+	rpcInvalidParams  = -32602
+)
+
+// isCredentialRejection reports whether an error from the login call means the
+// key itself was refused.
+//
+// The middleware answers a bad key with an error as readily as with false, so a
+// refusal from the method carries the same "do not repeat" meaning as a false.
+// The codes above do not: they say the request never reached a point where a
+// credential was evaluated, so nothing was spent and re-running is fine. The
+// sentinel's whole value is that distinction — a "do not re-run, you are
+// eroding the credential" warning printed for a renamed method is noise that
+// teaches an operator to ignore the real one.
+func isCredentialRejection(err error) bool {
+	var rpcErr *rpcError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	switch rpcErr.Code {
+	case rpcParseError, rpcInvalidRequest, rpcMethodNotFound, rpcInvalidParams:
+		return false
+	}
+	return true
 }
 
 func (c *WSClient) Close() error {

@@ -330,3 +330,29 @@ func TestReclaimer_ReReadsThePVListOncePerRun(t *testing.T) {
 		t.Errorf("listed PersistentVolumes %d times across 3 candidates, want 1", lists)
 	}
 }
+
+// One list per batch is the point, but an --all-orphaned run over a large NAS
+// takes minutes and this is the branch with the higher uncertainty: nothing
+// named the candidate, so there is no per-candidate Get to fall back on.
+func TestReclaimer_PVListIsReReadOnceTheCacheAges(t *testing.T) {
+	kube := k8sfake.NewSimpleClientset()
+	var lists int
+	kube.PrependReactor("list", "persistentvolumes", func(k8stesting.Action) (bool, runtime.Object, error) {
+		lists++
+		return false, nil, nil
+	})
+
+	r := NewReclaimer(reclaimFixture(), kube)
+	r.refsMaxAge = 0
+
+	for _, name := range []string{"pvc-a", "pvc-b"} {
+		if err := r.Run(context.Background(), Candidate{
+			Name: name, Tokens: CandidateTokens{Objects: []string{name}},
+		}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if lists != 2 {
+		t.Errorf("listed PersistentVolumes %d times, want one per candidate once the cache has aged out", lists)
+	}
+}

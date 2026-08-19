@@ -109,3 +109,18 @@ func TestDriverConfig_StrayTargetDetectionNeedsBothAffixes(t *testing.T) {
 		t.Errorf("the NFS class has no targets to scan")
 	}
 }
+
+// The opt-in says which credential to use, not that one exists. A driver-config
+// Secret that rendered with an empty apiKey would otherwise be dialled with,
+// sending "" — an authentication attempt like any other.
+func TestLoadDriverConfigs_RefusesAnEmptyResolvedCredential(t *testing.T) {
+	kube := k8sfake.NewSimpleClientset(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: nfsConfigSecret, Namespace: DriverNamespace},
+		Data: map[string][]byte{configSecretKey: []byte(
+			"httpConnection:\n  host: nas.lan\n  apiKey: \"\"\nzfs:\n  datasetParentName: storage/k8s/vols\n")},
+	})
+
+	if _, err := LoadDriverConfigs(context.Background(), kube, []string{ClassNFS}, true); !errors.Is(err, ErrNoAPIKey) {
+		t.Fatalf("err = %v, want ErrNoAPIKey even with the opt-in", err)
+	}
+}
