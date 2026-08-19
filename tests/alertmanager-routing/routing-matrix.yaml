@@ -1,0 +1,160 @@
+# Expected routing outcomes, resolved by Alertmanager's own engine in run.sh.
+#
+# This file is the citation for every claim about where an alert goes. Before
+# it existed the claims rested on a matrix run by hand, which is how the same
+# wrong one was written into the docs twice: nothing re-ran it, so nothing
+# noticed when the tree moved underneath it.
+#
+# `receivers` is an ordered list because amtool prints receivers in route-tree
+# order. A case is a statement about the tree's *shape*, not only its outcome:
+# the silenced-alertname cases below fail if the 'null' routes stop being
+# first, and the critical cases fail if `continue: true` stops mirroring.
+#
+# Adding a route means adding the cases that pin its position relative to its
+# siblings. A route with no case here is a route nothing defends.
+cases:
+  # The four cases that found the bug. A deliberately-silenced alertname is
+  # silenced whatever else it is labelled with — which is only true while the
+  # 'null' routes sit above every notifying route. Each of these resolved to a
+  # notifying receiver when they sat below the tenant routes.
+  - name: Watchdog carrying a tenant label is still silenced
+    labels:
+      alertname: Watchdog
+      severity: none
+      tenant: jdwlabs
+    receivers: ['null']
+
+  - name: InfoInhibitor carrying a tenant label is still silenced
+    labels:
+      alertname: InfoInhibitor
+      severity: info
+      tenant: dotablaze-tech
+    receivers: ['null']
+
+  - name: Watchdog escalated to critical is still silenced
+    labels:
+      alertname: Watchdog
+      severity: critical
+    receivers: ['null']
+
+  - name: InfoInhibitor at warning is still silenced
+    labels:
+      alertname: InfoInhibitor
+      severity: warning
+    receivers: ['null']
+
+  - name: Watchdog at its own severity is silenced
+    labels:
+      alertname: Watchdog
+      severity: none
+    receivers: ['null']
+
+  - name: InfoInhibitor at its own severity is silenced
+    labels:
+      alertname: InfoInhibitor
+      severity: info
+    receivers: ['null']
+
+  # `continue: true` on the ai-sre route resumes at the next *sibling*, never
+  # at the parent receiver. An untenanted critical therefore reaches a human
+  # only because the critical route at the bottom of the list also matches it.
+  # Flip that flag to false, or delete that route, and these go dark.
+  - name: untenanted critical fans out to the agent and to humans
+    labels:
+      alertname: HardwareHostUnreachable
+      severity: critical
+    receivers: ['ai-sre', 'discord']
+
+  - name: untenanted critical from the storage rules fans out both ways
+    labels:
+      alertname: TrueNASMetricsStale
+      severity: critical
+    receivers: ['ai-sre', 'discord']
+
+  # The relay's dead-man's switches are critical precisely so the alert saying
+  # the relay is dark does not go only to the dark relay.
+  - name: relay dead-mans-switch reaches humans, not only the relay
+    labels:
+      alertname: AiSreRelayProcessingNothing
+      severity: critical
+    receivers: ['ai-sre', 'discord']
+
+  - name: relay metrics-target-down reaches humans, not only the relay
+    labels:
+      alertname: AiSreRelayMetricsTargetDown
+      severity: critical
+    receivers: ['ai-sre', 'discord']
+
+  # Warning is deliberately agent-only for untenanted alerts: the chart's
+  # warning population would bury the criticals in the channel the relay posts
+  # investigations to. These cases are what stops that decision being widened
+  # by accident.
+  - name: untenanted warning reaches the agent only
+    labels:
+      alertname: KubePodNotReady
+      severity: warning
+    receivers: ['ai-sre']
+
+  - name: untenanted warning from the workload rules reaches the agent only
+    labels:
+      alertname: KubeJobFailed
+      severity: warning
+    receivers: ['ai-sre']
+
+  - name: relay warning that implies a live relay reaches the agent only
+    labels:
+      alertname: AiSreRelayInvestigatingNothing
+      severity: warning
+    receivers: ['ai-sre']
+
+  # Tenant routes own their tenant's alerts at every severity, which is what
+  # keeps them free to point at a per-tenant channel later.
+  - name: jdwlabs warning reaches the agent and the tenant route
+    labels:
+      alertname: JdwlabsResourceQuotaNearLimit
+      severity: warning
+      tenant: jdwlabs
+    receivers: ['ai-sre', 'discord']
+
+  - name: dotablaze-tech warning reaches the agent and the tenant route
+    labels:
+      alertname: DotablazeTechResourceQuotaNearLimit
+      severity: warning
+      tenant: dotablaze-tech
+    receivers: ['ai-sre', 'discord']
+
+  - name: jdwlabs critical reaches the agent and the tenant route
+    labels:
+      alertname: JdwlabsPodCrashLooping
+      severity: critical
+      tenant: jdwlabs
+    receivers: ['ai-sre', 'discord']
+
+  # Below critical/warning the tenant route is the only one that matches, so
+  # the tenant alert still reaches a human without the agent mirror.
+  - name: jdwlabs info reaches the tenant route only
+    labels:
+      alertname: JdwlabsDeploymentUpdated
+      severity: info
+      tenant: jdwlabs
+    receivers: ['discord']
+
+  - name: dotablaze-tech info reaches the tenant route only
+    labels:
+      alertname: DotablazeTechDeploymentUpdated
+      severity: info
+      tenant: dotablaze-tech
+    receivers: ['discord']
+
+  # No child route matches, so the parent receiver is used. This is the only
+  # path on which the parent's `receiver: 'discord'` is ever reached.
+  - name: untenanted info falls through to the parent receiver
+    labels:
+      alertname: SomeInformationalAlert
+      severity: info
+    receivers: ['discord']
+
+  - name: alert with no severity label falls through to the parent receiver
+    labels:
+      alertname: SomeUnlabelledAlert
+    receivers: ['discord']
