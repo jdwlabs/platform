@@ -383,9 +383,12 @@ metadata:
     argocd.argoproj.io/hook: PostSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
-  # One attempt inside the deadline: the folder wait is already the retry, and
-  # a second attempt would only re-run it after the deadline has expired.
-  backoffLimit: 0
+  # One retry, and the waits below are sized so both attempts fit inside the
+  # deadline (2 x ~400s). Without it a pod-level failure -- an image pull, an
+  # eviction -- permanently fails the grant, and a failed sync is not
+  # re-attempted for the same revision, so the folder would stay open until the
+  # next commit to this tenant.
+  backoffLimit: 1
   activeDeadlineSeconds: 900
   ttlSecondsAfterFinished: 300
   template:
@@ -442,7 +445,7 @@ spec:
               # runs after that Job succeeded, which already proved Grafana
               # answers. This covers a restart in between, not a cold boot.
               i=0
-              while [ "$i" -lt 60 ]; do
+              while [ "$i" -lt 30 ]; do
                 code=$(curl -sS -o /dev/null -w '%{http_code}' "$API/health" || echo 000)
                 [ "$code" = "200" ] && break
                 i=$((i + 1))
@@ -485,7 +488,7 @@ spec:
               # are the same observation without asking.
               i=0
               code=000
-              while [ "$i" -lt 60 ]; do
+              while [ "$i" -lt 50 ]; do
                 code=$(curl -sS -o /dev/null -w '%{http_code}' \
                   -u "$GF_USER:$GF_PASS" "$API/folders/$FOLDER_UID" || echo 000)
                 [ "$code" = "200" ] && break

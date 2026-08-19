@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -16,6 +17,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
+	kubefake "k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/jdwlabs/platform/internal/k8s"
 )
@@ -128,23 +132,43 @@ func argoApp(name string) *unstructured.Unstructured {
 	}}
 }
 
-// refreshedApps names the Applications carrying a hard-refresh annotation,
-// which is how a requested re-sync is observable in the fake.
+// refreshedApps names the Applications carrying a hard-refresh annotation, and
+// syncedApps those carrying a sync operation. They are deliberately separate:
+// a refresh re-runs the comparison, and an Application that compares Synced
+// runs no hooks — so asserting "a patch was sent" is exactly how a folder-RBAC
+// hook that never executes passes a test suite.
 func refreshedApps(t *testing.T, dc dynamic.Interface) []string {
 	t.Helper()
-	gvr := schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
-	list, err := dc.Resource(gvr).Namespace("argocd").List(context.Background(), metav1.ListOptions{})
-	if err != nil {
-		t.Fatalf("listing applications: %v", err)
-	}
 	var out []string
-	for _, app := range list.Items {
+	for _, app := range listApps(t, dc) {
 		if app.GetAnnotations()["argocd.argoproj.io/refresh"] != "" {
 			out = append(out, app.GetName())
 		}
 	}
 	sort.Strings(out)
 	return out
+}
+
+func syncedApps(t *testing.T, dc dynamic.Interface) []string {
+	t.Helper()
+	var out []string
+	for _, app := range listApps(t, dc) {
+		if _, found, _ := unstructured.NestedMap(app.Object, "operation", "sync"); found {
+			out = append(out, app.GetName())
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func listApps(t *testing.T, dc dynamic.Interface) []unstructured.Unstructured {
+	t.Helper()
+	gvr := schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
+	list, err := dc.Resource(gvr).Namespace("argocd").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("listing applications: %v", err)
+	}
+	return list.Items
 }
 
 func runGitSync(t *testing.T, stub *grafanaStub, args ...string) (string, error) {
@@ -155,14 +179,19 @@ func runGitSync(t *testing.T, stub *grafanaStub, args ...string) (string, error)
 
 func runGitSyncWithCluster(t *testing.T, stub *grafanaStub, args ...string) (string, dynamic.Interface, error) {
 	t.Helper()
+	return runGitSyncWithKube(t, stub, k8s.NewFake(grafanaKubeObjects()...), args...)
+}
+
+func runGitSyncWithKube(t *testing.T, stub *grafanaStub, kc kubernetes.Interface, args ...string) (string, dynamic.Interface, error) {
+	t.Helper()
 	srv := stub.start(t)
-	kc := k8s.NewFake(grafanaKubeObjects()...)
 	dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{
 			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}: "ApplicationList",
 		},
-		argoApp("platform-grafana"), argoApp("governance-jdwlabs"), argoApp("governance-dotablaze-tech"),
+		argoApp("platform-grafana"), argoApp("governance-jdwlabs"),
+		argoApp("governance-dotablaze-tech"), argoApp("governance-jdwillmsen"),
 	)
 	root := NewRootForTest(kc, dc)
 	var out bytes.Buffer
@@ -636,15 +665,18 @@ func TestGitSyncRecreate_ResyncsTheTenantEnvelopeThatOwnsTheFolder(t *testing.T)
 	if err != nil {
 		t.Fatalf("unexpected error: %v\n%s", err, out)
 	}
-	// Refreshing only platform-grafana recreates the folder and stops there,
-	// which is the reopened boundary with nothing reporting it.
-	got := refreshedApps(t, dc)
-	want := []string{"governance-jdwlabs", "platform-grafana"}
-	if strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Errorf("refreshed %v, want %v\n%s", got, want, out)
+	// The envelope needs a sync operation, not a refresh: nothing about
+	// governance-jdwlabs changed, so it compares Synced and a refresh runs no
+	// hooks — the folder would keep the inherited grants indefinitely while the
+	// command reported success.
+	if got := syncedApps(t, dc); strings.Join(got, " ") != "governance-jdwlabs" {
+		t.Errorf("synced %v, want governance-jdwlabs\n%s", got, out)
 	}
-	if !strings.Contains(out, "envelopes: requested for governance-jdwlabs") {
-		t.Errorf("the envelope re-sync must be reported, not inferred:\n%s", out)
+	if got := refreshedApps(t, dc); strings.Join(got, " ") != "platform-grafana" {
+		t.Errorf("refreshed %v, want only platform-grafana — a refresh is not a sync\n%s", got, out)
+	}
+	if !strings.Contains(out, "envelopes: sync requested for governance-jdwlabs") {
+		t.Errorf("the envelope sync must be reported, not inferred:\n%s", out)
 	}
 }
 
@@ -654,6 +686,9 @@ func TestGitSyncRecreate_UnclaimedRepositoryResyncsNoEnvelope(t *testing.T) {
 		"--repository", "dotablaze-tech-dashboards", "--confirm")
 	if err != nil {
 		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if got := syncedApps(t, dc); len(got) != 0 {
+		t.Errorf("no tenant claims this folder, so no envelope should be synced: %v\n%s", got, out)
 	}
 	if got := refreshedApps(t, dc); strings.Join(got, " ") != "platform-grafana" {
 		t.Errorf("refreshed %v, want only platform-grafana\n%s", got, out)
@@ -676,6 +711,9 @@ func TestGitSyncRecreate_DryRunNamesTheEnvelopeItWouldResync(t *testing.T) {
 	if got := refreshedApps(t, dc); len(got) != 0 {
 		t.Fatalf("a dry run must mutate nothing, refreshed %v", got)
 	}
+	if got := syncedApps(t, dc); len(got) != 0 {
+		t.Fatalf("a dry run must mutate nothing, synced %v", got)
+	}
 }
 
 func TestGitSyncRecreate_WithConnectionResyncsEveryClaimedEnvelope(t *testing.T) {
@@ -686,9 +724,131 @@ func TestGitSyncRecreate_WithConnectionResyncsEveryClaimedEnvelope(t *testing.T)
 		t.Fatalf("unexpected error: %v\n%s", err, out)
 	}
 	// The cascade deletes siblings nobody named, so it owes their envelopes too.
-	got := refreshedApps(t, dc)
-	want := []string{"governance-jdwlabs", "platform-grafana"}
-	if strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Errorf("refreshed %v, want %v\n%s", got, want, out)
+	if got := syncedApps(t, dc); strings.Join(got, " ") != "governance-jdwlabs" {
+		t.Errorf("synced %v, want governance-jdwlabs\n%s", got, out)
+	}
+}
+
+// unreadableClaims models the supported "reach Grafana directly, no usable
+// kubeconfig" mode, where the ownership lookup is the thing that cannot run.
+func unreadableClaims(t *testing.T) kubernetes.Interface {
+	t.Helper()
+	kc := kubefake.NewSimpleClientset(grafanaKubeObjects()...)
+	kc.PrependReactor("list", "configmaps",
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("configmaps is forbidden")
+		})
+	return kc
+}
+
+func TestGitSyncDelete_UnreadableClaimRefusesLikeAKnownOne(t *testing.T) {
+	// Unknown must not be more permissive than known: treating an unreadable
+	// cluster as "nothing is claimed" deletes exactly the repositories the
+	// known-claim branch refuses.
+	stub := &grafanaStub{repositories: sharedConnectionRepositories, connections: healthyConnections, dashboards: noDashboards}
+	out, _, err := runGitSyncWithKube(t, stub, unreadableClaims(t), "gitsync", "delete",
+		"--kind", "repository", "--name", "jdwlabs-dashboards", "--confirm")
+	if err == nil {
+		t.Fatalf("an unreadable claim must refuse\n%s", out)
+	}
+	if !strings.Contains(out, "--accept-open-folder") {
+		t.Errorf("the same escape as a known claim must be offered:\n%s", out)
+	}
+	if len(stub.deleted) != 0 {
+		t.Fatalf("nothing should have been deleted: %v", stub.deleted)
+	}
+}
+
+func TestGitSyncDelete_UnreadableClaimAcceptedStillStatesTheObligation(t *testing.T) {
+	stub := &grafanaStub{repositories: sharedConnectionRepositories, connections: healthyConnections, dashboards: noDashboards}
+	out, _, err := runGitSyncWithKube(t, stub, unreadableClaims(t), "gitsync", "delete",
+		"--kind", "repository", "--name", "jdwlabs-dashboards", "--confirm", "--accept-open-folder")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if len(stub.deleted) != 1 {
+		t.Fatalf("deleted = %v", stub.deleted)
+	}
+	if !strings.Contains(out, "could not be checked") || !strings.Contains(out, "argocd app sync") {
+		t.Errorf("overriding must still say what may now be owed:\n%s", out)
+	}
+}
+
+func TestGitSyncRecreate_UnreadableClaimRefusesRatherThanSyncingBlind(t *testing.T) {
+	// recreate's claim to being the safe path is that it syncs the envelopes
+	// itself, which it cannot do for claims it could not read.
+	stub := &grafanaStub{repositories: sharedConnectionRepositories, connections: healthyConnections, dashboards: noDashboards}
+	out, _, err := runGitSyncWithKube(t, stub, unreadableClaims(t), "gitsync", "recreate",
+		"--repository", "jdwlabs-dashboards", "--confirm")
+	if err == nil {
+		t.Fatalf("an unreadable claim must refuse\n%s", out)
+	}
+	if len(stub.deleted) != 0 {
+		t.Fatalf("nothing should have been deleted: %v", stub.deleted)
+	}
+}
+
+func TestGitSyncRecreate_NoSyncIsNotHeldToTheClaimCheck(t *testing.T) {
+	// --no-sync is already the operator saying they will drive the syncs.
+	stub := &grafanaStub{repositories: sharedConnectionRepositories, connections: healthyConnections, dashboards: noDashboards}
+	out, _, err := runGitSyncWithKube(t, stub, unreadableClaims(t), "gitsync", "recreate",
+		"--repository", "jdwlabs-dashboards", "--confirm", "--no-sync")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if len(stub.deleted) != 1 {
+		t.Fatalf("deleted = %v", stub.deleted)
+	}
+}
+
+func TestGitSyncRecreate_EveryClaimantOfAFolderIsSynced(t *testing.T) {
+	// Two tenants claiming one folder is rejected in git by
+	// tools/check-gitsync-tenant-folders.py, but the cluster passes through it
+	// while one drops the key and another adds it. Picking one arbitrarily is
+	// how the wrong envelope gets synced; syncing both also reconciles the
+	// stale claimant, whose ConfigMap loses the key on its own next sync.
+	kc := kubefake.NewSimpleClientset(append(grafanaKubeObjects(),
+		&corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "tenant-jdwillmsen-grafana-observability",
+				Namespace: "monitoring",
+				Labels:    map[string]string{"platform.jdwlabs.io/tenant": "jdwillmsen"},
+			},
+			Data: map[string]string{"gitsync-folder": "jdwlabs-dashboards"},
+		})...)
+	stub := &grafanaStub{repositories: sharedConnectionRepositories, connections: healthyConnections, dashboards: noDashboards}
+	out, dc, err := runGitSyncWithKube(t, stub, kc, "gitsync", "recreate",
+		"--repository", "jdwlabs-dashboards", "--confirm")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if got := syncedApps(t, dc); strings.Join(got, " ") != "governance-jdwillmsen governance-jdwlabs" {
+		t.Errorf("synced %v, want both claimants\n%s", got, out)
+	}
+	if !strings.Contains(out, "governance-jdwillmsen") || !strings.Contains(out, "governance-jdwlabs") {
+		t.Errorf("both claimants must be named:\n%s", out)
+	}
+}
+
+func TestGitSyncDelete_AmbiguousClaimNamesEveryTenant(t *testing.T) {
+	kc := kubefake.NewSimpleClientset(append(grafanaKubeObjects(),
+		&corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "tenant-jdwillmsen-grafana-observability",
+				Namespace: "monitoring",
+				Labels:    map[string]string{"platform.jdwlabs.io/tenant": "jdwillmsen"},
+			},
+			Data: map[string]string{"gitsync-folder": "jdwlabs-dashboards"},
+		})...)
+	stub := &grafanaStub{repositories: sharedConnectionRepositories, connections: healthyConnections, dashboards: noDashboards}
+	out, _, err := runGitSyncWithKube(t, stub, kc, "gitsync", "delete",
+		"--kind", "repository", "--name", "jdwlabs-dashboards", "--confirm")
+	if err == nil {
+		t.Fatalf("expected a refusal\n%s", out)
+	}
+	for _, tenant := range []string{"jdwlabs", "jdwillmsen"} {
+		if !strings.Contains(out, governanceAppPrefix+tenant) {
+			t.Errorf("the refusal must name %s, not one claimant arbitrarily:\n%s", tenant, out)
+		}
 	}
 }
