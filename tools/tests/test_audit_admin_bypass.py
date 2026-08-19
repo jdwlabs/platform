@@ -220,34 +220,85 @@ class LatestCheckConclusionsTests(unittest.TestCase):
         self.assertEqual(audit.latest_check_conclusions([]), {})
 
 
-class UnsatisfiedContextsTests(unittest.TestCase):
+class SplitRequiredTests(unittest.TestCase):
     def test_success_satisfies(self):
-        got = audit.unsatisfied_contexts({"go-lint"}, {"go-lint": "success"})
-        self.assertEqual(got, [])
+        self.assertEqual(audit.split_required({"go-lint"}, {"go-lint": "success"}), ([], []))
 
     def test_neutral_and_skipped_satisfy(self):
         # A path-filtered job reports `skipped` and GitHub treats the
         # requirement as met; grading it as a failure would flag every
         # docs-only merge.
-        got = audit.unsatisfied_contexts(
+        got = audit.split_required(
             {"go-lint", "helm-lint"}, {"go-lint": "neutral", "helm-lint": "skipped"}
         )
-        self.assertEqual(got, [])
+        self.assertEqual(got, ([], []))
 
-    def test_failure_is_unsatisfied(self):
-        got = audit.unsatisfied_contexts({"go-lint"}, {"go-lint": "failure"})
-        self.assertEqual(got, ["go-lint=failure"])
+    def test_failure_is_a_failed_context(self):
+        self.assertEqual(
+            audit.split_required({"go-lint"}, {"go-lint": "failure"}),
+            (["go-lint=failure"], []),
+        )
 
-    def test_absent_check_run_is_missing(self):
-        got = audit.unsatisfied_contexts({"signatures / signatures"}, {"go-lint": "success"})
-        self.assertEqual(got, ["signatures / signatures=MISSING"])
+    def test_still_running_check_is_a_failed_context(self):
+        self.assertEqual(
+            audit.split_required({"go-lint"}, {"go-lint": None}),
+            (["go-lint=INCOMPLETE"], []),
+        )
 
-    def test_still_running_check_is_unsatisfied(self):
-        got = audit.unsatisfied_contexts({"go-lint"}, {"go-lint": None})
-        self.assertEqual(got, ["go-lint=INCOMPLETE"])
+    def test_absent_check_run_is_absent_not_failed(self):
+        # The whole point of the split: absence is weaker evidence than a red
+        # check and has to be judged against the window, not on its own.
+        self.assertEqual(
+            audit.split_required({"signatures / signatures"}, {"go-lint": "success"}),
+            ([], ["signatures / signatures"]),
+        )
 
     def test_no_required_contexts_is_always_satisfied(self):
-        self.assertEqual(audit.unsatisfied_contexts(set(), {}), [])
+        self.assertEqual(audit.split_required(set(), {}), ([], []))
+
+
+class FirstProducedTests(unittest.TestCase):
+    def test_earliest_producer_wins(self):
+        prs = [
+            {"mergedAt": "2026-08-19T10:00:00Z", "conclusions": {"go-lint": "success"}},
+            {"mergedAt": "2026-08-17T10:00:00Z", "conclusions": {"go-lint": "success"}},
+        ]
+        self.assertEqual(audit.first_produced(prs), {"go-lint": "2026-08-17T10:00:00Z"})
+
+    def test_a_context_nobody_produced_is_absent_from_the_map(self):
+        prs = [{"mergedAt": "2026-08-19T10:00:00Z", "conclusions": {"go-lint": "success"}}]
+        self.assertNotIn("signatures / signatures", audit.first_produced(prs))
+
+    def test_a_failing_run_still_proves_the_check_was_running(self):
+        prs = [{"mergedAt": "2026-08-17T10:00:00Z", "conclusions": {"go-lint": "failure"}}]
+        self.assertEqual(audit.first_produced(prs), {"go-lint": "2026-08-17T10:00:00Z"})
+
+
+class JudgeAbsentTests(unittest.TestCase):
+    LATER = "2026-08-19T10:00:00Z"
+    EARLIER = "2026-08-17T10:00:00Z"
+
+    def test_absent_with_a_live_peer_is_reportable(self):
+        got = audit.judge_absent(["sig"], {"sig": self.EARLIER}, self.LATER)
+        self.assertEqual(got, (["sig=MISSING"], []))
+
+    def test_absent_with_no_peer_at_all_is_unevaluable(self):
+        # The check did not exist yet — 43 of 63 apps merges looked like this.
+        got = audit.judge_absent(["sig"], {}, self.LATER)
+        self.assertEqual(got, ([], ["sig"]))
+
+    def test_a_peer_that_only_merged_later_does_not_convict(self):
+        # A check introduced mid-window is produced by later PRs and none of
+        # the earlier ones; "present anywhere" would flag every merge before it.
+        got = audit.judge_absent(["sig"], {"sig": self.LATER}, self.EARLIER)
+        self.assertEqual(got, ([], ["sig"]))
+
+    def test_a_peer_merged_at_the_same_instant_does_not_convict(self):
+        got = audit.judge_absent(["sig"], {"sig": self.LATER}, self.LATER)
+        self.assertEqual(got, ([], ["sig"]))
+
+    def test_nothing_absent_is_nothing_judged(self):
+        self.assertEqual(audit.judge_absent([], {"sig": self.EARLIER}, self.LATER), ([], []))
 
 
 def _write_holds(body: str) -> Path:
@@ -304,9 +355,26 @@ AGENT_COMMIT = {
     "messageBody": "body\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 }
 
+GREEN = {"go-lint": "success", "signatures / signatures": "success"}
+MISSING_SIGNATURES = {"go-lint": "success"}
+RED = {"go-lint": "failure", "signatures / signatures": "success"}
 
-def _fake_gh(*, check_runs: list[dict], review_decision: str = "REVIEW_REQUIRED"):
-    """A gh_json stand-in for one repo with one merged, agent-authored PR."""
+
+def _pr_fixture(number, merged_at, conclusions, review="REVIEW_REQUIRED"):
+    return {
+        "number": number,
+        "title": f"pull request {number}",
+        "url": f"https://github.com/jdwlabs/platform/pull/{number}",
+        "mergedAt": merged_at,
+        "reviewDecision": review,
+        "baseRefName": "main",
+        "headRefOid": f"sha{number}",
+        "_conclusions": conclusions,
+    }
+
+
+def _fake_gh(prs: list[dict]):
+    """A gh_json stand-in for one repo and an arbitrary set of merged PRs."""
 
     def dispatch(args: list[str]) -> object:
         joined = " ".join(args)
@@ -315,21 +383,18 @@ def _fake_gh(*, check_runs: list[dict], review_decision: str = "REVIEW_REQUIRED"
         if "/rulesets/1" in joined:
             return _full_ruleset(count=1, contexts=("go-lint", "signatures / signatures"))
         if args[0] == "pr" and args[1] == "list":
-            return [
-                {
-                    "number": 299,
-                    "title": "a merged pull request",
-                    "url": "https://github.com/jdwlabs/platform/pull/299",
-                    "mergedAt": "2026-08-19T09:32:26Z",
-                    "reviewDecision": review_decision,
-                    "baseRefName": "main",
-                    "headRefOid": "a1aa2e82",
-                }
-            ]
+            return [{k: v for k, v in pr.items() if k != "_conclusions"} for pr in prs]
         if args[0] == "pr" and args[1] == "view":
             return {"commits": [AGENT_COMMIT]}
         if "/check-runs" in joined:
-            return {"check_runs": check_runs}
+            sha = joined.split("/commits/")[1].split("/")[0]
+            pr = next(p for p in prs if p["headRefOid"] == sha)
+            return {
+                "check_runs": [
+                    {"name": n, "conclusion": c, "started_at": pr["mergedAt"]}
+                    for n, c in pr["_conclusions"].items()
+                ]
+            }
         raise AssertionError(f"unexpected gh call: {joined}")
 
     return dispatch
@@ -344,23 +409,9 @@ def _run_main(gh, holds_body: str) -> tuple[int, str]:
     return code, buffer.getvalue()
 
 
-GREEN = [
-    {"name": "go-lint", "conclusion": "success", "started_at": "2026-08-19T04:56:30Z"},
-    {
-        "name": "signatures / signatures",
-        "conclusion": "success",
-        "started_at": "2026-08-19T04:56:30Z",
-    },
-]
-MISSING_SIGNATURES = GREEN[:1]
-RED = [
-    {"name": "go-lint", "conclusion": "failure", "started_at": "2026-08-19T04:56:30Z"},
-    {
-        "name": "signatures / signatures",
-        "conclusion": "success",
-        "started_at": "2026-08-19T04:56:30Z",
-    },
-]
+# A peer that merged earlier and produced every required check — this is what
+# turns an absent context on a later PR into evidence rather than a guess.
+PEER = _pr_fixture(300, "2026-08-17T10:00:00Z", GREEN)
 
 
 class VerdictTests(unittest.TestCase):
@@ -369,33 +420,69 @@ class VerdictTests(unittest.TestCase):
     def test_unapproved_but_fully_green_is_routine_and_exits_zero(self):
         # 187 of 200 merged PRs org-wide are unapproved. Failing on this shape
         # would fire on almost every merge and be filtered within a week.
-        code, out = _run_main(_fake_gh(check_runs=GREEN), "holds: []\n")
+        code, out = _run_main(
+            _fake_gh([PEER, _pr_fixture(299, "2026-08-19T10:00:00Z", GREEN)]), "holds: []\n"
+        )
         self.assertEqual(code, 0)
-        self.assertIn("routine-unapproved=1", out)
+        self.assertIn("routine-unapproved=2", out)
         self.assertIn("reportable=0", out)
 
     def test_approved_merge_is_not_counted_at_all(self):
         code, out = _run_main(
-            _fake_gh(check_runs=MISSING_SIGNATURES, review_decision="APPROVED"),
+            _fake_gh([
+                PEER,
+                _pr_fixture(299, "2026-08-19T10:00:00Z", MISSING_SIGNATURES, review="APPROVED"),
+            ]),
             "holds: []\n",
         )
         self.assertEqual(code, 0)
-        self.assertIn("routine-unapproved=0", out)
+        self.assertIn("reportable=0", out)
 
-    def test_a_missing_required_check_is_reportable_and_exits_one(self):
-        code, out = _run_main(_fake_gh(check_runs=MISSING_SIGNATURES), "holds: []\n")
+    def test_absent_context_with_a_live_peer_is_reportable(self):
+        # The real platform#299 shape: peers carry `signatures / signatures`,
+        # this merge does not.
+        code, out = _run_main(
+            _fake_gh([PEER, _pr_fixture(299, "2026-08-19T10:00:00Z", MISSING_SIGNATURES)]),
+            "holds: []\n",
+        )
         self.assertEqual(code, 1)
         self.assertIn("REPORTABLE", out)
         self.assertIn("signatures / signatures=MISSING", out)
 
-    def test_a_failed_required_check_is_reportable_and_exits_one(self):
-        code, out = _run_main(_fake_gh(check_runs=RED), "holds: []\n")
+    def test_absent_context_with_no_peer_is_exempt_and_reported_unevaluable(self):
+        # The check did not exist yet. Judging this as a bypass flagged 43 of
+        # 63 apps merges; it must be exempt, and it must not read as a pass.
+        code, out = _run_main(
+            _fake_gh([
+                _pr_fixture(298, "2026-08-17T10:00:00Z", MISSING_SIGNATURES),
+                _pr_fixture(299, "2026-08-19T10:00:00Z", MISSING_SIGNATURES),
+            ]),
+            "holds: []\n",
+        )
+        self.assertEqual(code, 0)
+        self.assertNotIn("REPORTABLE", out)
+        self.assertIn("unevaluable", out)
+        self.assertIn("signatures / signatures", out)
+
+    def test_a_single_pr_window_infers_nothing_from_absence(self):
+        code, out = _run_main(
+            _fake_gh([_pr_fixture(299, "2026-08-19T10:00:00Z", MISSING_SIGNATURES)]),
+            "holds: []\n",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("unevaluable", out)
+
+    def test_a_failed_required_check_is_reportable_regardless_of_peers(self):
+        # Present-and-red needs no liveness test: the check demonstrably ran.
+        code, out = _run_main(
+            _fake_gh([_pr_fixture(290, "2026-08-19T10:00:00Z", RED)]), "holds: []\n"
+        )
         self.assertEqual(code, 1)
         self.assertIn("go-lint=failure", out)
 
     def test_a_declared_hold_suppresses_the_finding(self):
         code, out = _run_main(
-            _fake_gh(check_runs=MISSING_SIGNATURES),
+            _fake_gh([PEER, _pr_fixture(299, "2026-08-19T10:00:00Z", MISSING_SIGNATURES)]),
             "holds:\n"
             "  - repo: platform\n"
             "    pr: 299\n"
@@ -408,7 +495,7 @@ class VerdictTests(unittest.TestCase):
     def test_a_hold_over_a_clean_merge_is_stale_and_fails(self):
         # An exception must not outlive the condition it excused.
         code, out = _run_main(
-            _fake_gh(check_runs=GREEN),
+            _fake_gh([PEER, _pr_fixture(299, "2026-08-19T10:00:00Z", GREEN)]),
             "holds:\n  - repo: platform\n    pr: 299\n    reason: no longer needed\n",
         )
         self.assertEqual(code, 1)
@@ -418,7 +505,7 @@ class VerdictTests(unittest.TestCase):
         # PR-number holds cannot expire on their own, so one whose PR the
         # window never fetched is simply not evaluated rather than stale.
         code, out = _run_main(
-            _fake_gh(check_runs=GREEN),
+            _fake_gh([PEER, _pr_fixture(299, "2026-08-19T10:00:00Z", GREEN)]),
             "holds:\n  - repo: apps\n    pr: 1\n    reason: long gone\n",
         )
         self.assertEqual(code, 0)
