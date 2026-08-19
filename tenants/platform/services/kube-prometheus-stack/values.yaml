@@ -212,6 +212,19 @@ prometheus-node-exporter:
   # volume's superblock is observable, and what storage-integrity's read-only
   # rule reads. The per-pod bind mounts under pods/ stay excluded because they
   # share that same superblock and would only duplicate it.
+  #
+  # This also newly exposes NFS-backed globalmounts to the filesystem
+  # collector, which matters because it is a new interaction inside the exact
+  # failure mode these rules are about: when the NAS is unreachable those
+  # mounts stat-timeout on every scrape. That is bounded rather than hanging —
+  # collector.filesystem.mount-timeout defaults to 5s and the collector marks
+  # the mount as errored — but a NAS outage now costs node-exporter a stall it
+  # did not previously take. Lower the timeout before disabling the export if
+  # that ever becomes the problem.
+  #
+  # Cosmetic divergence to expect: the chart's bundled node dashboards query
+  # node_filesystem_* with hardcoded selectors and no fsSelector, so their
+  # panels list the globalmount rows that the alerts below deliberately skip.
   extraArgs:
     - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/containerd/.+|var/lib/docker/.+|var/lib/kubelet/pods/.+)($|/)
     - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs|erofs)$

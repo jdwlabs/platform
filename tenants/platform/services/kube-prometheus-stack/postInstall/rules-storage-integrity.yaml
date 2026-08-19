@@ -11,10 +11,14 @@ spec:
     # its journal and latched the mount read-only, and the first anyone knew was
     # the application crashlooping on EROFS.
     #
-    # Both rules are deliberately cluster-wide. Neither underlying metric even
-    # carries a namespace — they are node- and kubelet-level — and any tenant's
-    # volume can latch, including tenants that define no services of their own
-    # and so have nothing else watching them.
+    # Both rules are deliberately cluster-wide, and cannot be anything else.
+    # Each series does carry a namespace label, but it is the exporter's own —
+    # monitoring for node-exporter, kube-system for the kubelet metrics — never
+    # the namespace of the workload whose volume is affected. node-exporter
+    # reads a mount table and kubelet counts per-driver calls; neither knows
+    # which pod is behind them. So a namespace matcher here would not narrow
+    # these alerts, it would silently select nothing, and a tenant-scoped rule
+    # cannot substitute for them either.
     - name: storage-integrity
       rules:
         # Reads the ro flag on the CSI staging mounts, where every attached PVC
@@ -47,7 +51,7 @@ spec:
         # shipped for the read-only remounts and read-only LUNs it genuinely
         # does cover — not as coverage for the fault that motivated it.
         - alert: FilesystemReadOnly
-          expr: node_filesystem_readonly{mountpoint=~"/var/lib/kubelet/plugins/kubernetes.io/csi/.+/globalmount"} == 1
+          expr: node_filesystem_readonly{job="node-exporter", mountpoint=~"/var/lib/kubelet/plugins/kubernetes.io/csi/.+/globalmount"} == 1
           for: 2m
           labels:
             severity: critical

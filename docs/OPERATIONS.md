@@ -733,6 +733,20 @@ graph, not only to the route tree.
 
 **Volumes that latch read-only — `FilesystemReadOnly`, `CSIVolumeStagingFailing`:**
 
+> **Neither alert in `storage-integrity` detects an ext4 emergency-RO latch on
+> these nodes.** Nodes run 6.18.34-talos, so the kernel takes the no-`SB_RDONLY`
+> path described below and `node_filesystem_readonly` reads 0 throughout;
+> `CSIVolumeStagingFailing` needs a CSI call to fail, and no CSI call is made
+> while an already-staged volume latches. **The only thing that detected either
+> occurrence was the workload's own stdout** — `Read-only file system` from the
+> entrypoint. The automation that acts on that (matching the message plus a
+> restart-count floor and then deleting the pod) lives with the workload in the
+> deployments repo, not here, deliberately not gated on readiness because
+> readiness alone would loop forever on faults deletion cannot fix. The broader
+> "every layer we collect reported green through a total data-path failure" gap
+> is tracked as JDWLABS-383. Do not read a quiet Alertmanager as a healthy
+> volume.
+
 A filesystem that has gone read-only under its workload is close to invisible
 here, and the shape of that blind spot decides how you diagnose it.
 
@@ -752,20 +766,6 @@ node-exporter builds `node_filesystem_readonly` from that string. The
 remount and a LUN presented read-only, not this. Treat a firing
 `FilesystemReadOnly` as conclusive and a silent one as no evidence either way.
 
-> **Neither alert in `storage-integrity` detects an ext4 emergency-RO latch on
-> these nodes.** Nodes run 6.18.34-talos, so the kernel takes the no-`SB_RDONLY`
-> path above and `node_filesystem_readonly` reads 0 throughout;
-> `CSIVolumeStagingFailing` needs a CSI call to fail, and no CSI call is made
-> while an already-staged volume latches. **The only thing that detected either
-> occurrence was the workload's own stdout** — `Read-only file system` from the
-> entrypoint. The automation that acts on that (matching the message plus a
-> restart-count floor and then deleting the pod) lives with the workload in the
-> deployments repo, not here, deliberately not gated on readiness because
-> readiness alone would loop forever on faults deletion cannot fix. The broader
-> "every layer we collect reported green through a total data-path failure" gap
-> is tracked as JDWLABS-383. Do not read a quiet Alertmanager as a healthy
-> volume.
-
 That alert reads the CSI staging mounts, which the chart's stock node-exporter
 arguments exclude along with the rest of `/var/lib/kubelet`; the narrowed
 `collector.filesystem.mount-points-exclude` in the kube-prometheus-stack values
@@ -773,8 +773,8 @@ is what makes them visible. Measured against the live cluster before that
 override existed:
 
 ```
-count(node_filesystem_readonly)                            -> 146
-count(node_filesystem_readonly{mountpoint=~"/var/lib/kubelet.*"}) -> 0
+count(node_filesystem_readonly)                                    -> 146
+count(node_filesystem_readonly{mountpoint=~"/var/lib/kubelet.*"})  ->   0
 ```
 
 so the rule was an empty vector cluster-wide and could not fire for any reason.
