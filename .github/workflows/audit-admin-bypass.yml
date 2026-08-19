@@ -1,5 +1,54 @@
 name: audit-admin-bypass
 
+# Reports agent-authored merges that stepped over a gate, across all four repos.
+#
+# This job used to pipe `--list` into the step summary and exit 0 unconditionally.
+# A run that found a bypass and a run that found none produced the same green
+# tick and the same unread summary, and a run whose audit crashed produced one
+# too — it had no failure state at all, so there was never anything for anyone
+# to notice. It now asserts, and the assertion is deliberately narrow.
+#
+# What it does not fail on: an unapproved merge whose required checks all
+# passed. Measured across the four repos, 187 of 200 merged pull requests carry
+# zero approving reviews. That is not 187 lapses — this is a two-seat org with a
+# catch-all CODEOWNERS and GitHub forbids self-approval, so for the account that
+# opens nearly every pull request "unapproved" is the only state a merge can be
+# in. Failing on it would fire on roughly 93% of merges, and a check that is red
+# by default is one people learn to merge past. Those merges are still counted
+# and printed, because the count is the success metric; they are just not a
+# finding.
+#
+# What it does fail on: a merge that was unapproved *and* left a required status
+# check red or never-run. Nothing about the seat count excuses that one — a
+# status check needs no second human to satisfy, so stepping over it is the
+# escape hatch being used against the only gate this org can actually enforce.
+# Sampled over twelve consecutive merges on this repo, exactly one qualifies.
+# A bypass that was a decision rather than a lapse is declared in
+# tools/admin-bypass-holds.yaml with a reason, the same way the promotion drift
+# checker handles a deliberate gap.
+#
+# Who finds out is decided by the severity label, via the route tree in this
+# repo's Alertmanager config:
+#
+#   * a finding — someone merged past a required check — goes out as
+#     `severity: warning` with no tenant label, which the route tree sends to
+#     the AI-SRE relay alone. It is a backlog to triage, not a page: the merge
+#     already happened, nothing is on fire, and the alert stands until someone
+#     records a hold or fixes the check. Sending that to Discord daily would
+#     either nag until it is filtered or post a "resolved" line minutes later
+#     when Alertmanager expires the alert, which reads as the finding having
+#     been dealt with when nothing has moved.
+#   * no verdict at all — the audit crashed, could not read a ruleset, or never
+#     ran — goes out as `severity: critical`, reaching Discord as well as the
+#     relay. That is the condition nothing else can report, because a check that
+#     cannot run cannot tell you what it did not find, and it is exactly the
+#     state this job spent its whole life in while reading green.
+#
+# Two gaps this deliberately does not cover, both of which need a rule beside
+# the cluster's other Prometheus rules rather than a step inside the job that
+# has stopped running: a schedule that stops firing altogether, and a run killed
+# by the job timeout, which takes the notify step with it.
+
 on:
   schedule:
     # 12:00 UTC: after the US workday's overnight tail and before the next
@@ -7,6 +56,11 @@ on:
     # timezone this org's contributors work in, once daily.
     - cron: "0 12 * * *"
   workflow_dispatch:
+    inputs:
+      since:
+        description: 'Only inspect PRs merged on or after this date (YYYY-MM-DD)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -14,6 +68,7 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -21,13 +76,18 @@ jobs:
         with:
           python-version: "3.x"
 
-      # tools/audit-admin-bypass.py reads PR and ruleset data across all four
-      # jdwlabs repos, not just this one — the default GITHUB_TOKEN is scoped
-      # to the repo the workflow runs in, so it can't see the other three.
-      # jdwlabs-agent-bot is installed org-wide with read access to pull
-      # requests and rulesets on every repo, which is what the script needs;
-      # same create-github-app-token pattern already used for cross-repo
-      # access in deployments/.github/workflows/promote-prd.yml.
+      - name: Install dependencies
+        run: pip install PyYAML
+
+      # tools/audit-admin-bypass.py reads PR, ruleset and check-run data across
+      # all four jdwlabs repos, not just this one — the default GITHUB_TOKEN is
+      # scoped to the repo the workflow runs in, so it can't see the other
+      # three. jdwlabs-agent-bot is installed org-wide with read access to pull
+      # requests and rulesets on every repo; reading required-check state needs
+      # `checks: read` on top of those, because the verdict now depends on which
+      # required contexts reported on the merged head commit. Same
+      # create-github-app-token pattern already used for cross-repo access in
+      # deployments/.github/workflows/promote-prd.yml.
       - name: Generate cross-repo read token
         id: bot-token
         uses: actions/create-github-app-token@v3.2.0
@@ -38,13 +98,101 @@ jobs:
           repositories: apps,platform,infrastructure,deployments
 
       - name: Run admin-bypass audit
+        id: report
         env:
           GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+          SINCE: ${{ github.event.inputs.since }}
         run: |
+          set -uo pipefail
+          # `|| status=$?` rather than a pipeline: the default shell runs with
+          # -e, so letting a non-zero audit abort the step here would skip the
+          # report it just produced and leave the job red with nothing in it.
+          status=0
+          if [ -n "${SINCE}" ]; then
+            python3 tools/audit-admin-bypass.py --since "${SINCE}" > report.txt 2>&1 || status=$?
+          else
+            python3 tools/audit-admin-bypass.py > report.txt 2>&1 || status=$?
+          fi
+          cat report.txt
           {
             echo "### Admin-bypass audit"
             echo
             echo '```'
-            python3 tools/audit-admin-bypass.py --list
+            cat report.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          # 2 and anything above it mean the audit reached no verdict, which is
+          # a different failure from having found a bypass and gets a different
+          # audience below. The step itself stays green either way so that the
+          # notification is sent before the job is allowed to end.
+          case "$status" in
+            0) outcome=clean ;;
+            1) outcome=bypassed ;;
+            *) outcome=no-verdict ;;
+          esac
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Notify
+        # always(): an empty outcome means the audit step never got to run —
+        # checkout, the dependency install or the token mint failed — which is
+        # itself an audit that produced no verdict and has to be reported as one.
+        if: always()
+        env:
+          OUTCOME: ${{ steps.report.outputs.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          if [ "${OUTCOME:-}" = "clean" ]; then
+            echo "No reportable bypass — nothing to report."
+            exit 0
+          fi
+
+          if [ "${OUTCOME:-}" = "bypassed" ]; then
+            severity=warning
+            summary="$(grep -m1 '^TOTAL ' report.txt || echo 'admin-bypass audit found a reportable bypass')"
+            description="$(cat report.txt)"
+          else
+            severity=critical
+            summary="admin-bypass audit reached no verdict — bypass detection is blind"
+            description="tools/audit-admin-bypass.py did not run to completion, so this run cannot say whether anything merged past a required check. Until it does, nothing is watching the org's most-used escape hatch."
+          fi
+
+          # tools/notify-alert.py is byte-identical to the copy in
+          # deployments — this is the second consumer of the same notifier.
+          # Its natural home once a third appears is jdwlabs/.github, alongside
+          # the other org-wide reusable pieces, rather than a third copy here.
+          python3 tools/notify-alert.py \
+            --alertname AdminBypassMerge \
+            --severity "$severity" \
+            --summary "$summary" \
+            --description "$description" \
+            --label repo="${GITHUB_REPOSITORY}" \
+            --label workflow="audit-admin-bypass" \
+            --annotation runbook_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/main/tools/admin-bypass-holds.yaml" \
+            --annotation run_url="${RUN_URL}"
+
+      - name: Fail on a finding
+        # The verdict is re-asserted here rather than in the audit step so the
+        # notification above is sent first. A red run remains the record in the
+        # Actions tab; it is no longer the only place the result exists.
+        env:
+          OUTCOME: ${{ steps.report.outputs.outcome }}
+          STATUS: ${{ steps.report.outputs.status }}
+        run: |
+          set -uo pipefail
+          case "${OUTCOME:-}" in
+            clean)
+              echo "0 reportable bypasses — every unapproved merge in the window left its required checks satisfied."
+              ;;
+            bypassed)
+              echo "::error::An agent-authored PR merged unapproved with a required check unsatisfied — see the report above."
+              echo "Fix the check, or record why the bypass was intended in tools/admin-bypass-holds.yaml"
+              echo "so the next reader does not have to rediscover it."
+              exit 1
+              ;;
+            *)
+              echo "::error::tools/audit-admin-bypass.py exited ${STATUS:-<never ran>} without a verdict — see the log above."
+              exit 1
+              ;;
+          esac
