@@ -633,9 +633,13 @@ at `/rules/platform` precisely so that directory is the org name.
 `discord_webhook_url`; the config is the `alertmanager-config` **Secret**,
 rendered by the ExternalSecret of the same name — there is no ConfigMap to
 inspect. Which receivers an alert actually resolves to is a property of the
-route tree, not of the receiver list, so read it with
-`amtool config routes test --config.file=<rendered> <label>=<value> ...`
-rather than by eye.
+route tree, not of the receiver list, so read it from the routing matrix in
+`tests/alertmanager-routing/routing-matrix.yaml` rather than by eye. That
+matrix is resolved by Alertmanager's own engine in CI on every PR, so it is
+the citation for every routing claim in this section — including the ones
+below. `tests/alertmanager-routing/run.sh` renders the ExternalSecret the way
+ESO does and re-runs the whole matrix locally; a routing question the matrix
+does not already answer is a case to add to it.
 
 **Who gets what:** `severity: critical` reaches both the `ai-sre` relay and
 Discord. `severity: warning` **without a `tenant` label** reaches the relay
@@ -759,9 +763,10 @@ sum(increase(ai_sre_relay_repeats_skipped_total[6h]))               # work dedup
   Service; every other relay alert is blind until it is restored.
 
 A dark relay costs visibility, not just automated remediation. `continue: true`
-on the `ai-sre` route resumes at the next sibling, never at the parent, so a
-`warning` alert reaches the relay and no one else — the relay is the sole
-recipient of every warning in the cluster. That is why the two dead-man's
+on the `ai-sre` route resumes at the next sibling, never at the parent, so an
+untenanted `warning` reaches the relay and no one else — the relay is the sole
+recipient of every warning a tenant route does not also claim, which is every
+platform warning. That is why the two dead-man's
 switches, `AiSreRelayProcessingNothing` and `AiSreRelayMetricsTargetDown`, are
 `critical`: at `warning` the alert reporting the relay dark would be delivered
 only to the dark relay. The other two stay `warning` because the relay is

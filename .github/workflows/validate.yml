@@ -8,8 +8,9 @@ on:
     branches:
       - main
 
-# Every job only reads the tree. Two of them (kubeconform, helm-lint) execute a
-# binary downloaded at runtime, so a token they cannot write with is the point.
+# Every job only reads the tree. Several of them (kubeconform, helm-lint,
+# prometheus-rules, alertmanager-routing) execute a binary downloaded at
+# runtime, so a token they cannot write with is the point.
 permissions:
   contents: read
 
@@ -114,6 +115,44 @@ jobs:
           sudo mv promtool /usr/local/bin/
       - name: Check and unit-test PrometheusRules
         run: tests/prometheus-rules/run.sh
+
+  # Rule syntax and alert delivery are different failures. promtool proves an
+  # alert compiles; it cannot see a route tree that delivers that alert to the
+  # wrong receiver, to none at all, or a 'null' route ordered below the routes
+  # it is meant to pre-empt. Nothing here resolved the tree before, so every
+  # routing claim rested on a matrix run by hand — which is how the same wrong
+  # one reached the docs twice.
+  #
+  # Pinned for the reason promtool is, and one more specific to this job:
+  # amtool resolves the tree with a particular Alertmanager release's engine,
+  # so the version has to be the one the cluster runs (kube-prometheus-stack
+  # 88.3.0 ships alertmanager v0.33.1) or the gate is asserting against a
+  # different router than the one that delivers.
+  alertmanager-routing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.x"
+      - name: Install dependencies
+        run: pip install PyYAML
+      - name: Install amtool
+        env:
+          # amtool ships in the alertmanager tarball, not prometheus', so this
+          # is a second download and a second digest rather than a reuse of
+          # the one above. Both values move together — take the digest from
+          # the release's own sha256sums.txt.
+          ALERTMANAGER_VERSION: "0.33.1"
+          ALERTMANAGER_SHA256: "93d802cba6a8d27239d747ce117df7648d326ab67394e32247540b030e9842ba"
+        run: |
+          curl -sSLo alertmanager.tar.gz \
+            "https://github.com/prometheus/alertmanager/releases/download/v${ALERTMANAGER_VERSION}/alertmanager-${ALERTMANAGER_VERSION}.linux-amd64.tar.gz"
+          echo "${ALERTMANAGER_SHA256}  alertmanager.tar.gz" | sha256sum -c -
+          tar -xzf alertmanager.tar.gz --wildcards '*/amtool' --strip-components=1
+          sudo mv amtool /usr/local/bin/
+      - name: Check the rendered config and resolve the routing matrix
+        run: tests/alertmanager-routing/run.sh
 
   foundation-crds-freshness:
     runs-on: ubuntu-latest
