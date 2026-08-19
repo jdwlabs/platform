@@ -98,9 +98,18 @@ jobs:
       - name: Install dependencies
         run: pip install PyYAML
       - name: Install promtool
+        env:
+          # Checksum, not just a version tag: a release asset is mutable and
+          # this job runs a downloaded binary over the whole repo. Every other
+          # supply-chain gate here (image-pin-check, signatures) already holds
+          # that line. Both values move together — take the digest from the
+          # release's own sha256sums.txt.
+          PROMETHEUS_VERSION: "3.5.0"
+          PROMETHEUS_SHA256: "e811827af26d822afb09a4f28314f61b618b12cff5369835a67f674d8b46f39a"
         run: |
           curl -sSLo prometheus.tar.gz \
-            https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz
+            "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+          echo "${PROMETHEUS_SHA256}  prometheus.tar.gz" | sha256sum -c -
           tar -xzf prometheus.tar.gz --wildcards '*/promtool' --strip-components=1
           sudo mv promtool /usr/local/bin/
       - name: Check and unit-test PrometheusRules
