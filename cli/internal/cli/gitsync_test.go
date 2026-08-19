@@ -184,14 +184,26 @@ func runGitSyncWithCluster(t *testing.T, stub *grafanaStub, args ...string) (str
 
 func runGitSyncWithKube(t *testing.T, stub *grafanaStub, kc kubernetes.Interface, args ...string) (string, dynamic.Interface, error) {
 	t.Helper()
+	return runGitSyncWithApps(t, stub, kc, []*unstructured.Unstructured{
+		argoApp("platform-grafana"), argoApp("governance-jdwlabs"),
+		argoApp("governance-dotablaze-tech"), argoApp("governance-jdwillmsen"),
+	}, args...)
+}
+
+func runGitSyncWithApps(t *testing.T, stub *grafanaStub, kc kubernetes.Interface,
+	apps []*unstructured.Unstructured, args ...string) (string, dynamic.Interface, error) {
+	t.Helper()
 	srv := stub.start(t)
+	objects := make([]runtime.Object, 0, len(apps))
+	for _, app := range apps {
+		objects = append(objects, app)
+	}
 	dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{
 			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}: "ApplicationList",
 		},
-		argoApp("platform-grafana"), argoApp("governance-jdwlabs"),
-		argoApp("governance-dotablaze-tech"), argoApp("governance-jdwillmsen"),
+		objects...,
 	)
 	root := NewRootForTest(kc, dc)
 	var out bytes.Buffer
@@ -798,6 +810,57 @@ func TestGitSyncRecreate_NoSyncIsNotHeldToTheClaimCheck(t *testing.T) {
 	}
 	if len(stub.deleted) != 1 {
 		t.Fatalf("deleted = %v", stub.deleted)
+	}
+}
+
+// busyApp is an Application the controller is already running an operation on.
+func busyApp(name string) *unstructured.Unstructured {
+	app := argoApp(name)
+	app.Object["status"] = map[string]interface{}{
+		"operationState": map[string]interface{}{"phase": "Running"},
+	}
+	return app
+}
+
+func TestGitSyncRecreate_EnvelopeAlreadySyncingIsReportedAsOwed(t *testing.T) {
+	// Patching .operation while one is in flight is accepted and then thrown
+	// away: the controller resumes the existing Status.OperationState and
+	// clears .operation when it finishes, so the hook never runs. Reporting
+	// that as "sync requested" is the same false all-clear as the refresh was.
+	stub := &grafanaStub{repositories: sharedConnectionRepositories, connections: healthyConnections, dashboards: noDashboards}
+	out, dc, err := runGitSyncWithApps(t, stub, k8s.NewFake(grafanaKubeObjects()...),
+		[]*unstructured.Unstructured{
+			argoApp("platform-grafana"), busyApp("governance-jdwlabs"),
+			argoApp("governance-dotablaze-tech"), argoApp("governance-jdwillmsen"),
+		},
+		"gitsync", "recreate", "--repository", "jdwlabs-dashboards", "--confirm")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "sync requested for governance-jdwlabs") {
+		t.Errorf("a dropped request must not be reported as requested:\n%s", out)
+	}
+	if !strings.Contains(out, "NOT synced: governance-jdwlabs") ||
+		!strings.Contains(out, "already in progress") ||
+		!strings.Contains(out, "re-run once it settles") {
+		t.Errorf("the owed sync and why it did not happen must both be stated:\n%s", out)
+	}
+	// The refusal is a read, so the Application is left exactly as found.
+	if got := syncedApps(t, dc); len(got) != 0 {
+		t.Errorf("nothing should have been patched: %v", got)
+	}
+}
+
+func TestGitSyncRecreate_NoSyncNamesTheEnvelopesItSkipped(t *testing.T) {
+	// Opting out of the syncs is not opting out of knowing which are owed.
+	stub := &grafanaStub{repositories: sharedConnectionRepositories, connections: healthyConnections, dashboards: noDashboards}
+	out, _, err := runGitSyncWithCluster(t, stub,
+		"gitsync", "recreate", "--repository", "jdwlabs-dashboards", "--confirm", "--no-sync")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "argocd app sync governance-jdwlabs") {
+		t.Errorf("the skipped envelope must still be named:\n%s", out)
 	}
 }
 

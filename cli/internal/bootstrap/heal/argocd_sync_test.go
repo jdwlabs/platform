@@ -2,6 +2,8 @@ package heal
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -99,6 +101,81 @@ func TestSyncApp_SetsAnOperationRatherThanARefreshAnnotation(t *testing.T) {
 	}
 	if got.GetAnnotations()["argocd.argoproj.io/refresh"] != "" {
 		t.Errorf("a refresh annotation is not a sync and must not stand in for one")
+	}
+}
+
+func TestSyncApp_RefusesWhileAnOperationIsInFlight(t *testing.T) {
+	// The controller resumes the existing Status.OperationState instead of the
+	// .operation just written, and clears .operation when that older one
+	// finishes -- so a patch that "succeeded" runs no hooks at all.
+	for _, tc := range []struct {
+		name string
+		app  map[string]interface{}
+	}{
+		{"pending operation", map[string]interface{}{
+			"operation": map[string]interface{}{"sync": map[string]interface{}{}},
+		}},
+		{"running operationState", map[string]interface{}{
+			"status": map[string]interface{}{
+				"operationState": map[string]interface{}{"phase": "Running"},
+			},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := map[string]interface{}{
+				"apiVersion": "argoproj.io/v1alpha1",
+				"kind":       "Application",
+				"metadata":   map[string]interface{}{"name": "governance-jdwlabs", "namespace": "argocd"},
+			}
+			for k, v := range tc.app {
+				obj[k] = v
+			}
+			scheme := runtime.NewScheme()
+			dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+				map[schema.GroupVersionResource]string{
+					{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}: "ApplicationList",
+				},
+				&unstructured.Unstructured{Object: obj},
+			)
+
+			err := SyncApp(context.Background(), dc, "governance-jdwlabs")
+			if !errors.Is(err, ErrSyncInProgress) {
+				t.Fatalf("want ErrSyncInProgress, got %v", err)
+			}
+			if !strings.Contains(err.Error(), "governance-jdwlabs") {
+				t.Errorf("the refusal must name the application: %v", err)
+			}
+		})
+	}
+}
+
+// A settled operation is history, not a sync in flight, so it must not block.
+func TestSyncApp_SucceededOperationStateDoesNotBlock(t *testing.T) {
+	app := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "argoproj.io/v1alpha1",
+		"kind":       "Application",
+		"metadata":   map[string]interface{}{"name": "governance-jdwlabs", "namespace": "argocd"},
+		"status": map[string]interface{}{
+			"operationState": map[string]interface{}{"phase": "Succeeded"},
+		},
+	}}
+	scheme := runtime.NewScheme()
+	dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}: "ApplicationList",
+		},
+		app,
+	)
+	if err := SyncApp(context.Background(), dc, "governance-jdwlabs"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, err := dc.Resource(appGVR).Namespace("argocd").
+		Get(context.Background(), "governance-jdwlabs", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get after patch: %v", err)
+	}
+	if _, found, _ := unstructured.NestedMap(got.Object, "operation", "sync"); !found {
+		t.Fatalf("no sync operation was requested: %v", got.Object)
 	}
 }
 
