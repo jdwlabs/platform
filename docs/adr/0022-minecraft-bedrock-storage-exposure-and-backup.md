@@ -196,6 +196,14 @@ original framing got wrong. The run produces the artifact **and** publishes
 operator learns the server was unreachable at backup time and still has a restorable
 world. Silence in either direction is the only outcome ruled out.
 
+A server deliberately scaled to zero is a separate case and publishes `1`, not `0`.
+Nothing is writing to a stopped world, so that copy is as consistent as a held one —
+the gauge reports whether the source was at rest, not whether a hold command was
+issued. The distinction is drawn from the StatefulSet's desired replica count, so a
+pod that is present but crashlooping still counts as meant-to-be-running and still
+alerts. Without it a planned shutdown would file a ticket every four hours for its
+whole duration.
+
 ### 5. CSI volume snapshots evaluated and rejected for now
 
 A snapshot taken through the CSI driver is the one design that depends on nothing

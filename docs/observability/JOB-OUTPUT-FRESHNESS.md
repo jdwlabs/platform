@@ -39,7 +39,7 @@ schedule-aware threshold added when the first such job appears.
 
 ## The contract for output freshness
 
-A job that produces an artifact publishes two gauges. Both carry a
+A job that produces an artifact publishes three gauges. All carry a
 `backup_job` label naming the producer and, where more than one artifact class
 exists, an `artifact` label.
 
@@ -48,7 +48,27 @@ exists, an `artifact` label.
 | `backup_last_success_timestamp_seconds` | gauge | Unix timestamp when an artifact was last **verified written and non-empty**. Not when the job started, not when it exited. |
 | `backup_last_artifact_bytes` | gauge | Size of that artifact in bytes. |
 | `backup_max_age_seconds` | gauge | The producer's own freshness SLO, published as a metric. |
-| `backup_last_artifact_quiesced` | gauge | Optional. `1` if the newest artifact was taken with its source quiesced, `0` if taken cold. Omit it entirely where the distinction does not apply, or where it is not known — never guess a value, since the point of the gauge is to make a degraded run distinguishable from a clean one. |
+| `backup_last_artifact_quiesced` | gauge | Optional. `1` if the newest artifact was taken with its **source at rest**, `0` if taken while the source was running and could not be stilled. Omit it entirely where the distinction does not apply, or where it is not known — never guess a value, since the point of the gauge is to make a degraded run distinguishable from a clean one. |
+| `backup_last_artifact_source_replicas` | gauge | Optional, informational. The source workload's desired replica count at the time of the copy. No rule reads it; it is what lets a human tell a *held* source apart from a *stopped* one after the fact. Omit it when the count cannot be read. |
+
+**"At rest" is not "held".** A source deliberately scaled to zero is at rest —
+nothing is writing to it, and the copy is as consistent as one taken under an
+application-level freeze. It publishes `1`. The gauge answers *was this copy
+consistent*, not *did the job manage to issue a freeze command*; a producer
+that conflates the two turns every planned shutdown into a degraded run, and
+`BackupArtifactNotQuiesced` is a warning, which this cluster routes to the
+AI-SRE receiver and repeats every 4h for the length of the outage.
+
+Decide it from the source's **desired** state, not its observed health. A pod
+present at one replica and crashlooping was never asked to be down, so its cold
+copy is a symptom and must publish `0`. A replica count that cannot be read
+publishes `0` too: the unknown case alerts rather than going quiet.
+
+`backup_max_age_seconds` may carry the `artifact` label or not, independently of
+the other gauges. A producer with several artifact classes and one budget for
+all of them publishes it once at job level; one with a different budget per
+class publishes it per class. `BackupArtifactStale` matches both shapes, and
+where both exist the per-artifact budget wins.
 
 Publishing the SLO as a metric rather than hard-coding it into a rule is what
 makes this reusable: a new producer adopts the pattern by emitting three
@@ -124,19 +144,34 @@ and are not restated here — one copy, so the two cannot drift:
 |---|---|
 | `BackupArtifactStale` | no verified artifact within the producer's own `backup_max_age_seconds` |
 | `BackupArtifactEmpty` | the newest artifact is zero bytes |
-| `BackupFreshnessSignalMissing` | nothing is publishing the gauges at all, so neither of the above can fire |
-| `BackupArtifactNotQuiesced` | the newest artifact was taken without quiescing its source |
+| `BackupFreshnessSignalMissing` | a producer that *was* publishing the gauges has stopped, so neither of the above can fire for it |
+| `BackupArtifactNotQuiesced` | the newest artifact was taken while its source was running and could not be stilled |
 
 They were deliberately held back until a producer existed. Until then they
 would have matched nothing, and a rule that silently matches nothing looks
 exactly like a rule that is passing — the same class of false assurance that
 caused the original incident.
 
-`BackupArtifactNotQuiesced` is optional and reads `backup_last_artifact_quiesced`,
-a fourth gauge for producers that can quiesce their source. A producer that
-degrades to an unquiesced copy rather than abandoning the run should publish it,
-so the fallback cannot silently become the permanent state. Omit the gauge and
-the alert simply never fires.
+`BackupArtifactNotQuiesced` is optional and reads `backup_last_artifact_quiesced`.
+A producer that degrades to an unquiesced copy rather than abandoning the run
+should publish it, so the fallback cannot silently become the permanent state.
+Omit the gauge and the alert simply never fires.
+
+`BackupFreshnessSignalMissing` is per producer, not cluster-wide. An
+`absent()` over the whole metric is satisfied by any one producer still
+reporting, so the second producer to exist would let the first go dark
+unnoticed — and staleness goes quiet with it, because a series that has
+vanished cannot be compared against a budget. The rule instead compares each
+`backup_job` still reporting against those that reported inside a two-day
+lookback. Two consequences worth knowing:
+
+- **It expires.** Two days after a producer stops, its own samples age out of
+  the lookback and the alert falls silent. That is roughly a dozen
+  notifications at Alertmanager's 4h repeat. A dead-man's-switch cannot outlive
+  the evidence that it ever had something to watch.
+- **A producer that never published is not a producer that went missing.**
+  Before the first exporter is deployed these rules are inert by design, which
+  is why they ship paired with a producer rather than ahead of one.
 
 ## Adopting this
 
@@ -151,3 +186,9 @@ the alert simply never fires.
 4. Prove the alert fires: point the producer at an empty source, confirm
    `BackupArtifactEmpty` goes pending, then restore it. An alert that has
    never been seen to fire is an assumption.
+5. If the producer publishes `backup_last_artifact_quiesced`, prove the alert
+   also stays *quiet* when it should. Stop the source deliberately and confirm
+   the run succeeds, publishes `1`, and raises nothing; then make the source
+   unreachable while it is still meant to be running and confirm the warning
+   does fire. Both directions, or the gauge is untested in the direction that
+   generates tickets.
