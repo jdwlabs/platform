@@ -61,25 +61,44 @@ tenant name, created through the classic folders API by
 exactly the kind Git Sync may not adopt. The bare name is the one choice
 guaranteed to fail.
 
-**Known gap.** Because of that, the tenant dashboards land in their own Git
-Sync folder, not inside the tenant folder that carries the tenant team's
-folder-RBAC — so the per-tenant RBAC from `tenant.yaml` does not currently
-cover them. Unifying the two needs a folder Git Sync owns from creation, which
-means tenant-envelope no longer creating it and the existing unmanaged folders
-being removed first. That is a deliberate follow-up, not part of the wiring.
+So a tenant holds **two** folders: `<tenant>`, which tenant-envelope creates,
+and `<tenant>-dashboards`, which its Git Sync repository creates. Both are
+permissioned the same way, from the same `observability.grafana` block — the
+Job in `helm-charts/tenant-envelope/templates/observability.yaml` waits for the
+Git Sync folder to appear and replaces its permission list with the tenant team
+at the tenant's access level, exactly as it does for the folder it created
+itself. That replacement is what drops Grafana's inherited Viewer/Editor
+grants, and without it a folder is readable by every user in the instance,
+the other tenants' teams included. The UID goes in `tenant.yaml` as
+`observability.grafana.gitSyncFolder`; a tenant without a synced folder leaves
+it unset.
+
+**Known gap.** Two folders is one more than the design calls for — the
+dashboards do not land *inside* the tenant folder, they sit beside it. The
+boundary holds either way (both folders carry the same team grant), but the
+navigation is split. Unifying them needs a folder Git Sync owns from creation,
+which means tenant-envelope no longer creating one and the existing unmanaged
+folders being removed first. That is a deliberate follow-up, not part of the
+wiring.
 
 Resource definitions live in
 `tenants/platform/services/grafana/postInstall/gitsync-resources.yaml`. They are
 Grafana app-platform objects, not Kubernetes ones, so `kubectl` and ArgoCD
 cannot see them. Editing that file alone changes nothing in the cluster — the
 apply Job creates but never updates, so a definition change has to go through
-`platformctl gitsync recreate --dry-run` and then `--confirm`.
+`platformctl gitsync recreate --repository <name> --dry-run` and then
+`--confirm`.
 
 Create-if-absent is per resource, so *adding* a folder is not a definition
 change: a new repository is absent, the next sync creates it, and no `recreate`
 is involved. Only editing a repository that already exists needs the
 delete-first dance — and with several repositories on one connection,
-`recreate` now takes `--repository` and leaves the shared connection alone.
+`recreate` takes `--repository` and leaves the shared connection alone.
+Changing the **connection** definition (a rotated GitHub App key, an edited
+`connection.json`) is the one case that cannot leave it alone: add
+`--with-connection`, which widens the plan to every repository bound to it and
+then the connection, since a connection cannot be deleted underneath a
+repository that still references it.
 
 ## Conventions
 
@@ -87,23 +106,27 @@ delete-first dance — and with several repositories on one connection,
   let Grafana auto-assign on import.
 - **Datasources are referenced via dashboard variables** (`${datasource}`,
   `${loki_ds}`), never hardcoded UIDs, so the same JSON works against a
-  tenant-scoped datasource.
+  tenant-scoped datasource. A tenant dashboard **pins** those variables to its
+  own datasources (`"current"` filled in, `"hide": 2`): an empty `current`
+  resolves to whatever Grafana calls default, which is the platform pair, and
+  the header on the tenant datasource is the only thing scoping the answer.
 - **Per-tenant Loki/Tempo datasources** now exist for jdwlabs and
   dotablaze-tech, named `<tenant>-loki` / `<tenant>-tempo` (rendered by the
   same `templates/observability.yaml` Job as the folder/team/RBAC, off each
   tenant's `observability.tenantId`). Each carries an `X-Scope-OrgID` header
-  pinned to that tenant, so a tenant dashboard should point its
-  `${loki_ds}`/`${datasource}` variable default at its own pair rather than
-  the platform ones — see
+  pinned to that tenant, and that header *is* the isolation — a tenant
+  dashboard that leaves its `${loki_ds}` variable unpinned answers out of the
+  platform store, so the tenant dashboards pin theirs; see
   [docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.3/§5.4](../docs/observability/DASHBOARDS-AND-MULTITENANCY.md)
   for the isolation mechanism and its known gaps.
 - **Folder = tenant** is the intended end state, enforced by folder-level RBAC
   and a per-tenant Grafana team derived from the tenant's `observability` block
   in `tenants/<tenant>/tenant.yaml`. The platform folder predates this model
-  and stays as-is. It is not reached yet for the tenants: their folder + team +
-  RBAC render from that block, but their dashboards sync into a separate Git
-  Sync folder because a repository cannot adopt a folder it did not create —
-  see "Folder identity is the repository's name" above.
+  and stays as-is. A tenant reaches it across two folders rather than one:
+  their dashboards sync into a separate Git Sync folder because a repository
+  cannot adopt a folder it did not create, and that folder is granted to the
+  same team from the same block — see "Folder identity is the repository's
+  name" above.
 - **One owner per dashboard.** A dashboard is provisioned by Git Sync *or* by a
   ConfigMap sidecar, never both — see the migration rule in the design doc.
 - **Every committed dashboard is a real dashboard.** A panel query that matches

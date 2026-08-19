@@ -19,6 +19,15 @@
 # store-level: the datasource's X-Scope-OrgID header means it can only ever
 # return that tenant's data no matter who queries through it.
 #
+# A tenant may hold a second folder it does not create: the one Git Sync makes
+# for `observability/dashboards/<tenant>`, named by `grafana.gitSyncFolder`.
+# Folder-RBAC is what makes a folder tenant-private, and Grafana's default
+# grants are inherited by anything created without it, so that folder is
+# readable by every user in the instance — the other tenants' teams included —
+# until this Job replaces its permission list. It is permissioned here rather
+# than by the Application that creates it because the team and access level are
+# tenant.yaml's to define, not the platform grafana service's.
+#
 # It renders into the `monitoring` namespace (where Grafana and its admin
 # credentials live), which the governance ApplicationSet can reach because it
 # deploys tenant-envelope under the elevated `bootstrap` AppProject — this
@@ -32,6 +41,7 @@
 # cross-Application sequencing.
 {{- if .Values.observability.tenantId }}
 {{- $folderUID := .Values.observability.grafana.folder }}
+{{- $gitSyncFolderUID := .Values.observability.grafana.gitSyncFolder | default "" }}
 {{- $teamName := .Values.observability.grafana.team }}
 {{- $permLevel := include "tenant-envelope.grafanaPermissionLevel" .Values.observability.grafana.access }}
 {{- $tenantID := .Values.observability.tenantId }}
@@ -128,6 +138,8 @@ spec:
                   key: admin-password
             - name: FOLDER_UID
               value: {{ $folderUID | quote }}
+            - name: GITSYNC_FOLDER_UID
+              value: {{ $gitSyncFolderUID | quote }}
             - name: TEAM_NAME
               value: {{ $teamName | quote }}
             - name: PERM_LEVEL
@@ -236,21 +248,29 @@ spec:
               # Folder permissions are a full replace, not additive, so this
               # is safe to reconcile on every sync (unlike the create-only
               # folder/team steps above) -- it always ends in exactly the
-              # tenant team holding $PERM_LEVEL on its own folder, regardless
-              # of what was set by hand in between.
-              code=$(curl -sS -o "$LAST_BODY" -w '%{http_code}' -X POST \
-                -H 'Content-Type: application/json' \
-                -u "$GF_USER:$GF_PASS" \
-                --data-binary "{\"items\":[{\"teamId\":$TEAM_ID,\"permission\":$PERM_LEVEL}]}" \
-                "$API/folders/$FOLDER_UID/permissions")
-              case "$code" in
-                200) echo "folder $FOLDER_UID permissions set: team $TEAM_NAME ($TEAM_ID) -> level $PERM_LEVEL" ;;
-                *)
-                  echo "POST /api/folders/$FOLDER_UID/permissions returned $code:"
-                  cat "$LAST_BODY"
-                  exit 1
-                  ;;
-              esac
+              # tenant team holding $PERM_LEVEL on the folder, regardless of
+              # what was set by hand in between. Replacing the list is also
+              # what drops Grafana's inherited Viewer/Editor grants, which is
+              # the step that makes a folder tenant-private rather than merely
+              # tenant-named.
+              set_folder_permissions() {
+                uid="$1"
+                code=$(curl -sS -o "$LAST_BODY" -w '%{http_code}' -X POST \
+                  -H 'Content-Type: application/json' \
+                  -u "$GF_USER:$GF_PASS" \
+                  --data-binary "{\"items\":[{\"teamId\":$TEAM_ID,\"permission\":$PERM_LEVEL}]}" \
+                  "$API/folders/$uid/permissions")
+                case "$code" in
+                  200) echo "folder $uid permissions set: team $TEAM_NAME ($TEAM_ID) -> level $PERM_LEVEL" ;;
+                  *)
+                    echo "POST /api/folders/$uid/permissions returned $code:"
+                    cat "$LAST_BODY"
+                    exit 1
+                    ;;
+                esac
+              }
+
+              set_folder_permissions "$FOLDER_UID"
 
               # ensure_datasource: full-replace reconcile, same reasoning as
               # the folder permissions step above -- the tenant header this
@@ -301,6 +321,39 @@ spec:
               }
               ensure_datasource "$LOKI_DS_UID" /etc/observability/loki-datasource.json
               ensure_datasource "$TEMPO_DS_UID" /etc/observability/tempo-datasource.json
+
+              # The Git Sync folder gets the same treatment, and comes last
+              # because it is the only step waiting on another Application --
+              # everything above is this Job's own to converge. It is waited for
+              # rather than probed once: it is created by the separate
+              # platform-grafana Application, which this Job's sync-wave does
+              # not order against (see the template comment). Never created
+              # here -- with sync.target folder the repository owns that UID,
+              # and a folder Git Sync did not create is one it refuses to
+              # adopt, so creating it would break the sync it belongs to.
+              #
+              # Giving up is an error rather than a skip. The only reason to
+              # skip would be "the folder is not there", which is
+              # indistinguishable from "the folder is there and open" without
+              # asking, and a tenant folder every other tenant can read is a
+              # worse outcome than a failed sync.
+              if [ -n "$GITSYNC_FOLDER_UID" ]; then
+                i=0
+                code=000
+                while [ "$i" -lt 60 ]; do
+                  code=$(curl -sS -o /dev/null -w '%{http_code}' \
+                    -u "$GF_USER:$GF_PASS" "$API/folders/$GITSYNC_FOLDER_UID" || echo 000)
+                  [ "$code" = "200" ] && break
+                  i=$((i + 1))
+                  sleep 5
+                done
+                if [ "$code" != "200" ]; then
+                  echo "git sync folder $GITSYNC_FOLDER_UID never appeared (last status $code)"
+                  echo "it is created by the $GITSYNC_FOLDER_UID repository in platform-grafana; check platformctl gitsync status"
+                  exit 1
+                fi
+                set_folder_permissions "$GITSYNC_FOLDER_UID"
+              fi
           volumeMounts:
             - name: resources
               mountPath: /etc/observability

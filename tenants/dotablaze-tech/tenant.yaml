@@ -50,6 +50,7 @@ observability:
     folder: dotablaze-tech
     team: dotablaze-tech
     access: edit
+    gitSyncFolder: dotablaze-tech-dashboards
 
 services:
   # ARC is dormant: CI runs exclusively on GitHub-hosted runners. Kept

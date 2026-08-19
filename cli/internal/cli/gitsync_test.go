@@ -309,6 +309,25 @@ func TestGitSyncDelete_RefusesConnectionStillReferenced(t *testing.T) {
 	}
 }
 
+func TestGitSyncDelete_SharedConnectionRefusalNamesEveryRepository(t *testing.T) {
+	stub := &grafanaStub{repositories: sharedConnectionRepositories, connections: healthyConnections, dashboards: noDashboards}
+	out, err := runGitSync(t, stub, "gitsync", "delete",
+		"--kind", "connection", "--name", "jdwlabs-platform-github", "--confirm")
+	if err == nil {
+		t.Fatalf("three repositories reference this connection\n%s", out)
+	}
+	for _, name := range []string{"platform-dashboards", "jdwlabs-dashboards", "dotablaze-tech-dashboards"} {
+		if !strings.Contains(out, name) {
+			t.Errorf("the way out must name %s, since all three block the delete:\n%s", name, out)
+		}
+	}
+	// The pre-shared-connection advice was "recreate does both in order",
+	// which recreate no longer does — following it loops forever.
+	if !strings.Contains(out, "--with-connection") {
+		t.Errorf("the suggested command must be one that actually deletes the connection:\n%s", out)
+	}
+}
+
 func TestGitSyncDelete_AbsentResourceIsANoOp(t *testing.T) {
 	stub := &grafanaStub{repositories: `{"items":[]}`, connections: `{"items":[]}`, dashboards: noDashboards}
 	out, err := runGitSync(t, stub, "gitsync", "delete", "--kind", "repository", "--name", "gone", "--confirm")
@@ -419,6 +438,72 @@ func TestGitSyncRecreate_LastRepositoryStillTakesTheConnection(t *testing.T) {
 	}
 	if strings.Contains(out, "retained:") {
 		t.Errorf("nothing is shared here, so nothing should be retained:\n%s", out)
+	}
+}
+
+func TestGitSyncRecreate_WithConnectionTakesEverySiblingThenTheConnection(t *testing.T) {
+	stub := &grafanaStub{repositories: sharedConnectionRepositories, connections: healthyConnections, dashboards: noDashboards}
+	out, err := runGitSync(t, stub, "gitsync", "recreate",
+		"--repository", "jdwlabs-dashboards", "--with-connection", "--confirm")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	want := []string{
+		"/repositories/jdwlabs-dashboards",
+		"/repositories/dotablaze-tech-dashboards",
+		"/repositories/platform-dashboards",
+		"/connections/jdwlabs-platform-github",
+	}
+	if len(stub.deleted) != len(want) {
+		t.Fatalf("changing the connection needs every repository off it first, got %v", stub.deleted)
+	}
+	// The connection last is the whole point: it cannot be deleted underneath
+	// a repository that still references it.
+	if !strings.HasSuffix(stub.deleted[len(stub.deleted)-1], "/connections/jdwlabs-platform-github") {
+		t.Errorf("the connection must be deleted last: %v", stub.deleted)
+	}
+	for _, path := range want {
+		found := false
+		for _, got := range stub.deleted {
+			if strings.HasSuffix(got, path) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s was never deleted: %v", path, stub.deleted)
+		}
+	}
+	if !strings.Contains(out, "cascade:") {
+		t.Errorf("deleting repositories the operator did not name must be said out loud:\n%s", out)
+	}
+	if strings.Contains(out, "retained:") {
+		t.Errorf("nothing is retained when the connection goes:\n%s", out)
+	}
+}
+
+func TestGitSyncRecreate_SharedConnectionPointsAtTheWayToChangeIt(t *testing.T) {
+	stub := &grafanaStub{repositories: sharedConnectionRepositories, connections: healthyConnections, dashboards: noDashboards}
+	out, err := runGitSync(t, stub, "gitsync", "recreate", "--repository", "jdwlabs-dashboards", "--dry-run")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "--with-connection") {
+		t.Errorf("a retained connection is exactly where the flag that changes it belongs:\n%s", out)
+	}
+}
+
+func TestGitSyncRecreate_WithConnectionChecksSiblingsForOwnedDashboards(t *testing.T) {
+	stub := &grafanaStub{repositories: sharedConnectionRepositories, connections: healthyConnections, dashboards: ownedDashboards}
+	out, err := runGitSync(t, stub, "gitsync", "recreate",
+		"--repository", "jdwlabs-dashboards", "--with-connection", "--confirm")
+	if err == nil {
+		t.Fatalf("the finalizer does not care which repository was named\n%s", out)
+	}
+	if !strings.Contains(out, "vault-overview") {
+		t.Errorf("the refusal should name the dashboards at risk:\n%s", out)
+	}
+	if len(stub.deleted) != 0 {
+		t.Fatalf("nothing should have been deleted: %v", stub.deleted)
 	}
 }
 

@@ -21,6 +21,9 @@ type ObsGrafanaBlock struct {
 	Folder string `yaml:"folder" json:"folder"`
 	Team   string `yaml:"team" json:"team"`
 	Access string `yaml:"access" json:"access"`
+	// Optional: the folder Git Sync creates for this tenant's dashboards, which
+	// the tenant team is granted on but which nothing here creates.
+	GitSyncFolder string `yaml:"gitSyncFolder,omitempty" json:"gitSyncFolder,omitempty"`
 }
 
 type Namespace struct {
