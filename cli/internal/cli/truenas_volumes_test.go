@@ -88,10 +88,46 @@ func truenasFixture() *truenas.FakeMiddleware {
 
 func runTrueNAS(t *testing.T, nas *truenas.FakeMiddleware, args ...string) (string, error) {
 	t.Helper()
+	// The driver config's own key is opt-in, so the ordinary path is an
+	// operator-supplied one — which is what these runs exercise.
+	t.Setenv(truenas.APIKeyEnv, "throwaway-test-key")
+	return runTrueNASWithConfigs(t, nas, iscsiDriverConfig, nfsDriverConfig, args...)
+}
+
+// runTrueNASNoKey is the shape of a run that supplied no credential at all.
+func runTrueNASNoKey(t *testing.T, nas *truenas.FakeMiddleware, args ...string) (string, error) {
+	t.Helper()
+	return runTrueNASWithConfigs(t, nas, iscsiDriverConfig, nfsDriverConfig, args...)
+}
+
+// runTrueNASDialError stands in for a middleware that answered the handshake
+// and then refused the credential.
+func runTrueNASDialError(t *testing.T, dialErr error, args ...string) (string, error) {
+	t.Helper()
+	t.Setenv(truenas.APIKeyEnv, "throwaway-test-key")
+	testTrueNASDialer = func(context.Context, truenas.DriverConfig, truenas.TLSOptions) (truenas.Caller, error) {
+		return nil, dialErr
+	}
+	t.Cleanup(func() { testTrueNASDialer = nil })
+	return executeTrueNAS(t, iscsiDriverConfig, nfsDriverConfig, args)
+}
+
+func runTrueNASWithConfigs(t *testing.T, nas *truenas.FakeMiddleware,
+	iscsiConfig, nfsConfig string, args ...string) (string, error) {
+	t.Helper()
+	testTrueNASDialer = func(context.Context, truenas.DriverConfig, truenas.TLSOptions) (truenas.Caller, error) {
+		return nas, nil
+	}
+	t.Cleanup(func() { testTrueNASDialer = nil })
+	return executeTrueNAS(t, iscsiConfig, nfsConfig, args)
+}
+
+func executeTrueNAS(t *testing.T, iscsiConfig, nfsConfig string, args []string) (string, error) {
+	t.Helper()
 
 	kc := k8s.NewFake(
-		driverConfigSecret("democratic-csi-iscsi-driver-config", iscsiDriverConfig),
-		driverConfigSecret("democratic-csi-driver-config", nfsDriverConfig),
+		driverConfigSecret("democratic-csi-iscsi-driver-config", iscsiConfig),
+		driverConfigSecret("democratic-csi-driver-config", nfsConfig),
 		// Only pvc-live is live, and it is proved so from the claim side: the
 		// PVC names the PV, and the PV's volume handle names the zvol.
 		&corev1.PersistentVolumeClaim{
@@ -109,11 +145,6 @@ func runTrueNAS(t *testing.T, nas *truenas.FakeMiddleware, args ...string) (stri
 			Status: corev1.PersistentVolumeStatus{Phase: corev1.VolumeBound},
 		},
 	)
-
-	testTrueNASDialer = func(context.Context, truenas.DriverConfig, truenas.TLSOptions) (truenas.Caller, error) {
-		return nas, nil
-	}
-	t.Cleanup(func() { testTrueNASDialer = nil })
 
 	root := NewRootForTest(kc, nil)
 	var out bytes.Buffer
@@ -369,7 +400,9 @@ func TestTrueNASReclaim_UnreadableSessionListRefusesEveryZvol(t *testing.T) {
 	if err == nil {
 		t.Fatalf("an unreadable session list must not exit clean:\n%s", out)
 	}
-	if !strings.Contains(out, "warnings[1]") || !strings.Contains(out, "iSCSI session list could not be read") {
+	// The second warning is the standing NFS one: the selected set still holds
+	// the NFS dataset, which has no session rung either way.
+	if !strings.Contains(out, "warnings[2]") || !strings.Contains(out, "iSCSI session list could not be read") {
 		t.Errorf("the failed read must be reported at the top of the output:\n%s", out)
 	}
 	if !strings.Contains(out, "refused[2]") {
@@ -435,8 +468,136 @@ func TestTrueNAS_APIKeyNeverReachesOutput(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%v: unexpected error: %v\n%s", args, err, out)
 		}
-		if strings.Contains(out, "not-a-real-key") {
-			t.Errorf("%v leaked the API key:\n%s", args, out)
+		for _, key := range []string{"not-a-real-key", "throwaway-test-key"} {
+			if strings.Contains(out, key) {
+				t.Errorf("%v leaked the API key:\n%s", args, out)
+			}
 		}
+	}
+}
+
+// The NFS class has no liveness rung the NAS can answer: a dataset a client
+// outside the cluster mounts, and one whose PersistentVolume a restore has not
+// replayed yet, both look exactly like an idle one. That gap is in AGENTS.md,
+// --help and OPERATIONS.md, none of which is on screen when --confirm is typed.
+func TestTrueNASReclaim_NFSCandidateAlwaysCarriesTheMissingRungWarning(t *testing.T) {
+	const want = "truenas-nfs has no session rung"
+	for _, mode := range []string{"--dry-run", "--confirm"} {
+		out, err := runTrueNAS(t, truenasFixture(),
+			"cluster", "volumes", "truenas", "reclaim", "--all-orphaned", mode)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v\n%s", mode, err, out)
+		}
+		if !strings.Contains(out, want) {
+			t.Errorf("%s must warn that the NFS class has no liveness rung:\n%s", mode, out)
+		}
+		if !strings.Contains(out, "warnings[1]") {
+			t.Errorf("%s: the caveat must be a warnings entry, above the tables:\n%s", mode, out)
+		}
+	}
+}
+
+// The warning is standing, not conditional on a degraded read — but it is about
+// the selected set, so an iSCSI-only selection has nothing to disclose.
+func TestTrueNASReclaim_ISCSIOnlySelectionCarriesNoNFSWarning(t *testing.T) {
+	out, err := runTrueNAS(t, truenasFixture(), "cluster", "volumes", "truenas", "reclaim",
+		"--storage-class", "truenas-iscsi", "--all-orphaned", "--dry-run")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "warnings[") {
+		t.Errorf("nothing degraded this run and no NFS dataset was selected:\n%s", out)
+	}
+}
+
+// A plan that stops part-way leaves a candidate in neither table: some of its
+// objects are gone and some are not. Naming it, and saying the re-run resumes,
+// is the difference between a resumable state and an unexplained one.
+func TestTrueNASReclaim_PartialFailureNamesTheCandidateAndSaysHowToResume(t *testing.T) {
+	nas := truenasFixture()
+	nas.Fail = map[string]error{"iscsi.target.delete": context.DeadlineExceeded}
+
+	out, err := runTrueNAS(t, nas, "cluster", "volumes", "truenas", "reclaim", "--all-orphaned", "--confirm")
+	if err == nil {
+		t.Fatalf("a failed delete must not exit clean:\n%s", out)
+	}
+	if !strings.Contains(out, "incomplete: pvc-orphan") {
+		t.Errorf("the half-deleted candidate must be named in the report:\n%s", out)
+	}
+	if !strings.Contains(out, "Re-run the same command to resume pvc-orphan") {
+		t.Errorf("the report must say the re-run resumes:\n%s", out)
+	}
+	if !strings.Contains(out, "idempotent") {
+		t.Errorf("the help must say why re-running is safe:\n%s", out)
+	}
+	if !strings.Contains(out, "error:") {
+		t.Errorf("a delete failure must reach the error line, not only the exit code:\n%s", out)
+	}
+}
+
+// A driver config with no iSCSI naming affixes silently disables the only scan
+// that finds a target a failed plan left mapped to no extent — which is exactly
+// the state the resume path above has to clean up.
+func TestTrueNASList_WarnsWhenTheStrayTargetScanCannotRun(t *testing.T) {
+	t.Setenv(truenas.APIKeyEnv, "throwaway-test-key")
+
+	out, err := runTrueNASWithConfigs(t, truenasFixture(),
+		strings.ReplaceAll(iscsiDriverConfig, "  namePrefix: csi-\n", ""), nfsDriverConfig,
+		"cluster", "volumes", "truenas", "list")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "namePrefix/nameSuffix are unset") {
+		t.Errorf("a silently disabled check reads as a clean NAS:\n%s", out)
+	}
+}
+
+// Without a credential the command must not reach for the one democratic-csi
+// provisions with, and must not suggest a re-run that would.
+func TestTrueNAS_RefusesToSpendTheCSIKeyWithoutAnOptIn(t *testing.T) {
+	t.Setenv(truenas.APIKeyEnv, "")
+
+	out, err := runTrueNASNoKey(t, truenasFixture(), "cluster", "volumes", "truenas", "list")
+	if err == nil {
+		t.Fatalf("a run with no credential must not authenticate:\n%s", out)
+	}
+	if !strings.Contains(out, truenas.APIKeyEnv) {
+		t.Errorf("the error must name the variable that supplies the key:\n%s", out)
+	}
+	if !strings.Contains(out, "throwaway") || !strings.Contains(out, "ADR-0025") {
+		t.Errorf("the help must point at a throwaway key and the ADR:\n%s", out)
+	}
+	if strings.Contains(out, "not-a-real-key") {
+		t.Errorf("the refusal leaked the driver config's credential:\n%s", out)
+	}
+}
+
+// The one rejection this transport is known to produce is the shared CSI key
+// being refused. Answering it with "check the secrets synced from Vault" is an
+// invitation to re-run, and every attempt erodes that credential further.
+func TestTrueNAS_RejectedKeyHelpForbidsTheRetry(t *testing.T) {
+	for _, tc := range []struct{ name, flag, want string }{
+		{"opted into the CSI key", "--truenas-use-csi-api-key", "Do not re-run"},
+		{"operator key", "", "Do not re-run with --truenas-use-csi-api-key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := []string{"cluster", "volumes", "truenas", "list"}
+			if tc.flag != "" {
+				args = append(args, tc.flag)
+			}
+			out, err := runTrueNASDialError(t, truenas.ErrAPIKeyRejected, args...)
+			if err == nil {
+				t.Fatalf("a rejected key must not exit clean:\n%s", out)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("the help must forbid the retry:\n%s", out)
+			}
+			if strings.Contains(out, "have synced from Vault") {
+				t.Errorf("the generic connection help reads as \"try again\":\n%s", out)
+			}
+			if !strings.Contains(out, "ADR-0025") {
+				t.Errorf("the help must cite the record of what a retry costs:\n%s", out)
+			}
+		})
 	}
 }

@@ -8,7 +8,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func reclaimFixture() *FakeMiddleware {
@@ -266,4 +268,65 @@ func reboundCandidate(t *testing.T, nas *FakeMiddleware) Candidate {
 	}
 	nas.Calls = nil
 	return c
+}
+
+// The common leak this command exists for is a PVC and a PV both fully deleted,
+// which leaves a candidate no PersistentVolume names and so nothing to re-read
+// by name. Its verdict is "no PV in the cluster names this storage", and a
+// restore that replays the PVs between the classification and the reclaim makes
+// that false before the first destructive call.
+func TestReclaimer_UnreferencedCandidateIsRecheckedAgainstTheWholePVList(t *testing.T) {
+	nas := reclaimFixture()
+	plan := orphanPlan(t, nas)
+	c := Candidate{
+		Name:         "pvc-orphan",
+		StorageClass: ClassISCSI,
+		Objects:      plan,
+		Tokens: CandidateTokens{
+			Objects: []string{"pvc-orphan", "storage/k8s/iscsi/vols/pvc-orphan"},
+			Targets: []string{"csi-pvc-orphan-cluster"},
+		},
+	}
+
+	restored := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "pv-restored"},
+		Spec: corev1.PersistentVolumeSpec{PersistentVolumeSource: corev1.PersistentVolumeSource{
+			CSI: &corev1.CSIPersistentVolumeSource{VolumeHandle: "pvc-orphan"},
+		}},
+		Status: corev1.PersistentVolumeStatus{Phase: corev1.VolumeBound},
+	}
+
+	err := NewReclaimer(nas, k8sfake.NewSimpleClientset(restored)).Run(context.Background(), c)
+	if err == nil {
+		t.Fatalf("a PersistentVolume that now names the storage must stop the plan")
+	}
+	if !strings.Contains(err.Error(), "pv-restored") {
+		t.Errorf("the refusal must name the PersistentVolume that appeared: %v", err)
+	}
+	if len(nas.Datasets) != 1 || len(nas.Extents) != 1 || len(nas.Targets) != 1 {
+		t.Errorf("the object graph was destroyed despite the refusal: %v", nas.Calls)
+	}
+}
+
+// The re-check is one list per run, not one per candidate: an --all-orphaned
+// run over a large NAS would otherwise re-list every PersistentVolume in the
+// cluster once per volume it deletes.
+func TestReclaimer_ReReadsThePVListOncePerRun(t *testing.T) {
+	kube := k8sfake.NewSimpleClientset()
+	var lists int
+	kube.PrependReactor("list", "persistentvolumes", func(k8stesting.Action) (bool, runtime.Object, error) {
+		lists++
+		return false, nil, nil
+	})
+
+	r := NewReclaimer(reclaimFixture(), kube)
+	for _, name := range []string{"pvc-a", "pvc-b", "pvc-c"} {
+		c := Candidate{Name: name, Tokens: CandidateTokens{Objects: []string{name}}}
+		if err := r.Run(context.Background(), c); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if lists != 1 {
+		t.Errorf("listed PersistentVolumes %d times across 3 candidates, want 1", lists)
+	}
 }

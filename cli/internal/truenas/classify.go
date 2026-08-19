@@ -49,6 +49,19 @@ type Object struct {
 
 func (o Object) String() string { return string(o.Kind) + "/" + o.Name }
 
+// CandidateTokens are the identifiers a PersistentVolume could use to name one
+// candidate. They are recorded on the candidate so the reclaim can re-run the
+// reference check just before deleting — a candidate that no PV names has no PV
+// to re-read by name, and that is the majority of orphans.
+//
+// Targets are separate from Objects because they match differently: an iSCSI
+// IQN carries the target name after a colon, so a target is also matched by
+// that suffix, while everything else is matched by equality.
+type CandidateTokens struct {
+	Objects []string
+	Targets []string
+}
+
 // Candidate is one reclaimable unit: the backing dataset plus every object that
 // exists only to export it, with the verdict and the ordered delete plan.
 type Candidate struct {
@@ -67,6 +80,9 @@ type Candidate struct {
 	ClaimedBy string
 	PV        string
 	PVPhase   string
+	// Tokens is what a PersistentVolume would have to say to name this
+	// candidate. It is the whole input to the reclaim's cluster-side re-check.
+	Tokens CandidateTokens
 	// Objects is the delete plan in execution order: target-extent mappings,
 	// then extents, then targets, then NFS shares, then the dataset, then the
 	// Released PersistentVolume. Reversing any pair of those leaves a dangling
@@ -139,7 +155,11 @@ func classifyDataset(cfg DriverConfig, inv Inventory, g *graph, refs []Reference
 	sessions, sessionTarget := countSessions(inv, targets)
 	c.Sessions = sessions
 
-	matches := matchReferences(refs, d, targets, shares)
+	c.Tokens = CandidateTokens{
+		Objects: append([]string{d.Name, d.ID, d.Mountpoint}, sharePaths(shares)...),
+		Targets: targetNames(targets),
+	}
+	matches := matchReferences(refs, c.Tokens)
 	if len(matches) == 1 {
 		c.PV = matches[0].PVName
 		c.PVPhase = matches[0].PVPhase
@@ -304,31 +324,14 @@ func countSessions(inv Inventory, targets []Target) (int, string) {
 	return count, named
 }
 
-func matchReferences(refs []Reference, d Dataset, targets []Target, shares []NFSShare) []Reference {
+func matchReferences(refs []Reference, tokens CandidateTokens) []Reference {
 	var out []Reference
 	for _, r := range refs {
-		if referenceMatches(r, d, targets, shares) {
+		if _, ok := r.namesCandidate(tokens); ok {
 			out = append(out, r)
 		}
 	}
 	return out
-}
-
-func referenceMatches(r Reference, d Dataset, targets []Target, shares []NFSShare) bool {
-	if r.namesObject(d.Name) || r.namesObject(d.ID) || r.namesObject(d.Mountpoint) {
-		return true
-	}
-	for _, t := range targets {
-		if r.namesTarget(t.Name) {
-			return true
-		}
-	}
-	for _, s := range shares {
-		if r.namesObject(s.Path) {
-			return true
-		}
-	}
-	return false
 }
 
 // deletePlan orders the objects so that no step leaves a row the middleware
@@ -406,9 +409,10 @@ func classifyStrays(cfg DriverConfig, inv Inventory, g *graph, refs []Reference)
 			Target:       joinNames(targetNames(targets)),
 			Extent:       e.Name,
 			Objects:      deletePlan(mappings, []Extent{e}, targets, nil, Dataset{}, ""),
+			Tokens:       CandidateTokens{Objects: []string{e.Name}, Targets: targetNames(targets)},
 		}
 		c.Sessions, _ = countSessions(inv, targets)
-		c.Class, c.Reason = strayVerdict(cfg, inv, refs, c, targets, "", e.Name)
+		c.Class, c.Reason = strayVerdict(cfg, inv, refs, c)
 		c.Reason = withDetail(c.Reason, "extent still exports "+id+", which no longer exists")
 		out = append(out, c)
 	}
@@ -417,10 +421,10 @@ func classifyStrays(cfg DriverConfig, inv Inventory, g *graph, refs []Reference)
 		if len(g.mappingsByTarget[t.ID]) > 0 || claimedTargets[t.ID] {
 			continue
 		}
-		// Without both affixes any unrelated target on the NAS would be
-		// reported, so an unconfigured naming convention disables this check
-		// rather than widening it.
-		if cfg.TargetPrefix == "" || cfg.TargetSuffix == "" {
+		// DetectsStrayTargets is the single statement of when this scan can
+		// run; the caller reports the skip, because a silently disabled check
+		// reads as "nothing was left behind".
+		if !cfg.DetectsStrayTargets() {
 			continue
 		}
 		if !strings.HasPrefix(t.Name, cfg.TargetPrefix) || !strings.HasSuffix(t.Name, cfg.TargetSuffix) {
@@ -432,9 +436,10 @@ func classifyStrays(cfg DriverConfig, inv Inventory, g *graph, refs []Reference)
 			StorageClass: cfg.StorageClass,
 			Target:       t.Name,
 			Objects:      []Object{{Kind: KindTarget, Name: t.Name, ID: strconv.Itoa(t.ID)}},
+			Tokens:       CandidateTokens{Targets: []string{t.Name}},
 		}
 		c.Sessions, _ = countSessions(inv, []Target{t})
-		c.Class, c.Reason = strayVerdict(cfg, inv, refs, c, []Target{t}, "", t.Name)
+		c.Class, c.Reason = strayVerdict(cfg, inv, refs, c)
 		c.Reason = withDetail(c.Reason, "target is mapped to no extent, so it exports nothing")
 		out = append(out, c)
 	}
@@ -460,8 +465,9 @@ func strayShares(cfg DriverConfig, inv Inventory, refs []Reference) []Candidate 
 			StorageClass: cfg.StorageClass,
 			Share:        s.Path,
 			Objects:      []Object{{Kind: KindShare, Name: s.Path, ID: strconv.Itoa(s.ID)}},
+			Tokens:       CandidateTokens{Objects: []string{s.Path}},
 		}
-		c.Class, c.Reason = strayVerdict(cfg, inv, refs, c, nil, s.Path, "")
+		c.Class, c.Reason = strayVerdict(cfg, inv, refs, c)
 		c.Reason = withDetail(c.Reason, "export has no dataset behind it")
 		out = append(out, c)
 	}
@@ -476,8 +482,7 @@ func strayShares(cfg DriverConfig, inv Inventory, refs []Reference) []Candidate 
 // a target resolved: an extent hanging off a target that is mapped to something
 // else contributes no target here, and a resolved-target test would let exactly
 // that case through with the session list unread.
-func strayVerdict(cfg DriverConfig, inv Inventory, refs []Reference, c Candidate, targets []Target,
-	sharePath, objectName string) (Class, string) {
+func strayVerdict(cfg DriverConfig, inv Inventory, refs []Reference, c Candidate) (Class, string) {
 	if cfg.StorageClass == ClassISCSI && !inv.SessionsKnown {
 		return ClassOther, "iSCSI session list unreadable, so liveness is unknown: " + inv.SessionsError
 	}
@@ -485,16 +490,8 @@ func strayVerdict(cfg DriverConfig, inv Inventory, refs []Reference, c Candidate
 		return ClassAttached, fmt.Sprintf("%d open iSCSI session(s)", c.Sessions)
 	}
 	for _, r := range refs {
-		if sharePath != "" && r.namesObject(sharePath) {
-			return ClassClaimed, "PersistentVolume " + r.PVName + " names this export"
-		}
-		if objectName != "" && r.namesObject(objectName) {
-			return ClassClaimed, "PersistentVolume " + r.PVName + " names this object"
-		}
-		for _, t := range targets {
-			if r.namesTarget(t.Name) {
-				return ClassClaimed, "PersistentVolume " + r.PVName + " names target " + t.Name
-			}
+		if named, ok := r.namesCandidate(c.Tokens); ok {
+			return ClassClaimed, "PersistentVolume " + r.PVName + " names " + named
 		}
 	}
 	return ClassOrphaned, ""

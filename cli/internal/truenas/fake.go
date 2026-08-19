@@ -66,7 +66,9 @@ func (f *FakeMiddleware) rowsFor(method string) ([]map[string]any, error) {
 	case "iscsi.extent.query":
 		out := make([]map[string]any, 0, len(f.Extents))
 		for _, e := range f.Extents {
-			out = append(out, map[string]any{"id": float64(e.ID), "name": e.Name, "disk": e.Disk, "path": e.Path})
+			out = append(out, map[string]any{
+				"id": float64(e.ID), "name": e.Name, "type": e.Type, "disk": e.Disk, "path": e.Path,
+			})
 		}
 		return out, nil
 	case "iscsi.target.query":

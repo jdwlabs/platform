@@ -2,6 +2,7 @@ package truenas
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -30,9 +31,18 @@ const (
 	nfsConfigSecret   = "democratic-csi-driver-config"
 	configSecretKey   = "driver-config-file.yaml"
 
-	// APIKeyEnv and AddrEnv let a run that has no cluster access supply the
-	// same two values by hand, mirroring how the gitsync commands accept
-	// Grafana credentials from the environment.
+	// APIKeyEnv is where the credential normally comes from, and it is not a
+	// convenience. The key inside the driver-config Secret is the one
+	// democratic-csi provisions with, and an authentication attempt against it
+	// is a mutation: four rejected attempts invalidated it and took
+	// provisioning, deletion, expansion and snapshots down on both TrueNAS
+	// classes until a human regenerated it in the UI
+	// (docs/adr/0025-truenas-metrics-what-the-graphite-push-can-and-cannot-carry.md).
+	// That ADR also records the key being refused by this very transport, so
+	// reaching for it by default spends a strike for a call that cannot
+	// succeed. Supply a throwaway key here instead.
+	//
+	// AddrEnv lets a run that has no cluster access name the NAS by hand.
 	APIKeyEnv = "PLATFORMCTL_TRUENAS_API_KEY"
 	AddrEnv   = "PLATFORMCTL_TRUENAS_ADDR"
 
@@ -73,24 +83,57 @@ type DriverConfig struct {
 // read is an explicit call that shows up in review.
 func (c DriverConfig) APIKey() string { return c.apiKey }
 
+// DetectsStrayTargets reports whether the stray-target scan can run. Without
+// both naming affixes any unrelated target on the NAS would be reported, so an
+// unconfigured convention disables the check rather than widening it. The
+// caller has to say so out loud: a plan that failed at the target step leaves a
+// target mapped to no extent, and that is exactly what this scan exists to
+// surface on the re-run.
+func (c DriverConfig) DetectsStrayTargets() bool {
+	return c.StorageClass == ClassISCSI && c.TargetPrefix != "" && c.TargetSuffix != ""
+}
+
 // Endpoint is the host:port the middleware is reached on. A host that already
 // carries a port keeps it — an operator pointing PLATFORMCTL_TRUENAS_ADDR at a
 // NAS behind a different TLS port means that port, not that port plus a default
 // appended to it.
+//
+// A trailing colon with nothing after it is not such a port, and a bare
+// bracketed IPv6 literal is the canonical form copied out of a URL rather than
+// a host that carries one. Both are repaired here because both otherwise reach
+// the dialer as an address no NAS answers on.
 func (c DriverConfig) Endpoint() string {
-	if _, _, err := net.SplitHostPort(c.Host); err == nil {
-		return c.Host
+	if host, port, err := net.SplitHostPort(c.Host); err == nil {
+		if port != "" {
+			return net.JoinHostPort(host, port)
+		}
+		return net.JoinHostPort(host, middlewarePort)
 	}
-	return net.JoinHostPort(c.Host, middlewarePort)
+	// SplitHostPort fails on a bare literal, bracketed or not; JoinHostPort
+	// re-adds the brackets an IPv6 address needs, so passing it one already
+	// bracketed would double them.
+	return net.JoinHostPort(strings.TrimSuffix(strings.TrimPrefix(c.Host, "["), "]"), middlewarePort)
 }
+
+// ErrNoAPIKey is returned when nothing supplied a credential and the
+// driver-config key was not opted into. It is a sentinel so the CLI can print
+// the remedy rather than the generic connection help.
+var ErrNoAPIKey = errors.New("no TrueNAS API key: " + APIKeyEnv + " is unset")
 
 // LoadDriverConfigs reads both rendered driver configs. A class whose Secret is
 // absent is reported as an error rather than skipped: a missing config means
 // the command would silently cover one class while claiming to cover two.
-func LoadDriverConfigs(ctx context.Context, kube kubernetes.Interface, classes []string) ([]DriverConfig, error) {
+//
+// allowCSIKey opts into authenticating with the credential inside those
+// Secrets. It defaults off everywhere: that key is what democratic-csi
+// provisions with, a rejection of it erodes it, and ADR-0025 records this
+// transport rejecting it — so a run that reached for it silently would spend a
+// strike on production storage for a call that cannot succeed.
+func LoadDriverConfigs(ctx context.Context, kube kubernetes.Interface, classes []string,
+	allowCSIKey bool) ([]DriverConfig, error) {
 	out := make([]DriverConfig, 0, len(classes))
 	for _, class := range classes {
-		cfg, err := loadDriverConfig(ctx, kube, class)
+		cfg, err := loadDriverConfig(ctx, kube, class, allowCSIKey)
 		if err != nil {
 			return nil, err
 		}
@@ -99,7 +142,8 @@ func LoadDriverConfigs(ctx context.Context, kube kubernetes.Interface, classes [
 	return out, nil
 }
 
-func loadDriverConfig(ctx context.Context, kube kubernetes.Interface, class string) (DriverConfig, error) {
+func loadDriverConfig(ctx context.Context, kube kubernetes.Interface, class string,
+	allowCSIKey bool) (DriverConfig, error) {
 	secretName, provisioner, err := secretForClass(class)
 	if err != nil {
 		return DriverConfig{}, err
@@ -124,7 +168,14 @@ func loadDriverConfig(ctx context.Context, kube kubernetes.Interface, class stri
 	if err != nil {
 		return DriverConfig{}, fmt.Errorf("secret %s/%s: %w", DriverNamespace, secretName, err)
 	}
-	return applyEnvOverrides(cfg), nil
+	return applyCredential(applyEnvOverrides(cfg), allowCSIKey)
+}
+
+func applyCredential(cfg DriverConfig, allowCSIKey bool) (DriverConfig, error) {
+	if os.Getenv(APIKeyEnv) == "" && !allowCSIKey {
+		return DriverConfig{}, ErrNoAPIKey
+	}
+	return cfg, nil
 }
 
 func secretForClass(class string) (secretName, provisioner string, err error) {
@@ -172,10 +223,18 @@ func ParseDriverConfig(class, provisioner string, raw []byte) (DriverConfig, err
 	if cfg.Host == "" {
 		return DriverConfig{}, fmt.Errorf("httpConnection.host is empty")
 	}
-	// An empty parent would make every dataset on the pool a match, so this is
-	// a refusal rather than a default.
+	// An empty parent would make every dataset on the pool a match, and a
+	// single segment is the same mistake one level down: `storage` makes every
+	// direct child of the pool a candidate. Both are refusals rather than
+	// defaults, because the parent is the only bound on what this command will
+	// ever consider deleting.
 	if cfg.DatasetParent == "" {
 		return DriverConfig{}, fmt.Errorf("zfs.datasetParentName is empty")
+	}
+	if !strings.Contains(cfg.DatasetParent, "/") {
+		return DriverConfig{}, fmt.Errorf(
+			"zfs.datasetParentName %q is a pool root, so every dataset directly under it would be a candidate",
+			cfg.DatasetParent)
 	}
 	return cfg, nil
 }

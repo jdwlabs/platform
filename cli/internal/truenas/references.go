@@ -108,6 +108,23 @@ func (r Reference) namesObject(identifier string) bool {
 	return false
 }
 
+// namesCandidate reports whether this PV asserts any identifier belonging to
+// one candidate, and returns the identifier it matched so a refusal can name
+// the thing that held the storage rather than only the PV.
+func (r Reference) namesCandidate(tokens CandidateTokens) (string, bool) {
+	for _, o := range tokens.Objects {
+		if r.namesObject(o) {
+			return o, true
+		}
+	}
+	for _, t := range tokens.Targets {
+		if r.namesTarget(t) {
+			return "target " + t, true
+		}
+	}
+	return "", false
+}
+
 // namesTarget matches an iSCSI target by bare name or as the suffix of an IQN.
 func (r Reference) namesTarget(target string) bool {
 	if target == "" {

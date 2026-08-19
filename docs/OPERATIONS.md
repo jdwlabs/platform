@@ -838,8 +838,18 @@ None of it is visible to `kubectl`, and none of it ages out.
 This supersedes the manual `midclt` procedure for NFS, which had no notion of an
 extent, a target or the mapping between them and so never transferred to iSCSI.
 
+The credential comes from `PLATFORMCTL_TRUENAS_API_KEY`, and it should be a
+throwaway read-only key minted in the TrueNAS UI. The key inside the
+`democratic-csi` driver-config Secret is **not** used unless
+`--truenas-use-csi-api-key` says so: an authentication attempt against it is a
+mutation, four rejected ones invalidated it and took provisioning, deletion,
+expansion and snapshots down on both classes, and ADR-0025 records this
+transport rejecting it outright. A rejection prints help saying not to re-run —
+follow it.
+
 ```
 # what is out there, and what the tool thinks of it
+export PLATFORMCTL_TRUENAS_API_KEY=<throwaway read-only key>
 platformctl cluster volumes truenas list
 platformctl cluster volumes truenas list --class orphaned --full
 
@@ -883,6 +893,18 @@ NAS-side signal that does survive is an export **above** the dataset, which
 makes everything beneath it reachable; a dataset covered by one is refused. Take
 that asymmetry into account before reclaiming NFS datasets on a cluster whose
 PVs are not fully synced.
+
+The gap cannot be closed from the NAS, so it is disclosed where the decision is
+made rather than only here: any run whose selected set contains a `truenas-nfs`
+candidate emits a standing `warnings` entry saying the class has no session
+rung, under `--dry-run` and `--confirm` alike.
+
+A reclaim that stops part-way is resumable, and says so. The candidate whose
+plan failed is in neither the `deleted` nor the `refused` table — part of its
+object graph is gone and part is not — so it is reported on its own
+`incomplete` line. Deleting an object that is already absent succeeds, and a
+re-run re-classifies everything from live state, so resuming is the same
+command again.
 
 A dataset under the driver's `detachedSnapshotsDatasetParentName` is refused
 outright. This command has no delete plan for a snapshot tree, and when that
