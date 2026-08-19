@@ -156,3 +156,12 @@ pod is subject to a restrictive policy today, because the only namespaces with
 `enforce: true` have no pods. Full endpoint coverage would still leave that
 true. Coverage is a precondition for enforcement mattering, not a substitute
 for turning it on.
+
+**This record was written as 0027 and renumbered.** A concurrently open branch
+had already taken that number for an unrelated decision. ADR 0017's
+consequences claim the collision race "now fails a required check instead of
+landing"; it does not. `tools/check-adr-numbering.py` scans one working tree,
+so two branches that each take the next free number both pass, and the
+collision only becomes visible when the second one merges — or, as here, when
+a human reads both open PRs. The check closes the duplicate-on-`main` case,
+not the concurrent-allocation case that produces it.
