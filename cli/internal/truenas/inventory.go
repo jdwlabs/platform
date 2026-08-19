@@ -59,6 +59,9 @@ func (d Dataset) IsZvol() bool { return strings.EqualFold(d.Type, "VOLUME") }
 type Extent struct {
 	ID   int
 	Name string
+	// Type distinguishes a zvol-backed extent from a file-backed one, which is
+	// the only kind that legitimately carries no Disk.
+	Type string
 	Disk string
 	Path string
 }
@@ -207,6 +210,7 @@ func queryExtents(ctx context.Context, c Caller) ([]Extent, error) {
 	var rows []struct {
 		ID   int    `json:"id"`
 		Name string `json:"name"`
+		Type string `json:"type"`
 		Disk string `json:"disk"`
 		Path string `json:"path"`
 	}
@@ -215,7 +219,19 @@ func queryExtents(ctx context.Context, c Caller) ([]Extent, error) {
 	}
 	out := make([]Extent, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, Extent{ID: r.ID, Name: r.Name, Disk: r.Disk, Path: r.Path})
+		// A call that succeeds is not the same as a row the decoder can read.
+		// `disk` is the only statement of which zvol an extent exports, so a
+		// field this code cannot read collapses the zvol→extent→target join
+		// silently: sharedTargets finds nothing to share and the session rung
+		// finds no target to count sessions on, and every attached zvol falls
+		// through to orphaned. A file-backed extent is the one legitimate row
+		// with no disk, and it says so in its type.
+		if r.Disk == "" && !strings.EqualFold(r.Type, "FILE") {
+			return nil, fmt.Errorf(
+				"iscsi extent %d (%q) has type %q and no readable disk field, so which zvol it exports is unknown",
+				r.ID, r.Name, r.Type)
+		}
+		out = append(out, Extent{ID: r.ID, Name: r.Name, Type: r.Type, Disk: r.Disk, Path: r.Path})
 	}
 	return out, nil
 }
@@ -276,8 +292,20 @@ func querySessions(ctx context.Context, c Caller) ([]Session, error) {
 		return nil, fmt.Errorf("list iscsi sessions: %w", err)
 	}
 	out := make([]Session, 0, len(rows))
+	named := false
 	for _, r := range rows {
+		if r.Target != "" {
+			named = true
+		}
 		out = append(out, Session{Target: r.Target, Initiator: r.Initiator})
+	}
+	// Rows the decoder cannot read are not an absence of sessions. Every
+	// Session carrying an empty target makes countSessions return 0 for every
+	// zvol while SessionsKnown stays true, which removes the liveness rung
+	// without removing the verdicts that depend on it — so it is reported as
+	// an unreadable session list instead, and the existing refusal applies.
+	if len(out) > 0 && !named {
+		return nil, fmt.Errorf("list iscsi sessions: %d row(s) returned with no readable target field", len(out))
 	}
 	return out, nil
 }

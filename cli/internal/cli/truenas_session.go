@@ -40,7 +40,7 @@ func openTrueNASSessions(ctx context.Context, shared *truenasGlobals) (truenasSe
 	if err != nil {
 		return nil, err
 	}
-	cfgs, err := truenas.LoadDriverConfigs(ctx, kube, classes)
+	cfgs, err := truenas.LoadDriverConfigs(ctx, kube, classes, shared.UseCSIKey)
 	if err != nil {
 		return nil, err
 	}
@@ -83,10 +83,10 @@ func (s truenasSessions) Close() {
 // cluster's PersistentVolumes, which are read once and shared: a claim is a
 // property of the cluster, not of one storage class.
 //
-// The warnings it returns are the reads that failed without failing the whole
-// command. A degraded read changes what every verdict from it can mean, so it
-// is reported at the top of the output rather than left implicit in the reason
-// on rows an operator may have filtered away.
+// The warnings it returns are what changes the meaning of the verdicts without
+// failing the command: a read that degraded, and a check the driver config
+// cannot support. Either one is reported at the top of the output rather than
+// left implicit in the reason on rows an operator may have filtered away.
 func (s truenasSessions) Classify(ctx context.Context) ([]truenas.Candidate, []string, error) {
 	if len(s) == 0 {
 		return nil, nil, nil
@@ -107,6 +107,15 @@ func (s truenasSessions) Classify(ctx context.Context) ([]truenas.Candidate, []s
 				"%s: the iSCSI session list could not be read, so no zvol can be proved idle: %s",
 				sess.cfg.StorageClass, inv.SessionsError))
 		}
+		// A skipped stray-target scan looks identical to a clean NAS, and it is
+		// the scan a resumed run depends on: a plan that failed at the target
+		// step leaves a target mapped to no extent and nothing else to find it.
+		if sess.cfg.StorageClass == truenas.ClassISCSI && !sess.cfg.DetectsStrayTargets() {
+			warnings = append(warnings, fmt.Sprintf(
+				"%s: iscsi.namePrefix/nameSuffix are unset in the driver config, so a target left behind "+
+					"by a partial delete cannot be told from an unrelated one and is not reported",
+				sess.cfg.StorageClass))
+		}
 		out = append(out, truenas.Classify(sess.cfg, inv, refs)...)
 	}
 	sortTrueNASCandidates(out)
@@ -114,27 +123,33 @@ func (s truenasSessions) Classify(ctx context.Context) ([]truenas.Candidate, []s
 }
 
 // Reclaim executes each candidate's plan in order and returns the candidates
-// whose plan completed. The first failure stops the run: the plans are ordered
-// dependency chains, so continuing past a failed step would leave rows behind
-// that the next command has no way to attribute.
-func (s truenasSessions) Reclaim(ctx context.Context, selected []truenas.Candidate) ([]truenas.Candidate, error) {
-	byClass := map[string]*truenasSession{}
+// whose plan completed, plus the name of the one that stopped the run. The
+// first failure stops it: the plans are ordered dependency chains, so
+// continuing past a failed step would leave rows behind that the next command
+// has no way to attribute.
+//
+// The failed name is returned rather than folded into the error because that
+// candidate is in neither table — its plan is partly executed — and it is the
+// one an operator has to look at before resuming.
+func (s truenasSessions) Reclaim(ctx context.Context, selected []truenas.Candidate) (
+	deleted []truenas.Candidate, failed string, err error) {
+	// One Reclaimer per class, not per candidate: it caches the run's single
+	// re-read of the cluster's PersistentVolumes.
+	reclaimers := map[string]*truenas.Reclaimer{}
 	for _, sess := range s {
-		byClass[sess.cfg.StorageClass] = sess
+		reclaimers[sess.cfg.StorageClass] = truenas.NewReclaimer(sess.call, sess.kube)
 	}
-	var deleted []truenas.Candidate
 	for _, c := range selected {
-		sess, ok := byClass[c.StorageClass]
+		r, ok := reclaimers[c.StorageClass]
 		if !ok {
-			return deleted, fmt.Errorf("no open connection for storage class %s", c.StorageClass)
+			return deleted, c.Name, fmt.Errorf("no open connection for storage class %s", c.StorageClass)
 		}
-		r := truenas.NewReclaimer(sess.call, sess.kube)
 		if err := r.Run(ctx, c); err != nil {
-			return deleted, err
+			return deleted, c.Name, err
 		}
 		deleted = append(deleted, c)
 	}
-	return deleted, nil
+	return deleted, "", nil
 }
 
 func selectedClasses(storageClass string) ([]string, error) {

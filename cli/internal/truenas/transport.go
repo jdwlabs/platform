@@ -89,9 +89,17 @@ func (e *rpcError) Error() string {
 	return fmt.Sprintf("truenas rpc error %d: %s: %s", e.Code, e.Message, string(e.Data))
 }
 
+// ErrAPIKeyRejected is returned when the middleware accepts the connection and
+// refuses the credential. It is a sentinel because the remedy is never "try
+// again": an authentication attempt is a mutation, and repeating one against
+// the shared democratic-csi key is what invalidated it in ADR-0025.
+var ErrAPIKeyRejected = errors.New("TrueNAS rejected the API key")
+
 // Dial opens the middleware connection and authenticates with the API key.
 // The key is never stored on the returned client and never appears in an error
 // string: an authentication failure reports the rejection, not the credential.
+//
+// One attempt, no retry, for the reason above.
 func Dial(ctx context.Context, host string, apiKey string, tlsOpts TLSOptions) (*WSClient, error) {
 	tlsCfg, err := buildTLSConfig(host, tlsOpts)
 	if err != nil {
@@ -115,11 +123,19 @@ func Dial(ctx context.Context, host string, apiKey string, tlsOpts TLSOptions) (
 	var ok bool
 	if err := c.Call(ctx, "auth.login_with_api_key", []any{apiKey}, &ok); err != nil {
 		_ = c.Close()
+		// The middleware answers a bad key with an error as readily as with
+		// false, so a refusal from the method itself is a rejection and
+		// carries the same "do not repeat" meaning. A transport failure does
+		// not — nothing there reached the key.
+		var rpcErr *rpcError
+		if errors.As(err, &rpcErr) {
+			return nil, fmt.Errorf("%w: %w", ErrAPIKeyRejected, err)
+		}
 		return nil, fmt.Errorf("authenticate to TrueNAS: %w", err)
 	}
 	if !ok {
 		_ = c.Close()
-		return nil, fmt.Errorf("TrueNAS rejected the truenas-csi API key")
+		return nil, ErrAPIKeyRejected
 	}
 	return c, nil
 }

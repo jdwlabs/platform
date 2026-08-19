@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -33,6 +34,9 @@ type truenasGlobals struct {
 	StorageClass string
 	CAFile       string
 	SkipVerify   bool
+	// UseCSIKey opts into authenticating with the democratic-csi driver
+	// config's own credential. It defaults off: see truenasConnectHelp.
+	UseCSIKey bool
 }
 
 func newTrueNASVolumesCmd(g *Globals) *cobra.Command {
@@ -61,6 +65,12 @@ named for one volume can be mapped to an extent that exports another. Every
 linkage here is resolved through those IDs, and a candidate whose target also
 exports something else is refused rather than deleted.
 
+Authentication reads PLATFORMCTL_TRUENAS_API_KEY. The democratic-csi
+driver-config credential is not used unless --truenas-use-csi-api-key says so:
+an authentication attempt against it is a mutation, and rejected attempts have
+invalidated it and taken provisioning, deletion, expansion and snapshots down on
+both TrueNAS classes (ADR-0025). Use a throwaway read-only key.
+
 Run with no subcommand to list everything.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -73,6 +83,9 @@ Run with no subcommand to list everything.`,
 		"PEM bundle the TrueNAS certificate must chain to")
 	cmd.PersistentFlags().BoolVar(&shared.SkipVerify, "truenas-insecure-skip-tls-verify", false,
 		"accept the NAS certificate without verifying it (a stock TrueNAS ships a self-signed one)")
+	cmd.PersistentFlags().BoolVar(&shared.UseCSIKey, "truenas-use-csi-api-key", false,
+		"authenticate with the democratic-csi driver-config key instead of "+truenas.APIKeyEnv+
+			" (a rejection of that key takes CSI provisioning down on both classes — see ADR-0025)")
 
 	cmd.AddCommand(newTrueNASListCmd(g, shared))
 	cmd.AddCommand(newTrueNASReclaimCmd(g, shared))
@@ -135,9 +148,18 @@ dataset an export above it still makes reachable is refused for that reason.
 --name targets are checked against the same rules and refused if they fail,
 which is why "delete everything unmatched" is not offered.
 
+Because that rung is missing, every run whose selected set contains a
+truenas-nfs candidate reports it as a standing warnings entry, under --dry-run
+and --confirm alike.
+
 Objects are deleted in dependency order — target-extent mapping, extent, target,
 NFS export, dataset, then the Released PersistentVolume — and each one is
-re-read and matched against its exact name immediately before the delete.`,
+re-read and matched against its exact name immediately before the delete.
+
+A plan that stops part-way is resumable. Its candidate is reported on an
+"incomplete" line, deleting an object that is already gone succeeds, and a
+re-run re-classifies everything from live state, so resuming is this same
+command again.`,
 		Example: `  platformctl cluster volumes truenas reclaim --all-orphaned --dry-run
   platformctl cluster volumes truenas reclaim --all-orphaned --confirm
   platformctl cluster volumes truenas reclaim --name pvc-ae4ffd70-... --confirm`,
@@ -170,7 +192,7 @@ func runTrueNASList(cmd *cobra.Command, g *Globals, shared *truenasGlobals, opts
 
 	cands, warnings, err := loadTrueNASCandidates(cmd.Context(), shared)
 	if err != nil {
-		return reportCLIError(out, err, truenasConnectHelp(shared))
+		return reportCLIError(out, err, truenasConnectHelp(shared, err))
 	}
 
 	shown := cands
@@ -179,7 +201,7 @@ func runTrueNASList(cmd *cobra.Command, g *Globals, shared *truenasGlobals, opts
 	}
 
 	if g.JSON {
-		return emitTrueNASEvents(out, g, "list", shown, fields, truenasCountLine(cands), warnings)
+		return emitTrueNASEvents(out, g, "list", shown, fields, truenasCountLine(cands), warnings, "")
 	}
 
 	if err := display.ToonScalar(out, "count", truenasCountLine(cands)); err != nil {
@@ -229,63 +251,82 @@ func runTrueNASReclaim(cmd *cobra.Command, g *Globals, shared *truenasGlobals, o
 
 	sessions, err := openTrueNASSessions(cmd.Context(), shared)
 	if err != nil {
-		return reportCLIError(out, err, truenasConnectHelp(shared))
+		return reportCLIError(out, err, truenasConnectHelp(shared, err))
 	}
 	defer sessions.Close()
 
 	cands, warnings, err := sessions.Classify(cmd.Context())
 	if err != nil {
-		return reportCLIError(out, err, truenasConnectHelp(shared))
+		return reportCLIError(out, err, truenasConnectHelp(shared, err))
 	}
 
-	selected, refused := selectTrueNASTargets(cands, opts)
-
-	mode := "delete"
+	res := truenasReclaimResult{Mode: "delete", Warnings: warnings}
 	if g.DryRun {
-		mode = "dry-run"
+		res.Mode = "dry-run"
+	}
+	res.Selected, res.Refused = selectTrueNASTargets(cands, opts)
+	// The NFS class has no liveness rung the NAS can answer, so every verdict
+	// in a set containing one inherits that caveat — including the preview,
+	// which is the output an operator decides on.
+	if warn := truenasNFSLivenessWarning(res.Selected); warn != "" {
+		res.Warnings = append(res.Warnings, warn)
 	}
 
-	var deleted []truenas.Candidate
 	var deleteErr error
 	if opts.Confirm {
-		deleted, deleteErr = sessions.Reclaim(cmd.Context(), selected)
+		res.Deleted, res.Failed, deleteErr = sessions.Reclaim(cmd.Context(), res.Selected)
 	}
 
 	orphanTotal := len(filterTrueNASClass(cands, truenas.ClassOrphaned))
-	summary := truenasResultLine(mode, selected, deleted, refused, len(cands), orphanTotal)
+	res.Summary = truenasResultLine(res.Mode, res.Selected, res.Deleted, res.Refused, len(cands), orphanTotal)
 
 	if g.JSON {
-		reported, table := selected, "reclaim"
+		reported, table := res.Selected, "reclaim"
 		if opts.Confirm {
-			reported, table = deleted, "deleted"
+			reported, table = res.Deleted, "deleted"
 		}
-		if err := emitTrueNASEvents(out, g, table, reported, truenasReclaimFields, summary, warnings); err != nil {
+		if err := emitTrueNASEvents(out, g, table, reported, truenasReclaimFields,
+			res.Summary, res.Warnings, res.Failed); err != nil {
 			return err
 		}
-	} else if err := writeTrueNASReclaimReport(out, mode, opts, selected, deleted, refused, summary, warnings); err != nil {
+	} else if err := writeTrueNASReclaimReport(out, opts, res); err != nil {
 		return err
 	}
 
 	if deleteErr != nil {
-		return deleteErr
+		return reportCLIError(out, deleteErr, truenasResumeHelp(res.Failed))
 	}
-	if len(refused) > 0 {
-		return fmt.Errorf("%d candidate(s) are not reclaimable", len(refused))
+	if len(res.Refused) > 0 {
+		return fmt.Errorf("%d candidate(s) are not reclaimable", len(res.Refused))
 	}
 	return nil
 }
 
-func writeTrueNASReclaimReport(out io.Writer, mode string, opts *truenasReclaimOptions,
-	selected, deleted, refused []truenas.Candidate, summary string, warnings []string) error {
-	if err := display.ToonScalar(out, "mode", mode); err != nil {
+// truenasReclaimResult is one reclaim run's outcome, in the order the report
+// prints it.
+type truenasReclaimResult struct {
+	Mode     string
+	Selected []truenas.Candidate
+	Deleted  []truenas.Candidate
+	Refused  []truenas.Candidate
+	// Failed names the candidate whose plan stopped the run. Its objects are
+	// partly deleted, so it belongs to neither table above and would otherwise
+	// appear only inside an error string.
+	Failed   string
+	Summary  string
+	Warnings []string
+}
+
+func writeTrueNASReclaimReport(out io.Writer, opts *truenasReclaimOptions, res truenasReclaimResult) error {
+	if err := display.ToonScalar(out, "mode", res.Mode); err != nil {
 		return err
 	}
-	if err := writeTrueNASWarnings(out, warnings); err != nil {
+	if err := writeTrueNASWarnings(out, res.Warnings); err != nil {
 		return err
 	}
-	table, rows := "reclaim", selected
+	table, rows := "reclaim", res.Selected
 	if opts.Confirm {
-		table, rows = "deleted", deleted
+		table, rows = "deleted", res.Deleted
 	}
 	if err := display.ToonTable(out, table, truenasReclaimFields, truenasRows(rows, truenasReclaimFields)); err != nil {
 		return err
@@ -297,33 +338,70 @@ func writeTrueNASReclaimReport(out io.Writer, mode string, opts *truenasReclaimO
 		truenasObjectRows(rows)); err != nil {
 		return err
 	}
-	if len(refused) > 0 {
+	if len(res.Refused) > 0 {
 		if err := display.ToonTable(out, "refused", []string{"name", "class", "reason"},
-			truenasRows(refused, []string{"name", "class", "reason"})); err != nil {
+			truenasRows(res.Refused, []string{"name", "class", "reason"})); err != nil {
 			return err
 		}
 	}
-	if err := display.ToonScalar(out, "result", summary); err != nil {
+	// A candidate whose plan stopped mid-way is in no table: some of its
+	// objects are gone and some are not, which is neither deleted nor refused.
+	if res.Failed != "" {
+		if err := display.ToonScalar(out, "incomplete", res.Failed); err != nil {
+			return err
+		}
+	}
+	if err := display.ToonScalar(out, "result", res.Summary); err != nil {
 		return err
 	}
 
 	var help []string
-	if mode == "dry-run" && len(selected) > 0 {
-		help = append(help, fmt.Sprintf("Re-run with --confirm to delete these %d candidate(s)", len(selected)))
+	if res.Mode == "dry-run" && len(res.Selected) > 0 {
+		help = append(help, fmt.Sprintf("Re-run with --confirm to delete these %d candidate(s)", len(res.Selected)))
 	}
-	if len(refused) > 0 {
+	if len(res.Refused) > 0 {
 		help = append(help,
 			"Run `platformctl cluster volumes truenas list --fields name,class,reason` to see what holds them")
 	}
+	// The resume line is not repeated here: the failure that produced it goes
+	// through reportCLIError, which prints it under the error it belongs to.
 	if len(help) == 0 {
 		return nil
 	}
 	return display.ToonList(out, "help", help)
 }
 
-// writeTrueNASWarnings reports a read that degraded the run. It sits directly
-// under the count or the mode line so the caveat is read before the rows it
-// applies to, rather than after a table an operator may have stopped reading.
+// truenasResumeHelp says how to finish a plan that stopped part-way. Every
+// delete is idempotent — an object already gone reports success — and a re-run
+// re-classifies from live state, so resuming is the same command again rather
+// than a repair procedure.
+func truenasResumeHelp(failed string) string {
+	if failed == "" {
+		return "Re-run the same command to resume: completed deletes are idempotent and " +
+			"the remaining objects are re-classified from live state"
+	}
+	return "Re-run the same command to resume " + failed +
+		": completed deletes are idempotent and the remaining objects are re-classified from live state"
+}
+
+// truenasNFSLivenessWarning states the rung this backend does not have,
+// whenever the selected set is exposed to it. The gap is documented, but a
+// document is not what an operator reads before typing --confirm.
+func truenasNFSLivenessWarning(selected []truenas.Candidate) string {
+	for _, c := range selected {
+		if c.StorageClass == truenas.ClassNFS {
+			return truenas.ClassNFS + " has no session rung; a dataset an external client mounts, " +
+				"or one whose PersistentVolume is not resynced, is indistinguishable from an idle one"
+		}
+	}
+	return ""
+}
+
+// writeTrueNASWarnings reports what changes the meaning of the rows below it —
+// a read that degraded the run, a check that could not run, or a rung this
+// backend does not have. It sits directly under the count or the mode line so
+// the caveat is read before the rows it applies to, rather than after a table
+// an operator may have stopped reading.
 func writeTrueNASWarnings(out io.Writer, warnings []string) error {
 	if len(warnings) == 0 {
 		return nil
@@ -523,7 +601,7 @@ func truenasFieldValue(c truenas.Candidate, field string) string {
 // stream the repo's --json contract defines, so an agent parsing events sees the
 // same rows and the same aggregate line.
 func emitTrueNASEvents(out io.Writer, g *Globals, phaseName string,
-	cands []truenas.Candidate, fields []string, summary string, warnings []string) error {
+	cands []truenas.Candidate, fields []string, summary string, warnings []string, incomplete string) error {
 	em := NewEmitter(out, g.JSON)
 	if g.Session != nil {
 		em.SetSession(g.Session)
@@ -548,6 +626,13 @@ func emitTrueNASEvents(out io.Writer, g *Globals, phaseName string,
 			Detail:  detail,
 		})
 	}
+	// A candidate whose plan stopped part-way is in neither reported set, so
+	// the event stream states it as its own row rather than leaving it to the
+	// error text.
+	if incomplete != "" {
+		em.Emit(Event{Phase: "truenas-volumes", Name: incomplete, Status: "fail",
+			Message: "plan stopped part-way; re-run to resume, completed deletes are idempotent"})
+	}
 	em.Emit(Event{Phase: "truenas-volumes", Name: phaseName, Status: "ok", Message: summary})
 	return nil
 }
@@ -561,8 +646,25 @@ func loadTrueNASCandidates(ctx context.Context, shared *truenasGlobals) ([]truen
 	return sessions.Classify(ctx)
 }
 
-func truenasConnectHelp(shared *truenasGlobals) string {
-	if shared.CAFile == "" && !shared.SkipVerify {
+// truenasConnectHelp names the remedy for the failure that actually happened.
+// The credential cases come first and never suggest re-running: an
+// authentication attempt against the shared democratic-csi key is a mutation,
+// and four of them invalidated it and took provisioning, deletion, expansion
+// and snapshots down on both TrueNAS classes (ADR-0025). Generic
+// "check the secrets synced" advice on a rejection reads as an invitation to
+// spend another strike.
+func truenasConnectHelp(shared *truenasGlobals, err error) string {
+	switch {
+	case errors.Is(err, truenas.ErrNoAPIKey):
+		return "Mint a throwaway read-only key in the TrueNAS UI and export " + truenas.APIKeyEnv +
+			"; --truenas-use-csi-api-key spends the shared democratic-csi credential instead (ADR-0025)"
+	case errors.Is(err, truenas.ErrAPIKeyRejected) && shared.UseCSIKey:
+		return "Do not re-run: each attempt erodes the shared democratic-csi credential and takes CSI " +
+			"provisioning down on both classes (ADR-0025). Supply a throwaway key via " + truenas.APIKeyEnv
+	case errors.Is(err, truenas.ErrAPIKeyRejected):
+		return "Do not re-run with --truenas-use-csi-api-key: that key is what democratic-csi provisions " +
+			"with and a rejection erodes it (ADR-0025). Mint a fresh key and re-export " + truenas.APIKeyEnv
+	case shared.CAFile == "" && !shared.SkipVerify:
 		return "A stock TrueNAS presents a self-signed certificate: pass --truenas-ca-file, " +
 			"or --truenas-insecure-skip-tls-verify on a trusted LAN"
 	}

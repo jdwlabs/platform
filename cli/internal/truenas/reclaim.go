@@ -21,6 +21,13 @@ import (
 type Reclaimer struct {
 	call Caller
 	kube kubernetes.Interface
+
+	// refs is the cluster's PersistentVolumes, re-read once for the whole run
+	// and shared by every candidate whose verdict rests on their absence. One
+	// list call per run is the point: the alternative is either no re-check at
+	// all or a full list per candidate.
+	refs       []Reference
+	refsLoaded bool
 }
 
 func NewReclaimer(call Caller, kube kubernetes.Interface) *Reclaimer {
@@ -48,13 +55,17 @@ func (r *Reclaimer) Run(ctx context.Context, c Candidate) error {
 }
 
 // preflight re-reads the cluster-side state the candidate's verdict rests on.
-// Both halves are checked: the PersistentVolume's phase, and the claim that
-// would have moved it, because a claim is resolved from the
+// Which state that is depends on the verdict: a candidate a PersistentVolume
+// named is rechecked by name, and one that none named is rechecked against the
+// whole PV list.
+//
+// For the named branch both halves are checked: the PersistentVolume's phase,
+// and the claim that would have moved it, because a claim is resolved from the
 // PersistentVolumeClaim's spec.volumeName and the binder sets one before the
 // phase catches up.
 func (r *Reclaimer) preflight(ctx context.Context, c Candidate) error {
 	if c.PV == "" {
-		return nil
+		return r.preflightUnreferenced(ctx, c)
 	}
 	pv, err := r.kube.CoreV1().PersistentVolumes().Get(ctx, c.PV, metav1.GetOptions{})
 	if err != nil {
@@ -83,6 +94,40 @@ func (r *Reclaimer) preflight(ctx context.Context, c Candidate) error {
 			c.Name, claim.Namespace, claim.Name, c.PV)
 	}
 	return nil
+}
+
+// preflightUnreferenced re-reads the cluster for a candidate that no
+// PersistentVolume named. That is the majority of orphans — a fully deleted PVC
+// and PV, plus every stray — and it is the branch with nothing to re-read by
+// name, so without this its verdict is the one fact never rechecked before the
+// storage is destroyed. An etcd or Velero restore that has replayed the PVs
+// since classification is exactly the case this catches.
+func (r *Reclaimer) preflightUnreferenced(ctx context.Context, c Candidate) error {
+	refs, err := r.references(ctx)
+	if err != nil {
+		return fmt.Errorf("re-read the cluster's PersistentVolumes before reclaiming %s: %w", c.Name, err)
+	}
+	for _, ref := range refs {
+		named, ok := ref.namesCandidate(c.Tokens)
+		if !ok {
+			continue
+		}
+		return fmt.Errorf("refusing to reclaim %s: PersistentVolume %s now names %s",
+			c.Name, ref.PVName, named)
+	}
+	return nil
+}
+
+func (r *Reclaimer) references(ctx context.Context) ([]Reference, error) {
+	if r.refsLoaded {
+		return r.refs, nil
+	}
+	refs, err := ResolveReferences(ctx, r.kube)
+	if err != nil {
+		return nil, err
+	}
+	r.refs, r.refsLoaded = refs, true
+	return refs, nil
 }
 
 // Delete removes one planned object. An object that is already absent is the
