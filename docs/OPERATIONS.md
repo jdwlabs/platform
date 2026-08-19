@@ -532,9 +532,11 @@ route tree, not of the receiver list, so read it with
 rather than by eye.
 
 **Who gets what:** `severity: critical` reaches both the `ai-sre` relay and
-Discord. `severity: warning` reaches the relay only — deliberately, because
-mirroring the chart's warning population into Discord as well would bury the
-criticals. Anything else (`info`, no `severity`) falls through to the root
+Discord. `severity: warning` **without a `tenant` label** reaches the relay
+only — deliberately, because mirroring the chart's warning population into
+Discord as well would bury the criticals. A `warning` that *does* carry a
+`tenant` label also reaches Discord, via its tenant route; see "Tenant alert
+routing" below. Anything else (`info`, no `severity`) falls through to the root
 `discord` receiver. `Watchdog` and `InfoInhibitor` are dropped at `null`
 routes that sit at the top of the list, so they are dropped whatever other
 labels they carry. A `continue: true` route resumes at the next *sibling*
