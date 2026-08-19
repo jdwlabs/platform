@@ -61,11 +61,15 @@ spec:
         # not that nothing needed doing.
         #
         # Watchdog is excluded by the severity matcher, which is the same
-        # matcher the Alertmanager ai-sre route uses — the condition therefore
+        # matcher the Alertmanager ai-sre route uses, minus the two alertnames
+        # the 'null' routes above it claim first — the condition therefore
         # reads "alerts that should have reached the relay", not "any series in
-        # ALERTS". Note this alert satisfies its own precondition once firing;
-        # it clears on the first processed alert, not on the cluster going
-        # quiet, which is the correct behaviour for a dead-man's-switch.
+        # ALERTS". Neither of those alertnames carries critical or warning, so
+        # the difference is empty today and this stays an exact count.
+        #
+        # Note this alert satisfies its own precondition once firing; it clears
+        # on the first processed alert, not on the cluster going quiet, which
+        # is the correct behaviour for a dead-man's-switch.
         - alert: AiSreRelayProcessingNothing
           expr: |
             sum(increase(ai_sre_relay_investigations_run_total[6h])) == 0
