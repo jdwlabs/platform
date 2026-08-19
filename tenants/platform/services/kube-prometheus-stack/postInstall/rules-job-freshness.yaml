@@ -190,6 +190,16 @@ spec:
         # next one to adopt this by "emitting the gauges", and a half-adopted
         # contract that reports nothing is indistinguishable from a healthy
         # backup. These two rules are what make partial adoption say so.
+        #
+        # The two are aggregated differently on purpose. A budget is legitimate
+        # at job level — that is the whole reason BackupArtifactStale carries a
+        # job-level fallback branch — so checking for one per artifact class
+        # would fire on a correct producer. Size has no such fallback: it is a
+        # property of one artifact and BackupArtifactEmpty compares it per
+        # artifact class. Collapsing the size check to the job would let a
+        # producer publish bytes for one class only and silence the guard for
+        # every other class, which is this file's own failure mode reappearing
+        # inside the rule added to prevent it.
         - alert: BackupBudgetMissing
           expr: |
             count by (backup_job) (backup_last_success_timestamp_seconds)
@@ -205,15 +215,15 @@ spec:
 
         - alert: BackupArtifactSizeMissing
           expr: |
-            count by (backup_job) (backup_last_success_timestamp_seconds)
-            unless on (backup_job)
-            count by (backup_job) (backup_last_artifact_bytes)
+            count by (backup_job, artifact) (backup_last_success_timestamp_seconds)
+            unless on (backup_job, artifact)
+            count by (backup_job, artifact) (backup_last_artifact_bytes)
           for: 1h
           labels:
             severity: warning
           annotations:
-            summary: "Backup {{ $labels.backup_job }} publishes no artifact size"
-            description: "{{ $labels.backup_job }} reports a success timestamp but no backup_last_artifact_bytes, so BackupArtifactEmpty can never fire for it — the zero-byte artifact case is unmonitored for this producer."
+            summary: "Backup {{ $labels.backup_job }} publishes no artifact size{{ if $labels.artifact }} for {{ $labels.artifact }}{{ end }}"
+            description: "{{ $labels.backup_job }} reports a success timestamp but no backup_last_artifact_bytes{{ if $labels.artifact }} for artifact class {{ $labels.artifact }}{{ end }}, so BackupArtifactEmpty can never fire for it — the zero-byte artifact case is unmonitored there."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
         # A producer that can quiesce its source publishes whether the copy
