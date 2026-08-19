@@ -12,12 +12,16 @@ spec:
     # the application crashlooping on EROFS.
     - name: storage-integrity
       rules:
-        # Reads the ro flag on the CSI staging mounts. Those are the right
-        # mountpoints to watch: node-exporter's default exclusions drop
-        # /var/lib/kubelet/pods/... — the per-pod bind mount — but not
-        # /var/lib/kubelet/plugins/kubernetes.io/csi/.../globalmount, where every
-        # attached PVC is staged first. Both views share one superblock, so the
-        # staging mount is the complete picture, not a sample.
+        # Reads the ro flag on the CSI staging mounts, where every attached PVC
+        # is staged before any pod binds it. The per-pod bind mounts under
+        # /var/lib/kubelet/pods/... share that same superblock, so the staging
+        # mount is the complete picture, not a sample.
+        #
+        # This selector depends on the narrowed
+        # collector.filesystem.mount-points-exclude in the service values.yaml:
+        # the chart ships node-exporter excluding all of /var/lib/kubelet, and
+        # against that default this expression matches an empty vector and can
+        # never fire. The two have to move together.
         #
         # What this does NOT catch, and the reason the runbook entry matters more
         # than the rule: since Linux 6.12 ext4's error handler no longer sets
@@ -36,13 +40,23 @@ spec:
           annotations:
             summary: "CSI volume mounted read-only on {{ $labels.instance }}"
             description: "{{ $labels.mountpoint }} on {{ $labels.instance }} ({{ $labels.device }}) is mounted read-only. Writes to the workload using it are failing with EROFS."
-            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
         # The signal that does survive the gap above. A filesystem left damaged
         # by an aborted journal cannot be staged: the iSCSI driver preens it with
         # fsck before mounting, and fsck refuses anything needing a decision, so
         # the volume fails to stage over and over instead of mounting and going
         # unwritable again. Any driver's staging failures are worth the same
         # alert, so this is deliberately not scoped to one.
+        #
+        # Scoped to NodeStageVolume alone. Publish is the per-pod bind of an
+        # already-staged volume and never reaches the fsck path, so its failures
+        # are a different and far more common class — two democratic-csi
+        # releases and Longhorn all report here, and folding them in would make
+        # any unrelated drip anywhere hold this alert open.
+        #
+        # instance is kept in the aggregation so a firing alert names the node
+        # to go and look at; the metric carries no volume identity, so it cannot
+        # name the volume and the annotations do not pretend otherwise.
         #
         # The window and the hold are what separate a stuck volume from an
         # ordinary one. A single failure — a journal replay reporting "errors
@@ -51,11 +65,11 @@ spec:
         # volume that cannot be staged is retried on kubelet's backoff well
         # inside that window, so the rate never falls back to zero.
         - alert: CSIVolumeStagingFailing
-          expr: sum by (driver_name, method_name) (rate(csi_operations_seconds_count{method_name=~".*/Node(Stage|Publish)Volume", grpc_status_code!="OK"}[10m])) > 0
+          expr: sum by (instance, driver_name, method_name) (rate(csi_operations_seconds_count{method_name=~".*/NodeStageVolume", grpc_status_code!="OK"}[10m])) > 0
           for: 15m
           labels:
             severity: critical
           annotations:
-            summary: "{{ $labels.driver_name }} cannot stage a volume"
-            description: "{{ $labels.method_name }} has been failing for 15m at {{ $value | humanize }}/s. A workload is stuck without its volume; if the driver runs fsck on stage, the filesystem likely needs manual repair."
-            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+            summary: "{{ $labels.driver_name }} cannot stage a volume on {{ $labels.instance }}"
+            description: "{{ $labels.method_name }} on {{ $labels.instance }} has been failing for 15m at {{ $value | humanize }}/s. A workload there is stuck without its volume; the metric does not name which one. If the driver runs fsck on stage, the filesystem likely needs manual repair."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"

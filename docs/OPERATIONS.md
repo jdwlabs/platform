@@ -752,6 +752,14 @@ node-exporter builds `node_filesystem_readonly` from that string. The
 remount and a LUN presented read-only, not this. Treat a firing
 `FilesystemReadOnly` as conclusive and a silent one as no evidence either way.
 
+That alert reads the CSI staging mounts, which the chart's stock node-exporter
+arguments exclude along with the rest of `/var/lib/kubelet`; the narrowed
+`collector.filesystem.mount-points-exclude` in the kube-prometheus-stack values
+is what makes them visible. If that override is ever reverted the alert goes
+silent permanently rather than noisily, so a silent one is only "no evidence"
+while the override is in place — check it before concluding anything from
+silence.
+
 What does surface it is `CSIVolumeStagingFailing`, one step later. The iSCSI
 driver preens the filesystem with `fsck -f -p` before mounting, so once the pod
 is deleted the damage stops being silent: either the repair succeeds and the

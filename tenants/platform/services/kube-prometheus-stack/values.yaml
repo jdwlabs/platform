@@ -204,6 +204,17 @@ prometheus-node-exporter:
   # ArgoCD holds prior manifests in git history; no need for k8s to keep old
   # controller revisions around either.
   revisionHistoryLimit: 0
+  # Helm replaces lists rather than merging them, so the chart's fs-types line
+  # is restated verbatim and must be re-checked whenever the pinned chart
+  # revision moves. Only the mount-points regex differs: upstream excludes the
+  # whole of /var/lib/kubelet, which hides the CSI staging mounts at
+  # plugins/kubernetes.io/csi/.../globalmount — the one place an attached
+  # volume's superblock is observable, and what storage-integrity's read-only
+  # rule reads. The per-pod bind mounts under pods/ stay excluded because they
+  # share that same superblock and would only duplicate it.
+  extraArgs:
+    - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/containerd/.+|var/lib/docker/.+|var/lib/kubelet/pods/.+)($|/)
+    - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs|erofs)$
   resources:
     requests:
       memory: 32Mi
@@ -246,6 +257,14 @@ defaultRules:
     # No kube-proxy scrape target (see kubeProxy below), so these would never
     # evaluate against data.
     kubeProxy: false
+  # The node-exporter mount-points override above deliberately exports the CSI
+  # staging mounts so a read-only volume is visible. Capacity on those volumes
+  # is already alerted from kubelet_volume_stats in rules-storage-capacity.yaml,
+  # which names the PVC; leaving them in scope here would raise a second,
+  # node-scoped copy of every NodeFilesystem* alert identified only by an opaque
+  # globalmount path.
+  node:
+    fsSelector: 'fstype!="",mountpoint!~"/var/lib/kubelet/.*"'
 
 # Scheduler and controller-manager run as hostNetwork static pods in kube-system
 # carrying component=kube-scheduler / component=kube-controller-manager, which
