@@ -356,14 +356,24 @@ func TestTrueNASReclaim_OpenSessionRefusesAnOtherwiseOrphanedZvol(t *testing.T) 
 	t.Fatalf("a zvol with an open iSCSI session was deleted:\n%s", out)
 }
 
-// A session list that cannot be read is unknown liveness, not idle liveness.
+// A session list that cannot be read is unknown liveness, not idle liveness —
+// and dropping the zvols it covers out of the report is how that turns into an
+// exit 0 that reports nothing was wrong. --all-orphaned selects by verdict, so
+// a claimed or attached candidate was never asked for, but a candidate classed
+// `other` is the classifier declining to conclude and is a refusal.
 func TestTrueNASReclaim_UnreadableSessionListRefusesEveryZvol(t *testing.T) {
 	nas := truenasFixture()
 	nas.Fail = map[string]error{"iscsi.global.sessions": context.DeadlineExceeded}
 
 	out, err := runTrueNAS(t, nas, "cluster", "volumes", "truenas", "reclaim", "--all-orphaned", "--confirm")
-	if err != nil {
-		t.Fatalf("unexpected error: %v\n%s", err, out)
+	if err == nil {
+		t.Fatalf("an unreadable session list must not exit clean:\n%s", out)
+	}
+	if !strings.Contains(out, "warnings[1]") || !strings.Contains(out, "iSCSI session list could not be read") {
+		t.Errorf("the failed read must be reported at the top of the output:\n%s", out)
+	}
+	if !strings.Contains(out, "refused[2]") {
+		t.Errorf("every zvol of unknown liveness must be a refused row:\n%s", out)
 	}
 	for _, d := range nas.Datasets {
 		if d.Name == "pvc-orphan" {
@@ -376,6 +386,24 @@ func TestTrueNASReclaim_UnreadableSessionListRefusesEveryZvol(t *testing.T) {
 		}
 	}
 	t.Fatalf("a zvol of unknown liveness was deleted:\n%s", out)
+}
+
+// The same read failure on a read-only listing is a caveat, not a failure: the
+// report is still the truth about what the NAS holds.
+func TestTrueNASList_UnreadableSessionListIsWarnedAboutAndStillLists(t *testing.T) {
+	nas := truenasFixture()
+	nas.Fail = map[string]error{"iscsi.global.sessions": context.DeadlineExceeded}
+
+	out, err := runTrueNAS(t, nas, "cluster", "volumes", "truenas", "list")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "warnings[1]") {
+		t.Errorf("the failed read must be reported:\n%s", out)
+	}
+	if !strings.Contains(out, "count: 3 total (1 orphaned / 0 claimed / 0 attached / 2 other)") {
+		t.Errorf("both zvols must fall to other:\n%s", out)
+	}
 }
 
 func TestTrueNASJSON_EmitsOneEventPerCandidatePlusSummary(t *testing.T) {

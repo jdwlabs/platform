@@ -82,24 +82,35 @@ func (s truenasSessions) Close() {
 // Classify reads every session's inventory and cross-references it against the
 // cluster's PersistentVolumes, which are read once and shared: a claim is a
 // property of the cluster, not of one storage class.
-func (s truenasSessions) Classify(ctx context.Context) ([]truenas.Candidate, error) {
+//
+// The warnings it returns are the reads that failed without failing the whole
+// command. A degraded read changes what every verdict from it can mean, so it
+// is reported at the top of the output rather than left implicit in the reason
+// on rows an operator may have filtered away.
+func (s truenasSessions) Classify(ctx context.Context) ([]truenas.Candidate, []string, error) {
 	if len(s) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	refs, err := truenas.ResolveReferences(ctx, s[0].kube)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []truenas.Candidate
+	var warnings []string
 	for _, sess := range s {
 		inv, err := truenas.ReadInventory(ctx, sess.call, sess.cfg)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
+		}
+		if !inv.SessionsKnown {
+			warnings = append(warnings, fmt.Sprintf(
+				"%s: the iSCSI session list could not be read, so no zvol can be proved idle: %s",
+				sess.cfg.StorageClass, inv.SessionsError))
 		}
 		out = append(out, truenas.Classify(sess.cfg, inv, refs)...)
 	}
 	sortTrueNASCandidates(out)
-	return out, nil
+	return out, warnings, nil
 }
 
 // Reclaim executes each candidate's plan in order and returns the candidates
@@ -118,10 +129,8 @@ func (s truenasSessions) Reclaim(ctx context.Context, selected []truenas.Candida
 			return deleted, fmt.Errorf("no open connection for storage class %s", c.StorageClass)
 		}
 		r := truenas.NewReclaimer(sess.call, sess.kube)
-		for _, obj := range c.Objects {
-			if err := r.Delete(ctx, obj); err != nil {
-				return deleted, fmt.Errorf("%s: %w", c.Name, err)
-			}
+		if err := r.Run(ctx, c); err != nil {
+			return deleted, err
 		}
 		deleted = append(deleted, c)
 	}

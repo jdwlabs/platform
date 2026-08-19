@@ -27,6 +27,64 @@ func NewReclaimer(call Caller, kube kubernetes.Interface) *Reclaimer {
 	return &Reclaimer{call: call, kube: kube}
 }
 
+// Run executes one candidate's whole plan: the cluster-side pre-flight first,
+// then every object in dependency order.
+//
+// The pre-flight has to come before the first NAS delete because the plan
+// destroys the storage long before it reaches the PersistentVolume — the zvol,
+// its extent, its target and their mapping all go first. A PV that binds
+// between classification and this call would otherwise be discovered only after
+// the data it points at no longer exists, which is the opposite of a refusal.
+func (r *Reclaimer) Run(ctx context.Context, c Candidate) error {
+	if err := r.preflight(ctx, c); err != nil {
+		return err
+	}
+	for _, obj := range c.Objects {
+		if err := r.Delete(ctx, obj); err != nil {
+			return fmt.Errorf("%s: %w", c.Name, err)
+		}
+	}
+	return nil
+}
+
+// preflight re-reads the cluster-side state the candidate's verdict rests on.
+// Both halves are checked: the PersistentVolume's phase, and the claim that
+// would have moved it, because a claim is resolved from the
+// PersistentVolumeClaim's spec.volumeName and the binder sets one before the
+// phase catches up.
+func (r *Reclaimer) preflight(ctx context.Context, c Candidate) error {
+	if c.PV == "" {
+		return nil
+	}
+	pv, err := r.kube.CoreV1().PersistentVolumes().Get(ctx, c.PV, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("re-read PersistentVolume %s before reclaiming %s: %w", c.PV, c.Name, err)
+	}
+	if phase := pv.Status.Phase; phase != corev1.VolumeReleased && phase != corev1.VolumeFailed {
+		return fmt.Errorf("refusing to reclaim %s: PersistentVolume %s is now %s", c.Name, c.PV, phase)
+	}
+	claim := pv.Spec.ClaimRef
+	if claim == nil {
+		return nil
+	}
+	pvc, err := r.kube.CoreV1().PersistentVolumeClaims(claim.Namespace).Get(ctx, claim.Name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("re-read PersistentVolumeClaim %s/%s before reclaiming %s: %w",
+			claim.Namespace, claim.Name, c.Name, err)
+	}
+	if pvc.Spec.VolumeName == c.PV {
+		return fmt.Errorf("refusing to reclaim %s: PersistentVolumeClaim %s/%s now claims PersistentVolume %s",
+			c.Name, claim.Namespace, claim.Name, c.PV)
+	}
+	return nil
+}
+
 // Delete removes one planned object. An object that is already absent is the
 // desired end state, so it reports success and a re-run stays idempotent.
 func (r *Reclaimer) Delete(ctx context.Context, obj Object) error {

@@ -180,3 +180,90 @@ func TestReclaimer_MiddlewareFailureStopsThePlan(t *testing.T) {
 		t.Errorf("the zvol was deleted despite its extent surviving")
 	}
 }
+
+// The plan destroys the zvol, its extent, its target and their mapping long
+// before it reaches the PersistentVolume, so a PV that binds between the
+// classification and the reclaim has to stop the run before the first NAS
+// delete. A refusal raised at the end of the plan arrives after the data it was
+// protecting is gone.
+func TestReclaimer_PersistentVolumeThatWentBoundStopsThePlanBeforeAnyDelete(t *testing.T) {
+	nas := reclaimFixture()
+	c := reboundCandidate(t, nas)
+
+	kube := k8sfake.NewSimpleClientset(&corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "pv-orphan"},
+		Status:     corev1.PersistentVolumeStatus{Phase: corev1.VolumeBound},
+	})
+
+	err := NewReclaimer(nas, kube).Run(context.Background(), c)
+	if err == nil {
+		t.Fatalf("a PersistentVolume that went Bound must stop the plan")
+	}
+	if !strings.Contains(err.Error(), "Bound") {
+		t.Errorf("the refusal must name the phase: %v", err)
+	}
+	for _, call := range nas.Calls {
+		if strings.HasSuffix(call, ".delete") {
+			t.Fatalf("the plan issued %s after the volume was re-bound", call)
+		}
+	}
+	if len(nas.Datasets) != 1 || len(nas.Extents) != 1 || len(nas.Targets) != 1 || len(nas.Mappings) != 1 {
+		t.Errorf("the object graph was destroyed despite the refusal: %+v", nas)
+	}
+}
+
+// A claim is resolved from the PersistentVolumeClaim's spec.volumeName, and the
+// binder writes that before the volume's phase catches up, so the phase alone
+// is not the whole of the re-check.
+func TestReclaimer_ReboundClaimStopsThePlanBeforeAnyDelete(t *testing.T) {
+	nas := reclaimFixture()
+	c := reboundCandidate(t, nas)
+
+	kube := k8sfake.NewSimpleClientset(
+		&corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "pv-orphan"},
+			Spec: corev1.PersistentVolumeSpec{
+				ClaimRef: &corev1.ObjectReference{Namespace: "apps", Name: "data-app-0"},
+			},
+			Status: corev1.PersistentVolumeStatus{Phase: corev1.VolumeReleased},
+		},
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "data-app-0", Namespace: "apps"},
+			Spec:       corev1.PersistentVolumeClaimSpec{VolumeName: "pv-orphan"},
+		},
+	)
+
+	err := NewReclaimer(nas, kube).Run(context.Background(), c)
+	if err == nil {
+		t.Fatalf("a re-bound claim must stop the plan")
+	}
+	if !strings.Contains(err.Error(), "apps/data-app-0") {
+		t.Errorf("the refusal must name the claim: %v", err)
+	}
+	if len(nas.Datasets) != 1 {
+		t.Errorf("the zvol was destroyed despite the refusal")
+	}
+}
+
+// reboundCandidate classifies the fixture against a Released PersistentVolume,
+// which is the state the operator was shown, and hands back the plan the
+// reclaim will be asked to run against a cluster that has since moved on.
+func reboundCandidate(t *testing.T, nas *FakeMiddleware) Candidate {
+	t.Helper()
+	cfg := NewDriverConfigForTest(ClassISCSI, "nas.test", "storage/k8s/iscsi/vols", "unused")
+	inv, err := ReadInventory(context.Background(), nas, cfg)
+	if err != nil {
+		t.Fatalf("read inventory: %v", err)
+	}
+	refs := []Reference{{PVName: "pv-orphan", PVPhase: "Released", Tokens: []string{"pvc-orphan"}}}
+	cands := Classify(cfg, inv, refs)
+	if len(cands) != 1 {
+		t.Fatalf("want 1 candidate, got %v", cands)
+	}
+	c := cands[0]
+	if c.Class != ClassOrphaned || c.PV != "pv-orphan" {
+		t.Fatalf("want an orphaned candidate holding pv-orphan, got %s/%s (%s)", c.Class, c.PV, c.Reason)
+	}
+	nas.Calls = nil
+	return c
+}

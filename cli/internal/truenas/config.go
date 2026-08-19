@@ -3,6 +3,7 @@ package truenas
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -72,8 +73,16 @@ type DriverConfig struct {
 // read is an explicit call that shows up in review.
 func (c DriverConfig) APIKey() string { return c.apiKey }
 
-// Endpoint is the host:port the middleware is reached on.
-func (c DriverConfig) Endpoint() string { return c.Host + ":" + middlewarePort }
+// Endpoint is the host:port the middleware is reached on. A host that already
+// carries a port keeps it — an operator pointing PLATFORMCTL_TRUENAS_ADDR at a
+// NAS behind a different TLS port means that port, not that port plus a default
+// appended to it.
+func (c DriverConfig) Endpoint() string {
+	if _, _, err := net.SplitHostPort(c.Host); err == nil {
+		return c.Host
+	}
+	return net.JoinHostPort(c.Host, middlewarePort)
+}
 
 // LoadDriverConfigs reads both rendered driver configs. A class whose Secret is
 // absent is reported as an error rather than skipped: a missing config means
