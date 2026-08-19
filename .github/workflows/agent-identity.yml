@@ -71,7 +71,7 @@ jobs:
           if ! encoded=$(gh api --paginate "repos/${PR_REPO}/pulls/${PR_NUMBER}/commits?per_page=100" \
             --jq '.[] | [
                     .sha,
-                    ((.parents // []) | length | tostring),
+                    ((.commit.verification.verified // false) | tostring),
                     ((.commit.message // "") | @base64),
                     ((.committer.login // "") | @base64),
                     ((.author.login // "") | @base64),
@@ -84,16 +84,18 @@ jobs:
             exit 1
           fi
 
-          # Matched whole-field, so that a contributor whose name merely
-          # contains the slug is not read as the App. The numeric prefix on
-          # the noreply address is assigned by GitHub and varies.
-          agent_pattern="^(${AGENT_IDENTITY}(\[bot\])?|[0-9]+\+${AGENT_IDENTITY}(\[bot\])?@users\.noreply\.github\.com)$"
+          # Matched whole-field, so a contributor whose name merely contains
+          # the slug is not read as the App, and case-insensitively below,
+          # since GitHub logins are case-insensitive and a git user.name is
+          # free text. GitHub assigns the numeric prefix on a noreply address
+          # and not every form of that address carries one.
+          agent_pattern="^(${AGENT_IDENTITY}(\[bot\])?|([0-9]+\+)?${AGENT_IDENTITY}(\[bot\])?@users\.noreply\.github\.com)$"
 
           total=0
           attributed=0
           unattributed_sha=""
 
-          while IFS=':' read -r sha parents b64msg b64committer_login \
+          while IFS=':' read -r sha verified b64msg b64committer_login \
                                  b64author_login b64author_name b64author_email \
                                  b64committer_name b64committer_email; do
             [ -n "${sha}" ] || continue
@@ -111,12 +113,16 @@ jobs:
             fi
 
             # A commit GitHub itself created — a merge from the update-branch
-            # button, a web-UI revert or edit — carries the actor as committer
-            # and gives no one a chance to write a trailer. Flagging those
-            # would recreate exactly the unsatisfiable red this check exists
-            # to remove.
+            # button, a web-UI revert or edit — is committed as web-flow and
+            # gives nobody an opportunity to write a trailer, so flagging one
+            # would rebuild the unsatisfiable red this check exists to remove.
+            # The exemption rests on GitHub's signature over that commit, not
+            # on the committer login by itself: that login is resolved from
+            # the committer email, which any local commit can set to
+            # noreply@github.com. GitHub signs what it creates, so a forged
+            # one arrives unsigned and stays in scope.
             committer_login=$(printf '%s' "${b64committer_login}" | base64 -d)
-            if [ "${parents}" -ge 2 ] || [ "${committer_login}" = "web-flow" ]; then
+            if [ "${verified}" = "true" ] && [ "${committer_login}" = "web-flow" ]; then
               continue
             fi
 
@@ -132,7 +138,7 @@ jobs:
                             "${b64author_name}" "${b64author_email}" \
                             "${b64committer_name}" "${b64committer_email}"; do
               field=$(printf '%s' "${b64field}" | base64 -d)
-              if printf '%s' "${field}" | grep -qE "${agent_pattern}"; then
+              if printf '%s' "${field}" | grep -qiE "${agent_pattern}"; then
                 unattributed_sha="${sha}"
                 break
               fi
