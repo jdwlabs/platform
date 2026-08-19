@@ -792,9 +792,12 @@ talosctl -n <node-ip> dmesg | grep -E 'EXT4-fs error|Remounting filesystem read-
 ```
 
 That command needs a populated `~/.talos/config` with a context selected; an
-unconfigured `talosctl` fails to reach the node and this evidence path silently
-disappears. Confirm the client works *before* you need it — see §1 for where the
-talosconfig comes from.
+unconfigured `talosctl` cannot reach the node and this evidence path silently
+disappears — which is exactly what happened during the 2026-08-19 occurrence.
+Confirm `talosctl -n <node-ip> version` works *before* you need it. The
+read-only (`os:reader`) talosconfig this repo already knows about is the one
+seeded to Vault as the `holmes` spec's `talosconfig` field; it is not written to
+an operator workstation by anything here.
 
 `FilesystemReadOnly` names a node and a staging path, not a workload: the path
 segment under `plugins/kubernetes.io/csi/` is a hash of the volume handle, so
