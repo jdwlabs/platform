@@ -34,4 +34,16 @@ observability:
     team: jdwillmsen
     access: edit
 
-services: []
+services:
+  # Rules only — no chart. Carries the static expectation that the world
+  # backup's freshness signal exists at all, which by design cannot live in
+  # the deployment repo: a rule shipped by the thing it watches disappears
+  # with it.
+  - name: jdwillmsen-alerts
+    chart: ""
+    repo: ""
+    revision: ""
+    namespace: jdwillmsen-prd
+    postInstall: false
+    rawManifests: true
+    syncWave: 2

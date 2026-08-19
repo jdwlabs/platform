@@ -1,0 +1,45 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: jdwillmsen-tenant-alerts
+  namespace: jdwillmsen-prd
+  labels:
+    tenant: jdwillmsen
+spec:
+  groups:
+    - name: jdwillmsen-tenant
+      rules:
+        # The one rule in the freshness contract that cannot be derived from
+        # the metrics, and therefore the only one that cannot expire.
+        #
+        # Every other backup alert reads gauges the producer publishes, so all
+        # of them go quiet together the moment the producer stops publishing —
+        # a deleted exporter, exporter.enabled flipped to false, a removed
+        # release, a ServiceMonitor that stopped matching. The platform's
+        # BackupFreshnessSignalMissing covers that gap by remembering producers
+        # seen in the last 14d, but a lookback is still evidence, and evidence
+        # ages out: once the last sample falls off, that alert stops firing and
+        # Alertmanager sends a resolved notification for a backup that is still
+        # dead. Two weeks later the cluster is back to the posture that caused
+        # the original incident — nothing produced, nothing said.
+        #
+        # absent() over a named series is the only shape immune to that,
+        # because it asserts an expectation this repository holds rather than
+        # one Prometheus can forget. It fires from the moment the series is
+        # missing and keeps firing indefinitely, including on a cluster rebuilt
+        # from scratch where the producer was never deployed at all.
+        #
+        # The literal job name is the point, not an oversight: this says "this
+        # specific backup must exist". Decommissioning the world backup means
+        # deleting this rule in the same change, which is exactly the review
+        # step that silently skipping it is meant to force.
+        - alert: JdwillmsenMinecraftBackupProducerAbsent
+          expr: absent(backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup"})
+          for: 1h
+          labels:
+            severity: critical
+            tenant: jdwillmsen
+          annotations:
+            summary: "No backup freshness signal exists for the Minecraft world"
+            description: "No freshness signal exists for the Minecraft world backup. It is not merely stale — nothing is reporting on it at all, so every other backup alert for it is silent too. Check the backup exporter Deployment and its ServiceMonitor in jdwillmsen-prd."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
