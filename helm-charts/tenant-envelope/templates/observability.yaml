@@ -383,13 +383,17 @@ metadata:
     argocd.argoproj.io/hook: PostSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
-  # One retry, and the waits below are sized so both attempts fit inside the
-  # deadline (2 x ~400s). Without it a pod-level failure -- an image pull, an
-  # eviction -- permanently fails the grant, and a failed sync is not
+  # One retry, because a pod-level failure -- an image pull, an eviction --
+  # would otherwise permanently fail the grant, and a failed sync is not
   # re-attempted for the same revision, so the folder would stay open until the
   # next commit to this tenant.
+  #
+  # The deadline covers both attempts at their full waits (2 x 400s) with ~200s
+  # left for two pod schedules, the API calls between the waits, and the Job
+  # controller's backoff. Cutting it closer truncates the second attempt
+  # mid-folder-wait on a cold node, which makes the retry shorter than it reads.
   backoffLimit: 1
-  activeDeadlineSeconds: 900
+  activeDeadlineSeconds: 1000
   ttlSecondsAfterFinished: 300
   template:
     spec:

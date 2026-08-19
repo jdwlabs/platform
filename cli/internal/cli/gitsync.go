@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -567,7 +568,15 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 	// notice sooner. The tenant envelopes are the opposite case and take a real
 	// sync operation; see syncTenantEnvelopes.
 	resync := "skipped (--no-sync)"
+	// Opting out of the syncs is not opting out of knowing which ones are owed:
+	// the claims were read either way, so the folders left open are nameable.
 	envelopes := "skipped (--no-sync)"
+	if opts.NoSync {
+		if owed := governanceAppsForFolders(deleting, claims); owed != "" {
+			envelopes = fmt.Sprintf("skipped (--no-sync): run `argocd app sync %s` "+
+				"or those folders stay readable by every grafana user", owed)
+		}
+	}
 	if !opts.NoSync {
 		dc, derr := volumeDynamicClient()
 		if derr == nil {
@@ -675,6 +684,26 @@ func siblingRepositories(repos []gitsync.Resource, connection, excluding string)
 		}
 	}
 	return sortedNames(out)
+}
+
+// governanceAppsForFolders names every Application owing a grant across a set
+// of folders, so a plan or a skipped run can say which syncs are outstanding
+// without repeating the claim walk at each call site.
+func governanceAppsForFolders(folders []string, claims map[string][]string) string {
+	var tenants []string
+	seen := map[string]bool{}
+	for _, folder := range folders {
+		for _, tenant := range claims[folder] {
+			if !seen[tenant] {
+				seen[tenant] = true
+				tenants = append(tenants, tenant)
+			}
+		}
+	}
+	if len(tenants) == 0 {
+		return ""
+	}
+	return governanceAppsFor(tenants)
 }
 
 // governanceAppsFor names the Applications that carry a folder's grant. Plural
@@ -988,6 +1017,7 @@ func readTenantFolderClaims(ctx context.Context) (map[string][]string, error) {
 // report the command failed.
 func syncTenantEnvelopes(ctx context.Context, deleted []string, claims map[string][]string) string {
 	var apps, missed []string
+	why := map[string]string{}
 	for _, name := range deleted {
 		for _, tenant := range claims[name] {
 			app := governanceAppPrefix + tenant
@@ -996,17 +1026,32 @@ func syncTenantEnvelopes(ctx context.Context, deleted []string, claims map[strin
 				err = heal.SyncApp(ctx, dc, app)
 			}
 			if err != nil {
-				missed = append(missed, app)
+				if _, seen := why[app]; !seen {
+					missed = append(missed, app)
+				}
+				// An in-flight operation reads as a different obligation: it
+				// settles on its own, so the sync only has to be re-requested
+				// afterwards rather than investigated.
+				if errors.Is(err, heal.ErrSyncInProgress) {
+					why[app] = "a sync was already in progress, so this request would have been dropped; re-run once it settles"
+				} else {
+					why[app] = err.Error()
+				}
 				continue
 			}
 			apps = append(apps, app)
 		}
 	}
+	missed = sortedNames(missed)
+	reasons := make([]string, 0, len(missed))
+	for _, app := range missed {
+		reasons = append(reasons, fmt.Sprintf("%s (%s)", app, why[app]))
+	}
 	// A partial result names both halves: the ones that were synced are not a
 	// reason to stop reporting the ones that were not.
 	requested := "sync requested for " + strings.Join(sortedNames(apps), " ")
 	owed := fmt.Sprintf("NOT synced: %s — run `argocd app sync %s` or those folders stay readable by every grafana user",
-		strings.Join(sortedNames(missed), " "), strings.Join(sortedNames(missed), " "))
+		strings.Join(reasons, "; "), strings.Join(missed, " "))
 	switch {
 	case len(apps) > 0 && len(missed) > 0:
 		return requested + "; " + owed
