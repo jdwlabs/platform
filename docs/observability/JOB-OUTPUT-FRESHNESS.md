@@ -145,7 +145,16 @@ and are not restated here — one copy, so the two cannot drift:
 | `BackupArtifactStale` | no verified artifact within the producer's own `backup_max_age_seconds` |
 | `BackupArtifactEmpty` | the newest artifact is zero bytes |
 | `BackupFreshnessSignalMissing` | a producer that *was* publishing the gauges has stopped, so neither of the above can fire for it |
+| `BackupBudgetMissing` | a producer publishes a timestamp but no `backup_max_age_seconds`, so `BackupArtifactStale` can never fire for it |
+| `BackupArtifactSizeMissing` | a producer publishes a timestamp but no `backup_last_artifact_bytes`, so `BackupArtifactEmpty` can never fire for it |
 | `BackupArtifactNotQuiesced` | the newest artifact was taken while its source was running and could not be stilled |
+
+The two `…Missing` rules exist because the three gauges are required together
+and adoption is easy to get half-right. Publishing a timestamp alone leaves the
+matching critical permanently silent with no series to compare — a rule that
+matches nothing, which is indistinguishable from a rule that passes. That is
+the failure this whole document exists for, so partial adoption reports itself
+rather than looking healthy.
 
 They were deliberately held back until a producer existed. Until then they
 would have matched nothing, and a rule that silently matches nothing looks
@@ -165,24 +174,65 @@ vanished cannot be compared against a budget. The rule instead compares each
 `backup_job` still reporting against those that reported inside a two-day
 lookback. Two consequences worth knowing:
 
-- **It expires.** Two days after a producer stops, its own samples age out of
-  the lookback and the alert falls silent. That is roughly a dozen
-  notifications at Alertmanager's 4h repeat. A dead-man's-switch cannot outlive
-  the evidence that it ever had something to watch.
+- **It expires, and resolving is not recovery.** Fourteen days after a producer
+  stops, its own samples age out of the lookback, the alert stops firing, and
+  Alertmanager sends an explicit **resolved** notification for a backup that is
+  just as dead as it was the day before. The window is sized against
+  Prometheus' 15d retention, so it is as long as this shape can be — but no
+  rule derived from a metric can do better, because once the series is gone
+  there is no evidence left that it ever should have existed.
 - **A producer that never published is not a producer that went missing.**
   Before the first exporter is deployed these rules are inert by design, which
   is why they ship paired with a producer rather than ahead of one.
+
+### Every producer needs a static expectation, and it cannot live with the producer
+
+The two points above have the same consequence, and it is the one thing in this
+document that is not optional. Every rule so far reads gauges the producer
+publishes, so **all of them go quiet together the moment the producer stops
+publishing** — exporter deleted, `enabled: false`, release removed,
+ServiceMonitor no longer matching. If the CronJob went with the release, the
+kube-state-metrics rules disappear too. After the lookback expires the cluster
+is back to the exact posture that caused the original incident: nothing
+produced, and nothing said.
+
+The only shape immune to this is `absent()` over a **named** series, because it
+asserts an expectation the repository holds rather than one Prometheus can
+forget:
+
+```yaml
+- alert: JdwillmsenMinecraftBackupProducerAbsent
+  expr: absent(backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup"})
+  for: 1h
+  labels:
+    severity: critical
+```
+
+Three things about it are deliberate:
+
+- **The literal job name.** It says "this specific backup must exist", so it
+  fires on a cluster rebuilt from scratch where the producer was never deployed
+  at all, and it never expires.
+- **It lives in this repository, not the deployment repo.** A rule shipped by
+  the thing it watches disappears together with it, which is the failure being
+  closed. The Minecraft one is in
+  `tenants/jdwillmsen/services/jdwillmsen-alerts/postInstall/prometheusrule.yaml`.
+- **Decommissioning means deleting it in the same change.** That is a feature.
+  Removing a backup should be a decision someone makes explicitly, not
+  something that happens by a series quietly ceasing to exist.
 
 ## Adopting this
 
 1. Make the job verify its own output — size, and ideally that the archive
    opens — before recording success.
 2. Emit the three gauges by one of the transports above.
-3. Land the rules alongside the producer. The rules now exist, so a second
-   producer needs no rule change at all — it inherits them by emitting the
-   gauges. Where a producer lives in another repository the two halves cannot
-   be one PR, so open them together and reference each from the other; the
-   pairing is what matters, not the single commit.
+3. Land the rules alongside the producer. The generic rules already exist, so a
+   second producer inherits them by emitting the gauges. It does need **one**
+   rule of its own: the static `absent()` expectation naming it, in this
+   repository, per the section above. Where a producer lives in another
+   repository the two halves cannot be one PR, so open them together and
+   reference each from the other; the pairing is what matters, not the single
+   commit.
 4. Prove the alert fires: point the producer at an empty source, confirm
    `BackupArtifactEmpty` goes pending, then restore it. An alert that has
    never been seen to fire is an assumption.

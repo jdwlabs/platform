@@ -22,15 +22,15 @@ tests:
   - interval: 1m
     name: healthy backup is silent
     input_series:
-      - series: 'backup_last_success_timestamp_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '1000000000+0x180'
-      - series: 'backup_last_artifact_bytes{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '734003200+0x180'
-      - series: 'backup_max_age_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '172800+0x180'
-      - series: 'backup_last_artifact_quiesced{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_quiesced{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '1+0x180'
-      - series: 'backup_last_artifact_source_replicas{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_source_replicas{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '1+0x180'
     alert_rule_test:
       - eval_time: 3h
@@ -45,16 +45,22 @@ tests:
       - eval_time: 3h
         alertname: BackupFreshnessSignalMissing
         exp_alerts: []
+      - eval_time: 3h
+        alertname: BackupBudgetMissing
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: BackupArtifactSizeMissing
+        exp_alerts: []
 
   # The exact JDWLABS-338 shape: job completed, wrote nothing.
   - interval: 1m
     name: empty artifact alerts
     input_series:
-      - series: 'backup_last_success_timestamp_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '0+0x3000'
-      - series: 'backup_last_artifact_bytes{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '0+0x3000'
-      - series: 'backup_max_age_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '172800+0x3000'
     alert_rule_test:
       - eval_time: 16m
@@ -62,11 +68,11 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
-              backup_job: minecraft-fwb-prd-backup
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
               artifact: world
             exp_annotations:
-              summary: "Backup minecraft-fwb-prd-backup produced an empty artifact"
-              description: "The most recent artifact for minecraft-fwb-prd-backup is zero bytes. The job completed successfully and wrote nothing."
+              summary: "Backup jdwillmsen-minecraft-fwb-prd-backup produced an empty artifact"
+              description: "The most recent artifact for jdwillmsen-minecraft-fwb-prd-backup is zero bytes. The job completed successfully and wrote nothing."
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
       # An empty artifact store is also stale, by design.
       - eval_time: 49h
@@ -74,11 +80,11 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
-              backup_job: minecraft-fwb-prd-backup
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
               artifact: world
             exp_annotations:
-              summary: "Backup minecraft-fwb-prd-backup has produced no fresh artifact"
-              description: "Last verified artifact for minecraft-fwb-prd-backup is 2d 1h 0m 0s old, past the freshness budget the job publishes for itself."
+              summary: "Backup jdwillmsen-minecraft-fwb-prd-backup has produced no fresh artifact"
+              description: "Last verified artifact for jdwillmsen-minecraft-fwb-prd-backup is 2d 1h 0m 0s old, past the freshness budget the job publishes for itself."
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
   # The contract makes `artifact` conditional, so a producer may publish one
@@ -135,6 +141,10 @@ tests:
         values: '3600+0x300'
       - series: 'backup_max_age_seconds{backup_job="mixed-backup",artifact="nightly"}'
         values: '172800+0x300'
+      - series: 'backup_last_artifact_bytes{backup_job="mixed-backup",artifact="hourly"}'
+        values: '1048576+0x300'
+      - series: 'backup_last_artifact_bytes{backup_job="mixed-backup",artifact="nightly"}'
+        values: '734003200+0x300'
     alert_rule_test:
       - eval_time: 3h
         alertname: BackupArtifactStale
@@ -155,22 +165,28 @@ tests:
   - interval: 1m
     name: one producer going dark alerts while others keep reporting
     input_series:
-      - series: 'backup_last_success_timestamp_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '1000000000+0x90'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '734003200+0x90'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x90'
       - series: 'backup_last_success_timestamp_seconds{backup_job="postgres-backup"}'
-        values: '1000000000+0x300'
+        values: '1000000000+0x3200'
+      - series: 'backup_last_artifact_bytes{backup_job="postgres-backup"}'
+        values: '104857600+0x3200'
       - series: 'backup_max_age_seconds{backup_job="postgres-backup"}'
-        values: '172800+0x300'
+        values: '172800+0x3200'
     alert_rule_test:
       - eval_time: 3h
         alertname: BackupFreshnessSignalMissing
         exp_alerts:
           - exp_labels:
               severity: warning
-              backup_job: minecraft-fwb-prd-backup
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
             exp_annotations:
-              summary: "Backup minecraft-fwb-prd-backup has stopped publishing a freshness signal"
-              description: "minecraft-fwb-prd-backup was publishing backup_last_success_timestamp_seconds and stopped over an hour ago. Its exporter is down, unscraped, or deleted, so BackupArtifactStale and BackupArtifactEmpty can no longer fire for it."
+              summary: "Backup jdwillmsen-minecraft-fwb-prd-backup has stopped publishing a freshness signal"
+              description: "jdwillmsen-minecraft-fwb-prd-backup stopped publishing its freshness gauges over an hour ago: exporter down, unscraped, or deleted, so no other backup alert can fire for it. This expires 14d after the last sample and resolves itself: the lookback ran out, not a recovery."
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
       # Why the rule above has to exist: with the series gone there is nothing
       # left to compare against a budget, so staleness cannot report the
@@ -178,6 +194,19 @@ tests:
       - eval_time: 3h
         alertname: BackupArtifactStale
         exp_alerts: []
+      # Still firing at 51h, where a 2d lookback had already aged out the last
+      # sample and resolved itself. The producer is no less dead than it was at
+      # 3h, and a resolved notification at that point reads as recovery.
+      - eval_time: 51h
+        alertname: BackupFreshnessSignalMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+            exp_annotations:
+              summary: "Backup jdwillmsen-minecraft-fwb-prd-backup has stopped publishing a freshness signal"
+              description: "jdwillmsen-minecraft-fwb-prd-backup stopped publishing its freshness gauges over an hour ago: exporter down, unscraped, or deleted, so no other backup alert can fire for it. This expires 14d after the last sample and resolves itself: the lookback ran out, not a recovery."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
   # A producer that never existed is not a producer that went missing. Before
   # the first exporter is deployed these rules are inert by design, which is
@@ -199,13 +228,13 @@ tests:
   - interval: 1m
     name: unquiesced fallback warns but does not page
     input_series:
-      - series: 'backup_last_success_timestamp_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '1000000000+0x180'
-      - series: 'backup_last_artifact_bytes{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '734003200+0x180'
-      - series: 'backup_max_age_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '172800+0x180'
-      - series: 'backup_last_artifact_quiesced{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_quiesced{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '0+0x180'
     alert_rule_test:
       - eval_time: 65m
@@ -213,11 +242,11 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
-              backup_job: minecraft-fwb-prd-backup
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
               artifact: world
             exp_annotations:
-              summary: "Backup minecraft-fwb-prd-backup fell back to an unquiesced copy"
-              description: "The newest artifact for minecraft-fwb-prd-backup was taken without its source at rest — the source was meant to be running and the job could not reach it. The archive is usable; why the source was unreachable is what needs looking at."
+              summary: "Backup jdwillmsen-minecraft-fwb-prd-backup fell back to an unquiesced copy"
+              description: "The newest artifact for jdwillmsen-minecraft-fwb-prd-backup was taken without its source at rest — the source was meant to be running and the job could not reach it. The archive is usable; why the source was unreachable is what needs looking at."
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
       - eval_time: 65m
         alertname: BackupArtifactEmpty
@@ -232,15 +261,15 @@ tests:
   - interval: 1m
     name: source meant to be running but unreachable warns
     input_series:
-      - series: 'backup_last_success_timestamp_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '1000000000+0x180'
-      - series: 'backup_last_artifact_bytes{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '734003200+0x180'
-      - series: 'backup_max_age_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '172800+0x180'
-      - series: 'backup_last_artifact_quiesced{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_quiesced{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '0+0x180'
-      - series: 'backup_last_artifact_source_replicas{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_source_replicas{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '1+0x180'
     alert_rule_test:
       - eval_time: 65m
@@ -248,11 +277,11 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
-              backup_job: minecraft-fwb-prd-backup
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
               artifact: world
             exp_annotations:
-              summary: "Backup minecraft-fwb-prd-backup fell back to an unquiesced copy"
-              description: "The newest artifact for minecraft-fwb-prd-backup was taken without its source at rest — the source was meant to be running and the job could not reach it. The archive is usable; why the source was unreachable is what needs looking at."
+              summary: "Backup jdwillmsen-minecraft-fwb-prd-backup fell back to an unquiesced copy"
+              description: "The newest artifact for jdwillmsen-minecraft-fwb-prd-backup was taken without its source at rest — the source was meant to be running and the job could not reach it. The archive is usable; why the source was unreachable is what needs looking at."
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
   # An operator scaled the source to zero on purpose. Nothing was writing to
@@ -262,15 +291,15 @@ tests:
   - interval: 1m
     name: deliberately stopped source is at rest and does not warn
     input_series:
-      - series: 'backup_last_success_timestamp_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '1000000000+0x180'
-      - series: 'backup_last_artifact_bytes{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '734003200+0x180'
-      - series: 'backup_max_age_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '172800+0x180'
-      - series: 'backup_last_artifact_quiesced{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_quiesced{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '1+0x180'
-      - series: 'backup_last_artifact_source_replicas{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_source_replicas{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '0+0x180'
     alert_rule_test:
       - eval_time: 65m
@@ -289,15 +318,15 @@ tests:
   - interval: 1m
     name: stopped source producing nothing still pages
     input_series:
-      - series: 'backup_last_success_timestamp_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '0+0x3000'
-      - series: 'backup_last_artifact_bytes{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '0+0x3000'
-      - series: 'backup_max_age_seconds{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '172800+0x3000'
-      - series: 'backup_last_artifact_quiesced{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_quiesced{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '1+0x3000'
-      - series: 'backup_last_artifact_source_replicas{backup_job="minecraft-fwb-prd-backup",artifact="world"}'
+      - series: 'backup_last_artifact_source_replicas{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
         values: '0+0x3000'
     alert_rule_test:
       - eval_time: 16m
@@ -305,23 +334,74 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
-              backup_job: minecraft-fwb-prd-backup
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
               artifact: world
             exp_annotations:
-              summary: "Backup minecraft-fwb-prd-backup produced an empty artifact"
-              description: "The most recent artifact for minecraft-fwb-prd-backup is zero bytes. The job completed successfully and wrote nothing."
+              summary: "Backup jdwillmsen-minecraft-fwb-prd-backup produced an empty artifact"
+              description: "The most recent artifact for jdwillmsen-minecraft-fwb-prd-backup is zero bytes. The job completed successfully and wrote nothing."
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
       - eval_time: 49h
         alertname: BackupArtifactStale
         exp_alerts:
           - exp_labels:
               severity: critical
-              backup_job: minecraft-fwb-prd-backup
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
               artifact: world
             exp_annotations:
-              summary: "Backup minecraft-fwb-prd-backup has produced no fresh artifact"
-              description: "Last verified artifact for minecraft-fwb-prd-backup is 2d 1h 0m 0s old, past the freshness budget the job publishes for itself."
+              summary: "Backup jdwillmsen-minecraft-fwb-prd-backup has produced no fresh artifact"
+              description: "Last verified artifact for jdwillmsen-minecraft-fwb-prd-backup is 2d 1h 0m 0s old, past the freshness budget the job publishes for itself."
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
       - eval_time: 49h
         alertname: BackupArtifactNotQuiesced
         exp_alerts: []
+
+  # Half-adopted contract: a timestamp with no budget. BackupArtifactStale
+  # needs a budget series on one side of its comparison, so it matches nothing
+  # and stays silent forever — a rule that looks exactly like it is passing,
+  # which is the failure this whole file exists to remove. Asserted together:
+  # the silence, and the alert that breaks it.
+  - interval: 1m
+    name: producer publishing no budget is reported, not silently unmonitored
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="half-adopted-backup",artifact="world"}'
+        values: '0+0x3000'
+      - series: 'backup_last_artifact_bytes{backup_job="half-adopted-backup",artifact="world"}'
+        values: '734003200+0x3000'
+    alert_rule_test:
+      - eval_time: 49h
+        alertname: BackupArtifactStale
+        exp_alerts: []
+      - eval_time: 65m
+        alertname: BackupBudgetMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              backup_job: half-adopted-backup
+            exp_annotations:
+              summary: "Backup half-adopted-backup publishes no freshness budget"
+              description: "half-adopted-backup reports a success timestamp but no backup_max_age_seconds, so BackupArtifactStale has nothing to compare it against and can never fire for it. The producer is publishing an incomplete gauge set."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # The same defect one gauge over: no size means the zero-byte artifact case —
+  # the original JDWLABS-338 shape — is unmonitored for that producer.
+  - interval: 1m
+    name: producer publishing no artifact size is reported
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="half-adopted-backup",artifact="world"}'
+        values: '1000000000+0x180'
+      - series: 'backup_max_age_seconds{backup_job="half-adopted-backup",artifact="world"}'
+        values: '172800+0x180'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: BackupArtifactEmpty
+        exp_alerts: []
+      - eval_time: 65m
+        alertname: BackupArtifactSizeMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              backup_job: half-adopted-backup
+            exp_annotations:
+              summary: "Backup half-adopted-backup publishes no artifact size"
+              description: "half-adopted-backup reports a success timestamp but no backup_last_artifact_bytes, so BackupArtifactEmpty can never fire for it — the zero-byte artifact case is unmonitored for this producer."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"

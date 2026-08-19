@@ -155,13 +155,22 @@ spec:
         # left side keeps reporting a producer for as long as the lookback
         # window still holds one of its samples, while the right side drops it
         # as soon as scraping stops. The window is therefore how long this can
-        # keep complaining — 2d is roughly a dozen notifications at
-        # Alertmanager's 4h repeat, after which the evidence has aged out and
-        # the alert necessarily falls silent. A dead-man's-switch cannot
-        # outlive its own evidence; what it can do is be loud while it lasts.
+        # keep complaining. 14d is sized against Prometheus' own 15d retention
+        # — there is no reason to set it shorter, since samples older than
+        # retention cannot be counted anyway.
+        #
+        # It still expires, and that matters more than the number. When the
+        # last sample ages out this alert stops firing and Alertmanager sends a
+        # **resolved** notification, which reads as recovery for a producer
+        # that is still dead. Nothing derived from a metric can do better: once
+        # the series is gone there is no evidence left that it should exist. A
+        # producer that must never silently disappear therefore needs a static
+        # expectation naming it, which cannot expire because it is not derived
+        # from anything — see the tenant's own rules and the "Adopting this"
+        # section of the contract doc.
         - alert: BackupFreshnessSignalMissing
           expr: |
-            count by (backup_job) (count_over_time(backup_last_success_timestamp_seconds[2d]))
+            count by (backup_job) (count_over_time(backup_last_success_timestamp_seconds[14d]))
             unless
             count by (backup_job) (backup_last_success_timestamp_seconds)
           for: 1h
@@ -169,7 +178,42 @@ spec:
             severity: warning
           annotations:
             summary: "Backup {{ $labels.backup_job }} has stopped publishing a freshness signal"
-            description: "{{ $labels.backup_job }} was publishing backup_last_success_timestamp_seconds and stopped over an hour ago. Its exporter is down, unscraped, or deleted, so BackupArtifactStale and BackupArtifactEmpty can no longer fire for it."
+            description: "{{ $labels.backup_job }} stopped publishing its freshness gauges over an hour ago: exporter down, unscraped, or deleted, so no other backup alert can fire for it. This expires 14d after the last sample and resolves itself: the lookback ran out, not a recovery."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # A producer that publishes a timestamp but no budget gets no staleness
+        # alert at all: both branches of BackupArtifactStale need a budget
+        # series to compare against, and one that is missing matches nothing.
+        # Same for size — BackupArtifactEmpty cannot fire without
+        # backup_last_artifact_bytes. Neither is reachable for a producer that
+        # emits all its gauges from one block, but the contract invites the
+        # next one to adopt this by "emitting the gauges", and a half-adopted
+        # contract that reports nothing is indistinguishable from a healthy
+        # backup. These two rules are what make partial adoption say so.
+        - alert: BackupBudgetMissing
+          expr: |
+            count by (backup_job) (backup_last_success_timestamp_seconds)
+            unless on (backup_job)
+            count by (backup_job) (backup_max_age_seconds)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Backup {{ $labels.backup_job }} publishes no freshness budget"
+            description: "{{ $labels.backup_job }} reports a success timestamp but no backup_max_age_seconds, so BackupArtifactStale has nothing to compare it against and can never fire for it. The producer is publishing an incomplete gauge set."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        - alert: BackupArtifactSizeMissing
+          expr: |
+            count by (backup_job) (backup_last_success_timestamp_seconds)
+            unless on (backup_job)
+            count by (backup_job) (backup_last_artifact_bytes)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Backup {{ $labels.backup_job }} publishes no artifact size"
+            description: "{{ $labels.backup_job }} reports a success timestamp but no backup_last_artifact_bytes, so BackupArtifactEmpty can never fire for it — the zero-byte artifact case is unmonitored for this producer."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
         # A producer that can quiesce its source publishes whether the copy
