@@ -1007,18 +1007,26 @@ Fallback when no `platformctl` binary is available — same join, two API reads:
 comm -13 \
   <(kubectl get ciliumendpoints -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' | sort) \
   <(kubectl get pods -A --field-selector status.phase=Running \
-      -o jsonpath='{range .items[?(@.spec.hostNetwork!=true)]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' | sort)
+      -o go-template='{{range .items}}{{if not .spec.hostNetwork}}{{.metadata.namespace}}/{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | sort)
 ```
+
+The pod side has to be a `go-template`. `PodSpec.HostNetwork` is `omitempty`,
+so the key is **absent** on every pod that is not host-network, and a jsonpath
+filter skips any item whose left operand is missing: the plausible-looking
+`items[?(@.spec.hostNetwork!=true)]` selects nothing, `comm` finds no unmanaged
+pods, and the join reports full coverage on a cluster that has none.
 
 **There is no Prometheus alert for this, and none can be written from
 cilium-agent metrics alone.** The agent exports counts of the endpoints it
 manages (`cilium_endpoint*`); it cannot export a count of pods it never learned
 about, because those pods are outside the world it can see. A real alert needs
 the *difference* between a kube-state-metrics pod count and a Cilium endpoint
-count, and this cluster scrapes neither — the Cilium values file sets no
-`prometheus`/`serviceMonitor` block, so no `cilium_*` series exists in
-Prometheus at all. Wiring that up is a separate change with its own resource
-and cardinality cost; until then the command above is the check.
+count, and only the first of those exists here. kube-state-metrics is enabled
+and scraped — `kube_pod_info` and `kube_pod_status_phase` are both live — but
+the Cilium values file sets no `prometheus`/`serviceMonitor` block, so not one
+`cilium_*` series reaches Prometheus. Wiring up the Cilium half is a separate
+change with its own resource and cardinality cost; until then the command above
+is the check.
 
 ### 9.2 Remediation: recreate, do not reconfigure
 
@@ -1040,7 +1048,7 @@ own mechanism:
 | Workload | Why a plain restart is wrong |
 |---|---|
 | `longhorn-system` `instance-manager-*`, `engine-image-*` | Not owned by a controller that recreates them on delete; deleting an instance-manager detaches every replica on that node. Drain the node instead |
-| `database`, `ai-sre` CNPG clusters (`platform-postgresql-cluster-*`, `platform-litellm-db-cluster-*`) | Deleting the primary is an unplanned failover. Use the operator's own restart, and switch the primary away first |
+| `database`, `ai-sre` CNPG clusters (`platform-postgresql-cluster-*`, `platform-litellm-db-cluster-*`) | Deleting the primary is an unplanned failover. Switch the primary away first — `kubectl -n <ns> cnpg promote <cluster> <replica-pod>` (§3, needs the `cnpg` kubectl plugin) — then recreate the demoted pod, one instance at a time |
 | `vault` (`platform-vault-*`) | The StatefulSet is deliberately `OnDelete` (ADR 0007) and a restarted pod comes back sealed. Follow §2, one replica at a time, unsealing before moving on |
 | `monitoring` `prometheus-*`, `platform-loki-*`, `alertmanager-*` | Each carries a PVC and a Longhorn attach/detach cycle. Restart these when the observability gap they cause is acceptable, and confirm the volume reattached before the next step |
 | `nginx-gateway` | Restarting the DaemonSet drops in-flight ingress. Same blast radius as any gateway restart |

@@ -104,6 +104,15 @@ func runNetpolCoverage(cmd *cobra.Command, g *Globals, opts *coverageOptions) er
 
 	pods = cilium.Join(pods, endpoints)
 	total := cilium.Total(pods)
+	// An empty scope divides by nothing, and Coverage() calls that 100%. A
+	// mistyped -n would otherwise print "0/0 pods managed (100%)" and exit 0 —
+	// indistinguishable from a fully enrolled namespace to the step gate in
+	// OPERATIONS.md, which advances on exactly this command's exit code.
+	if opts.Namespace != "" && total.Total == 0 {
+		return reportCLIError(out,
+			fmt.Errorf("namespace %s has no pod-network pods to cover, so coverage is undefined rather than complete", opts.Namespace),
+			"Check the namespace name, then re-run — `platformctl cluster netpol coverage` with no -n reports every namespace that has pods")
+	}
 	groups := cilium.GroupByNamespace(pods)
 	if opts.By == "node" {
 		groups = cilium.GroupByNode(pods)
