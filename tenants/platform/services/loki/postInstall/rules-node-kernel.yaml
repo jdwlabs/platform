@@ -1,0 +1,63 @@
+# Rule files reach the Loki ruler through the chart's k8s-sidecar, which
+# watches for this label and writes each data key as a file into the org
+# directory the ruler reads. The ruler evaluates every file under an org as
+# that org, so these queries see the same streams the platform Grafana
+# datasource does.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-node-kernel
+  namespace: monitoring
+  labels:
+    loki_rule: "true"
+data:
+  node-kernel.yaml: |
+    groups:
+      - name: node-kernel-faults
+        interval: 1m
+        rules:
+          # node_filesystem_readonly cannot cover this: since Linux 6.12 ext4's
+          # error handler sets an internal emergency-RO bit instead of
+          # SB_RDONLY, so /proc/mounts still reports rw while the filesystem is
+          # latched. The kernel ring buffer is the only signal at fault time.
+          - alert: NodeKernelFilesystemFault
+            expr: |
+              sum by (node) (count_over_time({job="integrations/talos/kernel"} |~ `(?i)(ext4-fs error|detected aborted journal|remounting filesystem read-only|journal errno)` [5m])) > 0
+            labels:
+              severity: critical
+            annotations:
+              summary: "Kernel reported a filesystem fault on node {{ $labels.node }}"
+              description: "{{ $value }} ext4/journal error line(s) in the last 5m on {{ $labels.node }}. The volume is likely latched read-only even though /proc/mounts still reports rw; workloads on it will fail writes until it is remounted."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+          # Upstream of the filesystem fault: an iSCSI session that drops for
+          # longer than the recovery timeout is what aborts the journal.
+          - alert: NodeKernelISCSISessionRecovery
+            expr: |
+              sum by (node) (count_over_time({job="integrations/talos/kernel"} |~ `(?i)(session recovery timed out|ping timeout of [0-9]+ secs expired|detected conn error)` [5m])) > 0
+            labels:
+              severity: warning
+            annotations:
+              summary: "iSCSI session trouble on node {{ $labels.node }}"
+              description: "{{ $value }} iSCSI ping-timeout or session-recovery line(s) in the last 5m on {{ $labels.node }}. Left unrecovered this aborts the filesystem journal on any volume the session backs."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+          - alert: NodeKernelBlockIOError
+            expr: |
+              sum by (node) (count_over_time({job="integrations/talos/kernel"} |~ `(?i)(blk_update_request: i/o error|buffer i/o error|critical (medium|target) error)` [5m])) > 0
+            labels:
+              severity: warning
+            annotations:
+              summary: "Block I/O errors on node {{ $labels.node }}"
+              description: "{{ $value }} block-layer I/O error line(s) in the last 5m on {{ $labels.node }}."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+          # kubelet's evictionHard is meant to reclaim before the kernel does;
+          # a kernel OOM kill means that headroom was crossed anyway, and it
+          # takes down whatever shares the node, not just the greedy pod.
+          - alert: NodeKernelOOMKill
+            expr: |
+              sum by (node) (count_over_time({job="integrations/talos/kernel"} |~ `(?i)(out of memory: killed process|oom-kill:)` [5m])) > 0
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kernel OOM killer fired on node {{ $labels.node }}"
+              description: "{{ $value }} OOM-kill line(s) in the last 5m on {{ $labels.node }}. kubelet's eviction thresholds did not reclaim in time."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
