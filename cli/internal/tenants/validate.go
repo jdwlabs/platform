@@ -50,20 +50,27 @@ func checkObservabilityKeys(path string, raw []byte) error {
 	return rejectUnknownKeys(path, "observability.grafana", grafana, ObsGrafanaBlock{})
 }
 
+// Every unknown key at once, not the first: two typos in one block otherwise
+// take two edit-and-rerun cycles to find.
 func rejectUnknownKeys(path, prefix string, got map[string]interface{}, schema interface{}) error {
 	known := modelledKeys(schema)
+	var unknown []string
 	for key := range got {
-		if known[key] {
-			continue
+		if !known[key] {
+			unknown = append(unknown, prefix+"."+key)
 		}
-		valid := make([]string, 0, len(known))
-		for name := range known {
-			valid = append(valid, name)
-		}
-		sort.Strings(valid)
-		return fmt.Errorf("%s: unknown field %s.%s; valid: %s", path, prefix, key, strings.Join(valid, ", "))
 	}
-	return nil
+	if len(unknown) == 0 {
+		return nil
+	}
+	sort.Strings(unknown)
+	valid := make([]string, 0, len(known))
+	for name := range known {
+		valid = append(valid, name)
+	}
+	sort.Strings(valid)
+	return fmt.Errorf("%s: unknown field(s) %s; valid under %s: %s",
+		path, strings.Join(unknown, ", "), prefix, strings.Join(valid, ", "))
 }
 
 // modelledKeys reads the json tags the YAML decoder actually matches on, so a

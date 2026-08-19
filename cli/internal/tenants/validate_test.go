@@ -38,6 +38,24 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+// Two misspellings of gitSyncFolder in one block. Each one silently drops the
+// key and leaves that tenant's synced folder readable by every Grafana user,
+// and reporting only the first costs an edit-and-rerun cycle to find the other.
+func TestValidate_ReportsEveryUnknownKeyAtOnce(t *testing.T) {
+	err := ValidateFile(filepath.Join("testdata", "observability-unknown-keys.yaml"))
+	if err == nil {
+		t.Fatal("want an error for two unmodelled keys, got nil")
+	}
+	for _, key := range []string{"observability.grafana.gitsyncFolder", "observability.grafana.gitSyncFoldr"} {
+		if !contains(err.Error(), key) {
+			t.Errorf("err %q does not name %s", err.Error(), key)
+		}
+	}
+	if !contains(err.Error(), "gitSyncFolder") {
+		t.Errorf("err %q must list the valid names to correct them to", err.Error())
+	}
+}
+
 func TestValidateDir_AllPass(t *testing.T) {
 	tmp := t.TempDir()
 	raw, err := os.ReadFile(filepath.Join("testdata", "valid-tenant.yaml"))
