@@ -1,0 +1,242 @@
+# Unit tests for the two static expectations guarding the Minecraft world
+# backup: that something is scheduled to make it, and that something reports on
+# it. The same rule set's volume-recovery rules are covered by
+# rules-volume-recovery_test.yaml.
+#
+# A dead-man's switch is the one control nobody ever watches fire in
+# production, so if it is not exercised here it is not exercised at all.
+#
+# The central fixture is `input_series` that models the **exporter publishing**,
+# because that is the world these rules actually run in. The earlier round of
+# verification asserted the switch fired when the backup series was simply
+# absent — a state production never reaches, since presence is owned by a
+# long-lived exporter Deployment and not by the backup. A fixture where the
+# producer is silent proves the mechanism in a world that does not exist.
+#
+# Rule files are extracted from the PrometheusRule manifests under tenants/ by
+# run.sh, since promtool reads bare rule groups and not the CRD wrapper.
+rule_files:
+  - rules/jdwillmsen-tenant-alerts.yaml
+evaluation_interval: 1m
+tests:
+  # THE REGRESSION FIXTURE.
+  #
+  # The CronJob is gone — deleted, or its release removed — and the exporter
+  # Deployment is still up serving the zeros it serves when nothing has written
+  # state. Every backup_* series is present and valued exactly as production
+  # had them, so anything keyed on the presence of those series sees a healthy
+  # publisher and says nothing.
+  #
+  # The switch must fire anyway. It is keyed on kube-state-metrics, which stops
+  # emitting the moment the CronJob stops existing, and no amount of publishing
+  # on the producer's behalf can restore that series.
+  - interval: 1m
+    name: backup CronJob deleted while the exporter publishes zeros
+    input_series:
+      # Exactly what the exporter serves with no state ConfigMap mounted.
+      - series: 'backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x200'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x200'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x200'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x200'
+      - series: 'backup_exporter_start_time_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x200'
+      # kube-state-metrics still reports other CronJobs in the namespace, so
+      # this is not "kube-state-metrics is down" — it is this CronJob being
+      # gone while the rest of the namespace is observable.
+      - series: 'kube_cronjob_spec_suspend{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-volume-recovery"}'
+        values: '0+0x200'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: JdwillmsenMinecraftBackupCronJobAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              cronjob: jdwillmsen-minecraft-fwb-prd-backup
+            exp_annotations:
+              summary: "No scheduled backup exists for the Minecraft world"
+              description: "The CronJob jdwillmsen-minecraft-fwb-prd-backup is either suspended, deleted, or was never created in jdwillmsen-prd. Nothing is copying the world, and the backup exporter goes on publishing whatever it last read, so the freshness gauges say nothing about it. Check the CronJob and that ArgoCD has the tenant's deployment repo synced. If the backup is being retired deliberately, delete this rule in the same change — it exists to force that decision, not to be silenced."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      # The old switch, in the same fixture, saying nothing. This assertion is
+      # the defect written down: the exporter is publishing, so absent() over
+      # the backup series is satisfied and the producer-absent rule is silent
+      # for a backup that no longer exists. It is correct for what it watches
+      # and useless as a dead-man's switch, which is why there are now two.
+      - eval_time: 65m
+        alertname: JdwillmsenMinecraftBackupProducerAbsent
+        exp_alerts: []
+      # And it does not expire. A lookback-based expectation would have aged
+      # out and sent a resolved notification; this is still firing four days
+      # later, on a CronJob that is no less deleted than it was at 65m.
+      - eval_time: 100h
+        alertname: JdwillmsenMinecraftBackupCronJobAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              cronjob: jdwillmsen-minecraft-fwb-prd-backup
+            exp_annotations:
+              summary: "No scheduled backup exists for the Minecraft world"
+              description: "The CronJob jdwillmsen-minecraft-fwb-prd-backup is either suspended, deleted, or was never created in jdwillmsen-prd. Nothing is copying the world, and the backup exporter goes on publishing whatever it last read, so the freshness gauges say nothing about it. Check the CronJob and that ArgoCD has the tenant's deployment repo synced. If the backup is being retired deliberately, delete this rule in the same change — it exists to force that decision, not to be silenced."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # Suspension is the other half of "not scheduled", and it is the half a
+  # presence check cannot see at all: the CronJob object still exists, so its
+  # series is still emitted — valued 1. The `== 0` inside absent() is what
+  # filters it away. A suspended backup backs up exactly as much as a deleted
+  # one, and here the exporter is serving a real, healthy, recently-reported
+  # archive on top of it.
+  - interval: 1m
+    name: backup CronJob suspended while the exporter reports a healthy archive
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '1000000000+0x200'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '404897792+0x200'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x200'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '1+0x200'
+      - series: 'kube_cronjob_spec_suspend{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-backup"}'
+        values: '1+0x200'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: JdwillmsenMinecraftBackupCronJobAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              cronjob: jdwillmsen-minecraft-fwb-prd-backup
+            exp_annotations:
+              summary: "No scheduled backup exists for the Minecraft world"
+              description: "The CronJob jdwillmsen-minecraft-fwb-prd-backup is either suspended, deleted, or was never created in jdwillmsen-prd. Nothing is copying the world, and the backup exporter goes on publishing whatever it last read, so the freshness gauges say nothing about it. Check the CronJob and that ArgoCD has the tenant's deployment repo synced. If the backup is being retired deliberately, delete this rule in the same change — it exists to force that decision, not to be silenced."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # Both halves healthy: a scheduled, unsuspended CronJob and an exporter
+  # publishing a real archive. Neither rule may fire. A dead-man's switch that
+  # is also on in the healthy case is one somebody silences, and then nothing
+  # covers the case it was written for.
+  - interval: 1m
+    name: scheduled backup with a reporting exporter is silent
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '1000000000+0x200'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '404897792+0x200'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x200'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '1+0x200'
+      - series: 'kube_cronjob_spec_suspend{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-backup"}'
+        values: '0+0x200'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: JdwillmsenMinecraftBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 65m
+        alertname: JdwillmsenMinecraftBackupProducerAbsent
+        exp_alerts: []
+
+  # The live 2026-08-19 posture, which is the case the whole ticket is about:
+  # the CronJob is scheduled and fine, and the exporter is serving zeros
+  # because it started after the last run and no state ConfigMap exists yet.
+  # Nothing here is broken, so the tenant's switch must stay quiet — the
+  # criticals that were firing on this state are suppressed by the contract
+  # rules, which rules-job-freshness_test.yaml asserts against the same shape.
+  - interval: 1m
+    name: healthy CronJob with an exporter that has not yet been written to is silent
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x200'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x200'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x200'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x200'
+      - series: 'kube_cronjob_spec_suspend{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-backup"}'
+        values: '0+0x200'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: JdwillmsenMinecraftBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 65m
+        alertname: JdwillmsenMinecraftBackupProducerAbsent
+        exp_alerts: []
+
+  # The seam the CronJob rule cannot cover, and the reason the producer-absent
+  # rule is kept rather than replaced. A perfectly scheduled CronJob tells you
+  # nothing about whether anyone is looking at what it produced: with the
+  # exporter deleted, every artifact-level alert for this backup is silent and
+  # only a static expectation over the signal itself says so.
+  - interval: 1m
+    name: exporter deleted under a healthy CronJob still alerts
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-backup"}'
+        values: '0+0x200'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: JdwillmsenMinecraftBackupProducerAbsent
+        exp_alerts:
+          # absent() over a plain selector derives its output labels from the
+          # selector's own equality matchers, so backup_job arrives for free
+          # here. The CronJob rule above wraps a comparison and gets none at
+          # all, which is why its identifying labels are stated on the rule.
+          # The two shapes read almost identically and do not behave alike.
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+            exp_annotations:
+              summary: "No backup freshness signal exists for the Minecraft world"
+              description: "No freshness signal exists for the Minecraft world backup. It is not merely stale — nothing is reporting on it at all, so every other backup alert for it is silent too. Check the backup exporter Deployment and its ServiceMonitor in jdwillmsen-prd."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 65m
+        alertname: JdwillmsenMinecraftBackupCronJobAbsent
+        exp_alerts: []
+
+  # Nothing deployed at all — a cluster rebuilt from scratch where neither half
+  # was ever created. Both static expectations must fire, because both describe
+  # something this repository says must exist. This is the case a derived rule
+  # can never cover: there is no series anywhere to derive anything from.
+  - interval: 1m
+    name: neither backup nor exporter ever deployed alerts on both
+    input_series:
+      - series: 'up{job="irrelevant"}'
+        values: '1+0x200'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: JdwillmsenMinecraftBackupCronJobAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              cronjob: jdwillmsen-minecraft-fwb-prd-backup
+            exp_annotations:
+              summary: "No scheduled backup exists for the Minecraft world"
+              description: "The CronJob jdwillmsen-minecraft-fwb-prd-backup is either suspended, deleted, or was never created in jdwillmsen-prd. Nothing is copying the world, and the backup exporter goes on publishing whatever it last read, so the freshness gauges say nothing about it. Check the CronJob and that ArgoCD has the tenant's deployment repo synced. If the backup is being retired deliberately, delete this rule in the same change — it exists to force that decision, not to be silenced."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 65m
+        alertname: JdwillmsenMinecraftBackupProducerAbsent
+        exp_alerts:
+          # absent() over a plain selector derives its output labels from the
+          # selector's own equality matchers, so backup_job arrives for free
+          # here. The CronJob rule above wraps a comparison and gets none at
+          # all, which is why its identifying labels are stated on the rule.
+          # The two shapes read almost identically and do not behave alike.
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+            exp_annotations:
+              summary: "No backup freshness signal exists for the Minecraft world"
+              description: "No freshness signal exists for the Minecraft world backup. It is not merely stale — nothing is reporting on it at all, so every other backup alert for it is silent too. Check the backup exporter Deployment and its ServiceMonitor in jdwillmsen-prd."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"

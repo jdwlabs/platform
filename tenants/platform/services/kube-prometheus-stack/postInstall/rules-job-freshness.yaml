@@ -108,21 +108,50 @@ spec:
         # explicitly: the per-artifact budget wins where one is published, and
         # only artifacts with no budget of their own fall through to the
         # job-level one.
+        #
+        # The trailing `unless` is what keeps this off a producer that has
+        # never written any state. An exporter serving placeholder zeros for a
+        # backup that has not reported yet publishes a timestamp of 0, which is
+        # indistinguishable here from a real reading of "last succeeded at the
+        # epoch" — and 0 is past every budget, so this pages critical on a
+        # healthy cluster for as long as the producer takes to run once. That
+        # is not hypothetical: it fired for thirteen hours on a backup whose
+        # archives were fine.
+        #
+        # `unless`, not `and`, so the suppression is opt-in from the producer's
+        # side. A producer that does not publish backup_state_reported at all
+        # has no series on the right, nothing is removed, and this rule behaves
+        # exactly as it did before — a half-adopted contract must never be able
+        # to silence a critical, which is the failure mode the two `…Missing`
+        # rules below exist to catch.
+        #
+        # Aggregated to backup_job rather than to the artifact class: whether a
+        # producer has ever reported is a property of the producer, not of one
+        # artifact, and a job-level `unless` covers every artifact class it
+        # publishes without needing the state gauge repeated per class.
+        #
+        # The suppression cannot last: BackupStateNeverReported below fires
+        # once the producer's own budget has elapsed with nothing written, so a
+        # publish path that is genuinely broken reports itself rather than
+        # sitting behind a permanently quiet critical.
         - alert: BackupArtifactStale
           expr: |
             (
-              (time() - max by (backup_job, artifact) (backup_last_success_timestamp_seconds))
-              > on (backup_job, artifact) group_left()
-                max by (backup_job, artifact) (backup_max_age_seconds)
-            )
-            or
-            (
               (
                 (time() - max by (backup_job, artifact) (backup_last_success_timestamp_seconds))
-                unless on (backup_job, artifact) (backup_max_age_seconds)
+                > on (backup_job, artifact) group_left()
+                  max by (backup_job, artifact) (backup_max_age_seconds)
               )
-              > on (backup_job) group_left() max by (backup_job) (backup_max_age_seconds)
+              or
+              (
+                (
+                  (time() - max by (backup_job, artifact) (backup_last_success_timestamp_seconds))
+                  unless on (backup_job, artifact) (backup_max_age_seconds)
+                )
+                > on (backup_job) group_left() max by (backup_job) (backup_max_age_seconds)
+              )
             )
+            unless on (backup_job) (max by (backup_job) (backup_state_reported) == 0)
           for: 30m
           labels:
             severity: critical
@@ -131,14 +160,74 @@ spec:
             description: "Last verified artifact for {{ $labels.backup_job }} is {{ $value | humanizeDuration }} old, past the freshness budget the job publishes for itself."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
+        # Same `unless`, same reason, and the distinction it draws matters more
+        # here than anywhere else in this file: "the job ran and wrote nothing"
+        # is the original incident and must stay critical, while "nothing has
+        # reported a size yet" is a different condition that this rule had no
+        # way to see. A producer serving placeholder zeros reports both as
+        # `backup_last_artifact_bytes == 0`.
+        #
+        # Only the second is suppressed. A producer that has reported publishes
+        # backup_state_reported 1, the right side matches nothing for it, and a
+        # genuine zero-byte archive pages exactly as before.
         - alert: BackupArtifactEmpty
-          expr: max by (backup_job, artifact) (backup_last_artifact_bytes) == 0
+          expr: |
+            (max by (backup_job, artifact) (backup_last_artifact_bytes) == 0)
+            unless on (backup_job) (max by (backup_job) (backup_state_reported) == 0)
           for: 15m
           labels:
             severity: critical
           annotations:
             summary: "Backup {{ $labels.backup_job }} produced an empty artifact"
             description: "The most recent artifact for {{ $labels.backup_job }} is zero bytes. The job completed successfully and wrote nothing."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # The other side of the two rules above: what the suppression itself
+        # reports, so that it can never be permanent and silent.
+        #
+        # A producer publishing backup_state_reported 0 is saying "the values
+        # beside this are placeholders, nothing has written real state". That
+        # is entirely normal for a freshly deployed backup, right up until the
+        # producer's own declared budget has gone by — at which point it means
+        # the publish path is broken rather than merely young, and the two
+        # criticals above are being held off a producer nobody is measuring.
+        #
+        # The grace period is the producer's own backup_max_age_seconds rather
+        # than a constant here, because that gauge is already this contract's
+        # statement of how long a gap is normal for that producer. A constant
+        # would be wrong for every producer but one, and picking the slowest
+        # would leave faster producers unmonitored for days. `min` over the
+        # budgets: the shortest interval any artifact class of this producer
+        # claims is the soonest something should have been written.
+        #
+        # Measured from when the exporter started serving rather than with a
+        # `for:` clause, because `for:` cannot be given a per-producer
+        # duration. An exporter restart resets the clock, which is honest — on
+        # restart the state source is re-read, so a producer that has reported
+        # publishes 1 immediately and only a genuinely never-written state is
+        # delayed by a restart rather than hidden by one.
+        #
+        # Warning, not critical: nothing is known to be wrong with the
+        # artifacts, and what this describes is a gap in measurement. The
+        # process-level rules at the top of this file still cover whether the
+        # job is running and completing throughout.
+        - alert: BackupStateNeverReported
+          expr: |
+            (
+              (time() - max by (backup_job) (backup_exporter_start_time_seconds))
+              > on (backup_job) group_left() min by (backup_job) (backup_max_age_seconds)
+            )
+            and on (backup_job) (max by (backup_job) (backup_state_reported) == 0)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Backup {{ $labels.backup_job }} has never reported any state"
+            description: >-
+              {{ $labels.backup_job }}'s exporter has been serving placeholder values for {{ $value | humanizeDuration }} —
+              longer than the freshness budget the producer publishes for itself — and the producer has still written no
+              state. BackupArtifactStale and BackupArtifactEmpty are suppressed for it while this is true, so nothing is
+              watching the artifact. The job is most likely completing without publishing its metrics.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
         # Without this, deleting the exporter that publishes the two metrics

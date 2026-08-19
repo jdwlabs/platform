@@ -48,6 +48,8 @@ exists, an `artifact` label.
 | `backup_last_success_timestamp_seconds` | gauge | Unix timestamp when an artifact was last **verified written and non-empty**. Not when the job started, not when it exited. |
 | `backup_last_artifact_bytes` | gauge | Size of that artifact in bytes. |
 | `backup_max_age_seconds` | gauge | The producer's own freshness SLO, published as a metric. |
+| `backup_state_reported` | gauge | Required of any producer whose metrics are served by a **long-lived exporter** rather than pushed by the run itself. `1` when the values beside it are state the producer wrote, `0` when they are placeholders the exporter is serving because nothing has written state yet. Publish it in **both** cases — a gauge that appears and disappears cannot be joined against, and its absence has to keep meaning "this producer never adopted it". |
+| `backup_exporter_start_time_seconds` | gauge | Required alongside `backup_state_reported`. Unix time the exporter process began serving. It is what bounds the suppression that `backup_state_reported 0` buys: `BackupStateNeverReported` compares it against this producer's own budget, so a placeholder state can never be both permanent and silent. |
 | `backup_last_artifact_quiesced` | gauge | Optional. `1` if the newest artifact was taken with its **source at rest**, `0` if taken while the source was running and could not be stilled. Omit it entirely where the distinction does not apply, or where it is not known — never guess a value, since the point of the gauge is to make a degraded run distinguishable from a clean one. |
 | `backup_last_artifact_source_replicas` | gauge | Optional, informational. The source workload's desired replica count at the time of the copy. No rule reads it; it is what lets a human tell a *held* source apart from a *stopped* one after the fact. Omit it when the count cannot be read. |
 
@@ -63,6 +65,19 @@ Decide it from the source's **desired** state, not its observed health. A pod
 present at one replica and crashlooping was never asked to be down, so its cold
 copy is a symptom and must publish `0`. A replica count that cannot be read
 publishes `0` too: the unknown case alerts rather than going quiet.
+
+**Placeholder values must say that they are placeholders.** An exporter that
+serves zeros when it has no state is right to do so — a backup deployed but
+never run would otherwise look healthy until its first run — but a timestamp of
+`0` is past every budget and a size of `0` is empty, so the two criticals fire
+on a brand-new, entirely healthy deployment. That is not theoretical: the
+Minecraft world backup paged `critical` for thirteen hours on a cluster whose
+archives were fine, because its state ConfigMap is mounted `optional: true` and
+a missing ConfigMap resolves to an empty mount rather than a failure.
+
+Keep the zeros; publish `backup_state_reported 0` beside them. `never measured`
+and `measured zero` are different conditions wanting different severities, and
+nothing else in the gauge set can tell them apart.
 
 `backup_max_age_seconds` may carry the `artifact` label or not, independently of
 the other gauges. A producer with several artifact classes and one budget for
@@ -147,6 +162,7 @@ and are not restated here — one copy, so the two cannot drift:
 | `BackupFreshnessSignalMissing` | a producer that *was* publishing the gauges has stopped, so neither of the above can fire for it |
 | `BackupBudgetMissing` | a producer publishes a timestamp but no `backup_max_age_seconds`, so `BackupArtifactStale` can never fire for it |
 | `BackupArtifactSizeMissing` | a producer publishes a timestamp but no `backup_last_artifact_bytes`, so `BackupArtifactEmpty` can never fire for it |
+| `BackupStateNeverReported` | a producer has served placeholder values for longer than its own `backup_max_age_seconds`, so the two criticals above are suppressed for it and nothing is watching its artifact |
 | `BackupArtifactNotQuiesced` | the newest artifact was taken while its source was running and could not be stilled |
 
 The two `…Missing` rules exist because the three gauges are required together
@@ -198,21 +214,58 @@ produced, and nothing said.
 
 The only shape immune to this is `absent()` over a **named** series, because it
 asserts an expectation the repository holds rather than one Prometheus can
-forget:
+forget. What it must be pointed at is the part that is easy to get wrong.
+
+### Point it at a series the watched thing does not produce
+
+`absent()` tests for a series' **presence**, so the switch is only as good as
+the question "who owns that presence?". Point it at a gauge the watched release
+publishes about itself and the answer is "the thing being watched", which is not
+a dead-man's switch at all — it is a liveness check on the publisher.
+
+That mistake shipped here. The world backup's switch was:
 
 ```yaml
-- alert: JdwillmsenMinecraftBackupProducerAbsent
-  expr: absent(backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup"})
+# WRONG as a dead-man's switch for the backup. Kept, but only as a check on the
+# exporter — see below.
+expr: absent(backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup"})
+```
+
+The producer of that series is a long-lived **exporter Deployment**, not the
+backup CronJob. Delete the CronJob permanently and the exporter goes on
+publishing the series at `0` forever, `absent()` stays empty, and the switch
+never fires — the exact posture it was written to prevent, reached through a
+different door.
+
+Point it instead at **kube-state-metrics**, which produces a series per CronJob
+and stops the moment the CronJob stops existing. Nothing in the watched release
+can keep it alive:
+
+```yaml
+- alert: JdwillmsenMinecraftBackupCronJobAbsent
+  expr: absent(kube_cronjob_spec_suspend{namespace="jdwillmsen-prd", cronjob="jdwillmsen-minecraft-fwb-prd-backup"} == 0)
   for: 1h
   labels:
     severity: critical
+    namespace: jdwillmsen-prd
+    cronjob: jdwillmsen-minecraft-fwb-prd-backup
 ```
 
-Three things about it are deliberate:
+Four things about it are deliberate:
 
-- **The literal job name.** It says "this specific backup must exist", so it
-  fires on a cluster rebuilt from scratch where the producer was never deployed
-  at all, and it never expires.
+- **The literal names.** It says "this specific backup must exist", so it fires
+  on a cluster rebuilt from scratch where the producer was never deployed at
+  all, and it never expires.
+- **`== 0` inside `absent()`.** It collapses "deleted" and "suspended" into one
+  rule. A deleted CronJob has no series; a suspended one has a series valued
+  `1`, which the comparison filters away, leaving `absent()` with nothing
+  either way. A suspended backup backs up exactly as much as a deleted one.
+- **The labels are stated on the rule.** `absent()` derives output labels from a
+  plain selector only, so wrapping a comparison yields **none at all** — no
+  `namespace`, nothing. Alertmanager's grouping and inhibition are keyed on
+  `alertname` and `namespace`, so a label-less alert routes unlike every other
+  alert in the cluster. State them explicitly whenever there is a comparison
+  inside `absent()`.
 - **It lives in this repository, not the deployment repo.** A rule shipped by
   the thing it watches disappears together with it, which is the failure being
   closed. The Minecraft one is in
@@ -221,22 +274,44 @@ Three things about it are deliberate:
   Removing a backup should be a decision someone makes explicitly, not
   something that happens by a series quietly ceasing to exist.
 
+### A second expectation, for the signal
+
+"Is anything making backups?" and "is anything reporting on them?" have
+different producers and need separate rules. kube-state-metrics can see a
+perfectly scheduled CronJob while nothing publishes a word about what it
+produced, so the `absent()` over the producer's own series is kept — scoped to
+what it actually covers, which is the exporter being deleted, disabled, or no
+longer scraped. Presence there means "somebody is reporting", never "the backup
+is alive".
+
+Verify it against a fixture where the exporter **is publishing**. A test that
+models the producer's series as simply absent proves the mechanism in a world
+production never reaches, and that is how the broken switch passed review.
+
 ## Adopting this
 
 1. Make the job verify its own output — size, and ideally that the archive
    opens — before recording success.
 2. Emit the three gauges by one of the transports above.
-3. Land the rules alongside the producer. The generic rules already exist, so a
+3. If the metrics are served by a long-lived exporter rather than pushed by the
+   run itself, publish `backup_state_reported` and
+   `backup_exporter_start_time_seconds` too, per the section above. Skipping
+   them makes the exporter's placeholder values page `critical` on a healthy
+   fresh deployment.
+4. Land the rules alongside the producer. The generic rules already exist, so a
    second producer inherits them by emitting the gauges. It does need **one**
    rule of its own: the static `absent()` expectation naming it, in this
-   repository, per the section above. Where a producer lives in another
-   repository the two halves cannot be one PR, so open them together and
-   reference each from the other; the pairing is what matters, not the single
-   commit.
-4. Prove the alert fires: point the producer at an empty source, confirm
+   repository, over a **kube-state-metrics** series and not over its own
+   gauges, per the section above. Where a producer lives in another repository
+   the two halves cannot be one PR, so open them together and reference each
+   from the other; the pairing is what matters, not the single commit.
+5. Prove the alert fires: point the producer at an empty source, confirm
    `BackupArtifactEmpty` goes pending, then restore it. An alert that has
-   never been seen to fire is an assumption.
-5. If the producer publishes `backup_last_artifact_quiesced`, prove the alert
+   never been seen to fire is an assumption. Prove the static expectation the
+   same way, and prove it **against a fixture where the exporter is
+   publishing** — the state production is always in. A switch verified only
+   against a silent producer is verified against nothing.
+6. If the producer publishes `backup_last_artifact_quiesced`, prove the alert
    also stays *quiet* when it should. Stop the source deliberately and confirm
    the run succeeds, publishes `1`, and raises nothing; then make the source
    unreachable while it is still meant to be running and confirm the warning
