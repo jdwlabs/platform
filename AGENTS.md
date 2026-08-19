@@ -65,6 +65,27 @@ Run `platformctl bootstrap` from the repo root. See [docs/BOOTSTRAP.md](docs/BOO
 
 **An authentication attempt is a mutation, not a read.** Repeated failures invalidate the `truenas-csi` key and take provisioning down for every class at once — four attempts did exactly that (`docs/adr/0025-truenas-metrics-what-the-graphite-push-can-and-cannot-carry.md`), and the key had to be regenerated in the TrueNAS UI. Never probe or retry auth in a loop — fail fast on a rejection and report it. The blast radius is what makes the `truenas-csi` key opt-in rather than the default, and it applies whether or not the attempt would succeed: do not read ADR-0025's "cannot authenticate over WebSocket" as a standing fact, it describes the pre-incident key and the regenerated one has since authenticated. That is also why a rejection prints its own help telling you **not** to re-run: export a throwaway read-only key as `PLATFORMCTL_TRUENAS_API_KEY` instead.
 
+### NetworkPolicy coverage (Cilium managed endpoints)
+
+Cilium only manages a pod whose sandbox it created, so a pod that predates the
+agent on its node has no `CiliumEndpoint`, no identity, and no policy resolves
+against it — while the namespace still reports its policies applied.
+
+- Measure: `platformctl cluster netpol coverage` — TOON output, per-namespace by
+  default; `--by node` shows which nodes still carry pre-agent pods, `--unmanaged`
+  prints the pod-level restart worklist, `-n <ns>` scopes both sides of the join
+- It exits non-zero below `--min-coverage` (default 100), so it is a gate, not
+  only a report; `--min-coverage 0` reports without failing
+- The same join runs as the `cilium-endpoint-coverage` check in
+  `platformctl cluster status`, reported as a warning — partial coverage is the
+  expected state mid-rollout, and a permanently red check is one nobody reads
+- Host-network pods and pods that are not Running are excluded: neither can ever
+  carry an endpoint, so counting them would report a gap no remediation closes
+- No Prometheus alert exists and none can be written from cilium-agent metrics
+  alone — the agent cannot count pods it never learned about. See
+  [ADR 0027](docs/adr/0027-cilium-managed-endpoint-coverage.md); the sequenced
+  remediation is [OPERATIONS.md §9](docs/OPERATIONS.md)
+
 ### Grafana Git Sync
 
 Connection and Repository live in Grafana's own API server — invisible to `kubectl` and to ArgoCD — so `platformctl gitsync` is the only sanctioned way to read or reset them.

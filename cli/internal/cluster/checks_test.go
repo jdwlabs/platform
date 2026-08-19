@@ -16,6 +16,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/jdwlabs/platform/internal/cilium"
 )
 
 func newDeployment(ns, name, workloadName string, ready int32) *appsv1.Deployment {
@@ -743,5 +745,64 @@ func TestCheckRcloneOwnClientID_MissingSecretFails(t *testing.T) {
 	r := checkRcloneOwnClientID(context.Background(), fake.NewSimpleClientset(), "database", "rclone-gdrive")
 	if r.Status != StatusFail {
 		t.Fatalf("expected fail, got %s: %s", r.Status, r.Message)
+	}
+}
+
+func coveragePod(ns, name string, hostNetwork bool) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		Spec:       corev1.PodSpec{NodeName: "talos-lx0", HostNetwork: hostNetwork},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+}
+
+func coverageEndpoints(objs ...runtime.Object) dynamic.Interface {
+	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{cilium.EndpointGVR: "CiliumEndpointList"},
+		objs...,
+	)
+}
+
+func coverageEndpoint(ns, name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "cilium.io/v2",
+		"kind":       "CiliumEndpoint",
+		"metadata":   map[string]interface{}{"name": name, "namespace": ns},
+		"status":     map[string]interface{}{"identity": map[string]interface{}{"id": int64(4242)}},
+	}}
+}
+
+func TestCheckCiliumEndpointCoverage_PartialCoverageWarns(t *testing.T) {
+	kube := fake.NewSimpleClientset(
+		coveragePod("jdwlabs-prd", "old", false),
+		coveragePod("jdwlabs-prd", "new", false),
+	)
+	res := checkCiliumEndpointCoverage(context.Background(), kube,
+		coverageEndpoints(coverageEndpoint("jdwlabs-prd", "new")))
+	if res.Status != StatusWarn {
+		t.Fatalf("status = %v, want warn", res.Status)
+	}
+	if !strings.Contains(res.Message, "1/2 pod-network pods managed (50%)") {
+		t.Errorf("message = %q, want the managed/total split", res.Message)
+	}
+}
+
+func TestCheckCiliumEndpointCoverage_FullCoveragePassesAndIgnoresHostNetwork(t *testing.T) {
+	kube := fake.NewSimpleClientset(
+		coveragePod("jdwlabs-prd", "new", false),
+		coveragePod("kube-system", "flannel", true),
+	)
+	res := checkCiliumEndpointCoverage(context.Background(), kube,
+		coverageEndpoints(coverageEndpoint("jdwlabs-prd", "new")))
+	if res.Status != StatusPass {
+		t.Fatalf("status = %v (%s), want pass", res.Status, res.Message)
+	}
+}
+
+func TestCheckCiliumEndpointCoverage_NoPodsIsSkippedNotPassed(t *testing.T) {
+	res := checkCiliumEndpointCoverage(context.Background(), fake.NewSimpleClientset(), coverageEndpoints())
+	if res.Status != StatusSkipped {
+		t.Fatalf("status = %v (%s), want skipped", res.Status, res.Message)
 	}
 }
