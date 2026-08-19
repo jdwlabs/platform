@@ -580,7 +580,17 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 		} else {
 			resync = "requested for " + grafanaApplication
 		}
-		envelopes = syncTenantEnvelopes(cmd.Context(), deleting, claims)
+		if claimErr != nil {
+			// --accept-open-folder got here past an unreadable cluster, so the
+			// claim map is empty for want of a read, not for want of a claimant.
+			// Reporting "none needed" off it would be the same false all-clear
+			// this line exists to avoid.
+			envelopes = "not checked: " + claimErr.Error() +
+				" — run `argocd app sync governance-<tenant>` for any tenant granted these folders, " +
+				"or they stay readable by every grafana user"
+		} else {
+			envelopes = syncTenantEnvelopes(cmd.Context(), deleting, claims)
+		}
 	}
 	if err := display.ToonScalar(out, "result",
 		fmt.Sprintf("deleted %d resource(s) in order; ArgoCD refresh %s", len(steps), resync)); err != nil {

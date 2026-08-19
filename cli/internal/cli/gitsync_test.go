@@ -801,6 +801,28 @@ func TestGitSyncRecreate_NoSyncIsNotHeldToTheClaimCheck(t *testing.T) {
 	}
 }
 
+func TestGitSyncRecreate_AcceptedUnreadableClaimDoesNotReportNoneNeeded(t *testing.T) {
+	// An empty claim map for want of a read is not the same as no claimant,
+	// and "none needed" off it is the same false all-clear as a refresh that
+	// runs no hooks.
+	stub := &grafanaStub{repositories: sharedConnectionRepositories, connections: healthyConnections, dashboards: noDashboards}
+	out, dc, err := runGitSyncWithKube(t, stub, unreadableClaims(t), "gitsync", "recreate",
+		"--repository", "jdwlabs-dashboards", "--confirm", "--accept-open-folder")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "none needed") {
+		t.Errorf("an unread claim must not be reported as nothing to do:\n%s", out)
+	}
+	if !strings.Contains(out, "not checked: configmaps is forbidden") ||
+		!strings.Contains(out, "argocd app sync") {
+		t.Errorf("the unsynced envelopes must be stated as owed:\n%s", out)
+	}
+	if got := syncedApps(t, dc); len(got) != 0 {
+		t.Errorf("nothing was read, so nothing can be synced: %v", got)
+	}
+}
+
 func TestGitSyncRecreate_EveryClaimantOfAFolderIsSynced(t *testing.T) {
 	// Two tenants claiming one folder is rejected in git by
 	// tools/check-gitsync-tenant-folders.py, but the cluster passes through it
