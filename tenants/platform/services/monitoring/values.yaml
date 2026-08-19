@@ -59,6 +59,11 @@ podLogsViaLoki:
       label = "tenant_id"
     }
 
+# This feature reads systemd journal files off the node, and Talos runs no
+# journald at all -- enabling it would mount a path that never has entries and
+# report nothing wrong while doing it. Talos keeps kernel output in the ring
+# buffer and pushes it to a remote endpoint instead, so node logs arrive on the
+# alloy-logs listener configured under `collectors` below rather than here.
 nodeLogs:
   enabled: false
 
@@ -79,6 +84,98 @@ selfReporting:
 collectors:
   alloy-logs:
     enabled: true
+    # Talos has no journald and no on-disk kernel log, so the only way off the
+    # node is its own push: the kernel command line names a TCP endpoint and
+    # Talos streams the ring buffer to it as newline-delimited JSON. Those
+    # lines carry no hostname, so the receiver has to be node-local for the
+    # node label to mean anything -- hence a hostPort on this DaemonSet and a
+    # loopback endpoint on the Talos side, rather than one shared collector.
+    #
+    # Volume is small in steady state (a quiet kernel emits a handful of lines
+    # a minute) and bursty only during the faults this exists to catch. Stream
+    # cardinality is bounded at one per node: facility, priority and level go
+    # to structured metadata so a chatty subsystem cannot fan out into new
+    # streams.
+    extraConfig: |
+      otelcol.receiver.tcplog "talos_kernel" {
+        listen_address = "0.0.0.0:6050"
+
+        output {
+          logs = [otelcol.exporter.loki.talos_kernel.input]
+        }
+      }
+
+      otelcol.exporter.loki "talos_kernel" {
+        forward_to = [loki.process.talos_kernel.receiver]
+      }
+
+      loki.process "talos_kernel" {
+        // The OTel-to-Loki bridge does not hand over the received line as-is:
+        // it serialises the whole log record, so what arrives here is
+        // {"body": "<the Talos JSON>"}. Unwrapping first is what makes the
+        // stages below see Talos's own keys -- parsing the envelope directly
+        // extracts nothing and every later stage silently does nothing.
+        stage.json {
+          expressions = {
+            body = "",
+          }
+        }
+
+        // Talos-emitted keys are hyphenated, which JMESPath reads as
+        // subtraction unless the identifier is quoted.
+        stage.json {
+          source = "body"
+          expressions = {
+            msg        = "",
+            facility   = "",
+            priority   = "",
+            level      = "\"talos-level\"",
+            talos_time = "\"talos-time\"",
+          }
+        }
+
+        // Without this the entry is timestamped on arrival, which reorders
+        // the ring buffer against itself whenever the connection reconnects
+        // and replays.
+        stage.timestamp {
+          source = "talos_time"
+          format = "RFC3339"
+        }
+
+        stage.structured_metadata {
+          values = {
+            facility = "",
+            priority = "",
+            level    = "",
+          }
+        }
+
+        stage.static_labels {
+          values = {
+            job       = "integrations/talos/kernel",
+            node      = sys.env("NODE_NAME"),
+            tenant_id = "platform",
+          }
+        }
+
+        // The bridge stamps its own `exporter` label on every entry, which
+        // says nothing about the log and only widens the stream key.
+        stage.label_drop {
+          values = ["exporter"]
+        }
+
+        // Drop the JSON envelope so the stored line is the kernel message the
+        // alert rules and `talosctl dmesg` both show.
+        stage.output {
+          source = "msg"
+        }
+
+        stage.tenant {
+          label = "tenant_id"
+        }
+
+        forward_to = [loki.write.loki.receiver]
+      }
     # daemonset: one reader per node, plus the blanket NoSchedule toleration
     # that keeps it scheduled on the tainted control-plane nodes; without it
     # those nodes' pod logs stop reaching Loki and nothing reports an error.
@@ -88,6 +185,44 @@ collectors:
       - daemonset
       - filesystem-log-reader
     alloy:
+      # otelcol.receiver.tcplog is Alloy's only raw-socket log listener and it
+      # is still experimental, so the whole collector has to run at that
+      # stability level to load it. Nothing else in this collector's config
+      # depends on the relaxation -- every other component here is GA -- and
+      # the alternative is no path off the node at all, since Talos emits
+      # newline-delimited JSON over a plain socket and no GA source parses it.
+      stabilityLevel: experimental
+      # hostPort, not a Service: Talos dials the endpoint from the host
+      # namespace before any cluster networking is guaranteed, and the
+      # loopback address has to reach the collector on that same node so the
+      # node label below is the node the message came from.
+      #
+      # This listener is unauthenticated and reachable beyond the node. Talos
+      # offers no TLS or auth for log shipping, `hostPort` with no `hostIP`
+      # binds every host address, and this chart's extraPorts contract emits
+      # only containerPort/hostPort/name/protocol -- there is no way to ask for
+      # a loopback-only bind through it. The same entry also publishes the port
+      # on the alloy-logs Service, so it is reachable cluster-internally too.
+      # Anything that can reach either path can inject lines into
+      # {job="integrations/talos/kernel"} and so forge a critical alert.
+      # Accepted for now: the blast radius is a spurious page, not access to
+      # data or to the node, and the alternative is no fault signal at all. A
+      # NetworkPolicy is deliberately not offered as the mitigation -- the
+      # monitoring namespace does not set `enforce: true`, so one rendered here
+      # would look like a control while evaluating nothing. Closing this needs
+      # either upstream `hostIP` support or namespace enforcement first.
+      extraPorts:
+        - name: talos-kmsg
+          port: 6050
+          targetPort: 6050
+          hostPort: 6050
+          protocol: TCP
+      # The kernel log lines carry no hostname of their own.
+      extraEnv:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
       # alloy-logs ran ~175Mi/node unbounded; the initial cap above still left
       # this request over-provisioned against later observed usage across the
       # DaemonSet, so it's trimmed modestly here. Limit is unchanged — it's

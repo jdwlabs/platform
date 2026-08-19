@@ -79,6 +79,14 @@ memcachedExporter:
 # sits at ~77Mi steady state; the limit leaves room for a full re-list when the
 # watch reconnects.
 sidecar:
+  rules:
+    # The rule store needs one directory per Loki org, and this chart wires the
+    # sidecar's folder-annotation knob only into the SimpleScalable backend
+    # StatefulSet -- not the single-binary one deployed here -- so a rule
+    # ConfigMap cannot ask for a subdirectory. Moving the sidecar's mount to
+    # the org path instead makes `/rules` contain exactly one tenant directory,
+    # `platform`, which is the org every platform-owned writer already stamps.
+    folder: /rules/platform
   resources:
     requests:
       memory: 96Mi
@@ -140,8 +148,34 @@ loki:
       - selector: '{job="integrations/kubernetes/eventhandler"}'
         priority: 1
         period: 48h
-  ruler:
-    enable_api: true
+  # `enable_api` previously sat under `loki.ruler`, which the chart never reads
+  # -- only `loki.rulerConfig` is interpolated into the generated config -- so
+  # it was inert (and redundant: Loki defaults it on). The ruler therefore ran
+  # with no rule directory and no Alertmanager, which is why no log-derived
+  # alert could exist at all, not merely why none had been written.
+  #
+  # `storage.local.directory` is the parent of the emptyDir the rules sidecar
+  # writes into. Loki's local rule store enumerates *subdirectories* of this
+  # path as tenants and ignores files sitting directly in it, so the sidecar's
+  # own mount path supplies the org name (see `sidecar.rules.folder`).
+  #
+  # `rule_path` is the scratch directory the ruler copies rule files into while
+  # evaluating; left at its default it is the same `/rules` the sidecar owns,
+  # so it is moved onto the PVC to keep the two from writing over each other.
+  #
+  # `enable_alertmanager_v2` is already Loki's default and is pinned rather
+  # than corrected: Alertmanager has removed the v1 `/api/v1/alerts` endpoint,
+  # so the value silently flipping back would send every alert into a 404.
+  rulerConfig:
+    wal:
+      dir: /var/loki/ruler-wal
+    storage:
+      type: local
+      local:
+        directory: /rules
+    rule_path: /var/loki/ruler-rules
+    alertmanager_url: http://platform-kube-prometheus-s-alertmanager:9093
+    enable_alertmanager_v2: true
   # No livenessProbe ships for this container by default, so before this
   # change nothing could restart it during a slow start -- a wedged process
   # just sat NotReady. This startupProbe is a genuine new kill path, not a

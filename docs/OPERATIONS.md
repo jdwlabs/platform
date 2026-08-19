@@ -430,6 +430,7 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | `BackupFreshnessSignalMissing` (warning) | A producer that was publishing freshness gauges has stopped, so its staleness and empty-artifact alerts can no longer fire. Check the producer's exporter pod and its ServiceMonitor target in Prometheus. **It expires 14d after the last sample and Alertmanager then sends an explicit `resolved` notification — that is the lookback running out, not the backup recovering.** Never read a resolve on this alert as recovery; confirm the target is scraping again. A producer that must never disappear silently also needs a static `absent()` expectation naming it, which cannot expire — see `docs/observability/JOB-OUTPUT-FRESHNESS.md`. |
 | `JdwillmsenMinecraftBackupProducerAbsent` (critical) | The static expectation that the Minecraft world backup reports at all. Unlike every other rule here it is not derived from the producer's own metrics, so it fires on a cluster where the producer was never deployed and keeps firing indefinitely. Check the backup exporter Deployment, its Service and ServiceMonitor in `jdwillmsen-prd`, and that ArgoCD has the deployment repo synced. If the world backup is being decommissioned on purpose, delete the rule in the same change — it is meant to force that decision, not be silenced. |
 | `BackupBudgetMissing` / `BackupArtifactSizeMissing` (warning) | A producer publishes a success timestamp but not `backup_max_age_seconds` / `backup_last_artifact_bytes`. The matching critical (`BackupArtifactStale` / `BackupArtifactEmpty`) has nothing to compare against and can never fire for that producer, so it is unmonitored while looking healthy. Fix the producer's gauge set rather than the rule; the contract's three gauges are all required. |
+| A pod reports `Read-only file system` while every layer above the kernel looks healthy | The filesystem is latched read-only without `/proc/mounts` ever changing: since Linux 6.12 ext4's error handler sets an internal emergency-RO bit instead of `SB_RDONLY`, so `node_filesystem_readonly` stays 0, the `VolumeAttachment` stays `true`, and the CSI node pod logs nothing. The evidence is in the node's kernel ring buffer only. Query it in Loki: `{job="integrations/talos/kernel", node="<node>"} |~ "(?i)ext4-fs error"`. `NodeKernelFilesystemFault` fires on this within a minute; if it did not, check the collector is receiving at all before trusting the absence. Recovery is a remount, which in practice means deleting the pod (and, if the journal aborted, detaching/reattaching the volume). |
 
 ## 6. Non-interactive / CI mode
 
@@ -585,7 +586,44 @@ gates green.
 {namespace="argocd"} |= "ERROR"                               # ArgoCD errors
 {namespace="vault"} | json | __error__=""                     # Structured Vault logs
 {namespace="cert-manager", container="cert-manager"} |= "DNS" # DNS-01 detail
+{job="integrations/talos/kernel"}                             # Node kernel ring buffer
+{job="integrations/talos/kernel", node="<node>"} |~ "(?i)ext4-fs error|i/o error"
 ```
+
+**Node kernel logs.** Talos has no journald, so nothing tails these off disk —
+the node pushes its ring buffer to a listener on the `alloy-logs` DaemonSet on
+that same node, and the `node` label is only meaningful because of that. The
+stream carries `facility`, `priority` and `level` as structured metadata, so
+filter on those with `| priority="crit"` rather than expecting stream labels.
+
+An empty result for `{job="integrations/talos/kernel"}` means the pipeline is
+down, not that the kernel is quiet — a healthy node emits lines steadily.
+Check, in order: the Talos side is still configured to push (the endpoint is on
+the kernel command line, so it survives only as long as the machine config
+does), then the DaemonSet pod on that node.
+
+The receiving port is unauthenticated and bound on every node address (Talos
+offers no auth for log shipping, and the collector chart cannot express a
+loopback-only bind), so this stream is *injectable* — a line in it is not proof
+the kernel emitted it. When a `NodeKernel*` alert fires with nothing corroborating
+it, confirm against the node itself with `talosctl dmesg` before acting on it.
+
+**Log-derived alerts.** These are LogQL, so they are *not* `PrometheusRule`
+objects and do not appear in Prometheus. They live as ConfigMaps in
+`tenants/platform/services/loki/postInstall/`, are delivered to the Loki ruler
+by the Loki chart's rules sidecar, and post to the same Alertmanager as every
+metric-derived alert. To see what the ruler actually loaded and its evaluation
+state — the sidecar failing to deliver a file is otherwise silent:
+
+```
+kubectl -n monitoring exec sts/platform-loki -c loki -- \
+  wget -qO- --header 'X-Scope-OrgID: platform' \
+  http://127.0.0.1:3100/prometheus/api/v1/rules
+```
+
+The ruler's rule store keys tenants by *directory*: files sitting directly in
+the watch folder are ignored, not loaded into a default org. The sidecar mounts
+at `/rules/platform` precisely so that directory is the org name.
 
 **Prometheus alert routes:** the Discord receiver reads `kv/alertmanager`
 `discord_webhook_url`; the config is the `alertmanager-config` **Secret**,

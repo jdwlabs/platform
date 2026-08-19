@@ -38,6 +38,8 @@ One owner per signal:
 | Recording/alerting rules | `kube-prometheus-stack` | Chart `defaultRules` + `PrometheusRule` manifests in `tenants/platform/services/kube-prometheus-stack/postInstall/` |
 | Alerting delivery | `kube-prometheus-stack` | Alertmanager (config via ExternalSecret) |
 | Pod logs | `k8s-monitoring` (Alloy) | `alloy-logs` DaemonSet → Loki |
+| Node/kernel logs | Talos (push) → `k8s-monitoring` (Alloy) | Talos streams its kernel ring buffer to a hostPort listener on the `alloy-logs` DaemonSet → Loki (`job="integrations/talos/kernel"`) |
+| Log-derived alerting rules | `loki` | Rule ConfigMaps in `tenants/platform/services/loki/postInstall/`, delivered by the chart's rules sidecar to the Loki ruler → Alertmanager |
 | Cluster events | `k8s-monitoring` (Alloy) | `alloy-singleton` → Loki (`job="integrations/kubernetes/eventhandler"`, referenced by the Loki retention/selector config) |
 | Traces | apps → Tempo directly (OTLP); Tempo metrics-generator remote-writes RED metrics to Prometheus | `tempo` release |
 | Dashboards / UI | standalone `grafana` | Sidecar ConfigMap discovery + Git Sync |
@@ -54,6 +56,34 @@ One owner per signal:
   alert pipeline behind a second translation layer.
 - Cardinality controls (cAdvisor/kube-state-metrics drop relabelings) live in
   the kube-prometheus-stack values and only apply on its scrape path.
+
+### Why node logs arrive by push, not by scrape
+
+The `nodeLogs` feature of `k8s-monitoring` reads systemd journal files off the
+node. Talos runs no journald, so that feature has nothing to read here and
+stays disabled — enabling it would mount an always-empty path and report
+nothing wrong while doing it. Talos keeps kernel output in the ring buffer and
+exposes it two ways: over its own API (`talosctl dmesg`, which needs a
+talosconfig and so cannot be a collector's data source) and as a push to a
+remote endpoint named on the kernel command line. The push is the only one a
+collector can consume unattended, which inverts the usual direction: the node
+dials the collector.
+
+Because those lines carry no hostname of their own, the listener has to be on
+the node that produced them for a `node` label to be truthful. That is why the
+receiver is a hostPort on the per-node `alloy-logs` DaemonSet rather than a
+Service in front of all of them, and why the Talos side points at loopback.
+
+### Why log rules live with `loki`, not with `kube-prometheus-stack`
+
+Alerting rules are otherwise owned by `kube-prometheus-stack` (see the table
+above), and that stays true for everything expressed in PromQL. A LogQL rule
+cannot be: `PrometheusRule` objects are read by the Prometheus Operator, which
+has no way to hand a LogQL expression to the Loki ruler. The Loki chart's own
+rules sidecar is the only delivery path, so those rule files are owned by the
+`loki` release. Delivery of the resulting alert is still shared — the Loki
+ruler posts to the same Alertmanager, so a log-derived alert routes by
+`severity` exactly like a metric-derived one.
 
 ### Why the standalone Grafana (not the bundled one)
 

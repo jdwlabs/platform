@@ -256,10 +256,12 @@ services:
     repo: https://grafana.github.io/helm-charts
     revision: 7.3.0
     namespace: monitoring
-    # No postInstall directory: its only manifest was the Loki dashboard, now
-    # owned by Git Sync. Leaving this true would point an ArgoCD source at a
-    # path that no longer exists in the repo.
-    postInstall: false
+    # The directory exists again, now holding the ruler's rule ConfigMaps. It
+    # cannot live with the other alert rules under kube-prometheus-stack: those
+    # are PrometheusRule CRs read by the Prometheus Operator, while these are
+    # LogQL and only the Loki rules sidecar in this release ever reads them.
+    # (Its previous occupant, the Loki dashboard, is owned by Git Sync now.)
+    postInstall: true
     syncWave: 2
 
   - name: kube-prometheus-stack
