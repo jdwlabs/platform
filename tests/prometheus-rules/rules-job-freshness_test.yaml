@@ -448,3 +448,157 @@ tests:
       - eval_time: 65m
         alertname: BackupArtifactEmpty
         exp_alerts: []
+
+  # THE ZEROS-PUBLISHING FIXTURE — the live 2026-08-19 posture, and the state
+  # the earlier verification never modelled.
+  #
+  # The exporter is up and serving placeholder values because no state has ever
+  # been written to it: timestamp 0, size 0, budget published, and
+  # backup_state_reported 0 saying so. The backups themselves are fine.
+  #
+  # A timestamp of 0 is past every budget and a size of 0 is empty, so both
+  # criticals matched this and paged for thirteen hours on a healthy cluster.
+  # Neither may fire on a state nothing has measured.
+  - interval: 1m
+    name: exporter serving placeholder zeros does not page critical
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x3200'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x3200'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x3200'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x3200'
+      - series: 'backup_exporter_start_time_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x3200'
+    alert_rule_test:
+      # Both would have fired here before the guard: 16m is past the empty
+      # rule's 15m and the timestamp is already infinitely stale.
+      - eval_time: 16m
+        alertname: BackupArtifactEmpty
+        exp_alerts: []
+      - eval_time: 49h
+        alertname: BackupArtifactStale
+        exp_alerts: []
+      # Still nothing at 47h. The producer publishes a 48h budget, so a gap
+      # this long is exactly what it said was normal for it, and warning here
+      # would be the same crying-wolf the criticals were doing.
+      - eval_time: 47h
+        alertname: BackupStateNeverReported
+        exp_alerts: []
+      # But the suppression is bounded. Past the producer's own budget plus the
+      # rule's hour, a state that has still never been written stops being a
+      # young deployment and becomes a broken publish path — and it says so,
+      # because two criticals are being held off a producer nobody is
+      # measuring and that must never be silent and permanent.
+      - eval_time: 50h
+        alertname: BackupStateNeverReported
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+            exp_annotations:
+              summary: "Backup jdwillmsen-minecraft-fwb-prd-backup has never reported any state"
+              description: "jdwillmsen-minecraft-fwb-prd-backup's exporter has been serving placeholder values for 2d 2h 0m 0s — longer than the freshness budget the producer publishes for itself — and the producer has still written no state. BackupArtifactStale and BackupArtifactEmpty are suppressed for it while this is true, so nothing is watching the artifact. The job is most likely completing without publishing its metrics."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # The original silent-backup shape with the state gauge adopted: the job ran,
+  # reported, and what it reported is an empty archive. This is the condition
+  # the whole contract exists for and it must stay critical — the guard
+  # distinguishes "never measured" from "measured zero", and this is the
+  # second.
+  - interval: 1m
+    name: a reported zero-byte artifact still pages critical
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '1000000000+0x3200'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x3200'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x3200'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '1+0x3200'
+      - series: 'backup_exporter_start_time_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x3200'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: BackupArtifactEmpty
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+              artifact: world
+            exp_annotations:
+              summary: "Backup jdwillmsen-minecraft-fwb-prd-backup produced an empty artifact"
+              description: "The most recent artifact for jdwillmsen-minecraft-fwb-prd-backup is zero bytes. The job completed successfully and wrote nothing."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      # A producer that has reported is never a candidate for the unknown-state
+      # warning, however old its state is. Staleness is what covers that, and
+      # it is a critical.
+      - eval_time: 50h
+        alertname: BackupStateNeverReported
+        exp_alerts: []
+
+  # A producer that has reported and then goes stale is unaffected by the
+  # guard. The suppression is keyed on backup_state_reported being 0, not on it
+  # existing, so adopting the gauge must not blunt staleness.
+  - interval: 1m
+    name: a reporting producer going stale still pages critical
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x3200'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '404897792+0x3200'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x3200'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '1+0x3200'
+    alert_rule_test:
+      - eval_time: 49h
+        alertname: BackupArtifactStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+              artifact: world
+            exp_annotations:
+              summary: "Backup jdwillmsen-minecraft-fwb-prd-backup has produced no fresh artifact"
+              description: "Last verified artifact for jdwillmsen-minecraft-fwb-prd-backup is 2d 1h 0m 0s old, past the freshness budget the job publishes for itself."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # The suppression is per producer. One exporter serving placeholders must not
+  # quiet another producer's genuine failure — the cluster-wide version of the
+  # mistake BackupFreshnessSignalMissing already had to be rewritten to avoid.
+  - interval: 1m
+    name: one producer serving placeholders does not suppress another
+    input_series:
+      # Never reported: suppressed.
+      - series: 'backup_last_success_timestamp_seconds{backup_job="fresh-deploy-backup",artifact="world"}'
+        values: '0+0x3200'
+      - series: 'backup_last_artifact_bytes{backup_job="fresh-deploy-backup",artifact="world"}'
+        values: '0+0x3200'
+      - series: 'backup_max_age_seconds{backup_job="fresh-deploy-backup",artifact="world"}'
+        values: '172800+0x3200'
+      - series: 'backup_state_reported{backup_job="fresh-deploy-backup",artifact="world"}'
+        values: '0+0x3200'
+      # Reported an empty archive: must still page.
+      - series: 'backup_last_success_timestamp_seconds{backup_job="postgres-backup"}'
+        values: '1000000000+0x3200'
+      - series: 'backup_last_artifact_bytes{backup_job="postgres-backup"}'
+        values: '0+0x3200'
+      - series: 'backup_max_age_seconds{backup_job="postgres-backup"}'
+        values: '172800+0x3200'
+      - series: 'backup_state_reported{backup_job="postgres-backup"}'
+        values: '1+0x3200'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: BackupArtifactEmpty
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              backup_job: postgres-backup
+            exp_annotations:
+              summary: "Backup postgres-backup produced an empty artifact"
+              description: "The most recent artifact for postgres-backup is zero bytes. The job completed successfully and wrote nothing."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"

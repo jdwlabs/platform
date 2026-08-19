@@ -9,8 +9,9 @@ spec:
   groups:
     - name: jdwillmsen-tenant
       rules:
-        # The one rule in the freshness contract that cannot be derived from
-        # the metrics, and therefore the only one that cannot expire.
+        # The two rules below are the freshness contract's static expectations
+        # for the world backup: the parts that cannot be derived from the
+        # metrics, and therefore the only parts that cannot expire.
         #
         # Every other backup alert reads gauges the producer publishes, so all
         # of them go quiet together the moment the producer stops publishing —
@@ -29,19 +30,88 @@ spec:
         # missing and keeps firing indefinitely, including on a cluster rebuilt
         # from scratch where the producer was never deployed at all.
         #
-        # The literal job name is the point, not an oversight: this says "this
+        # The literal names are the point, not an oversight: these say "this
         # specific backup must exist". Decommissioning the world backup means
-        # deleting this rule in the same change, which is exactly the review
+        # deleting both rules in the same change, which is exactly the review
         # step that silently skipping it is meant to force.
         #
-        # Living in the tenant namespace does couple the guard to it: deleting
-        # jdwillmsen-prd removes this rule at the same moment it removes the
-        # producer. Putting it in monitoring/ alongside the platform rules
-        # would be namespace-independent and was considered. It sits here
+        # Living in the tenant namespace does couple the guards to it: deleting
+        # jdwillmsen-prd removes them at the same moment it removes the
+        # producer. Putting them in monitoring/ alongside the platform rules
+        # would be namespace-independent and was considered. They sit here
         # because deleting a tenant namespace is loud in a dozen other ways and
         # is never accidental, and because keeping tenant alerts with their
         # tenant matches jdwlabs-alerts and dotablaze-tech-alerts. Worth
         # revisiting if a tenant is ever torn down and rebuilt routinely.
+        #
+        # Two rules rather than one because "is anything making backups?" and
+        # "is anything reporting on them?" are separate questions with separate
+        # producers, and a single absent() answering one of them was read as
+        # answering both. That misreading is what this pair exists to end: the
+        # rule below watched the exporter and was described as watching the
+        # backup, so a permanently deleted CronJob went undetected while the
+        # exporter kept the series alive on its behalf.
+
+        # Is anything making backups?
+        #
+        # kube-state-metrics is the producer of this series, not the backup and
+        # not its exporter, so nothing in the release being watched can keep it
+        # alive. That is the whole difference from the rule below, which reads
+        # a series the watched release publishes about itself: a switch whose
+        # signal is owned by its subject is not a switch. Deleting the release
+        # takes the CronJob with it, this series goes with the CronJob, and the
+        # alert fires — where a gauge published on the producer's behalf would
+        # have gone on reporting a healthy 0 forever.
+        #
+        # `== 0` inside absent() is what makes one rule cover both halves of
+        # "not scheduled". A deleted CronJob has no series; a suspended one has
+        # a series valued 1, which the comparison filters away, leaving
+        # absent() with nothing either way. A suspended backup backs up exactly
+        # as much as a deleted one.
+        #
+        # absent() derives its output labels from a plain selector only, so a
+        # comparison inside it yields none at all. The identifying labels are
+        # stated here instead, which also keeps Alertmanager's grouping and
+        # inhibition — both keyed on alertname and namespace — working the way
+        # they do for every other alert.
+        #
+        # Same seam and same shape as JdwillmsenMinecraftVolumeRecoveryAbsent
+        # below, deliberately: two static expectations over kube-state-metrics
+        # that read alike are two an operator can reason about at once. 1h
+        # rather than that rule's 30m because a nightly backup has no need to
+        # be noticed within minutes, and it matches the producer-absent rule it
+        # sits beside.
+        - alert: JdwillmsenMinecraftBackupCronJobAbsent
+          expr: absent(kube_cronjob_spec_suspend{namespace="jdwillmsen-prd", cronjob="jdwillmsen-minecraft-fwb-prd-backup"} == 0)
+          for: 1h
+          labels:
+            severity: critical
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+            cronjob: jdwillmsen-minecraft-fwb-prd-backup
+          annotations:
+            summary: "No scheduled backup exists for the Minecraft world"
+            description: >-
+              The CronJob jdwillmsen-minecraft-fwb-prd-backup is either suspended, deleted, or was never created in
+              jdwillmsen-prd. Nothing is copying the world, and the backup exporter goes on publishing whatever it last
+              read, so the freshness gauges say nothing about it. Check the CronJob and that ArgoCD has the tenant's
+              deployment repo synced. If the backup is being retired deliberately, delete this rule in the same change —
+              it exists to force that decision, not to be silenced.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # Is anything reporting on them?
+        #
+        # Scoped to the signal and nothing more. This fires when the exporter
+        # Deployment is gone, disabled, or no longer scraped — the case
+        # kube-state-metrics cannot see, because a CronJob can be perfectly
+        # scheduled while nothing publishes a word about what it produced.
+        #
+        # It is emphatically not the dead-man's switch for the backup itself,
+        # and the rule above exists because it was once treated as one. The
+        # exporter serves placeholder values when the producer has not
+        # reported, so this series is present whenever the exporter is, whether
+        # or not anything is backing anything up. Presence here means "somebody
+        # is reporting", never "the backup is alive".
         - alert: JdwillmsenMinecraftBackupProducerAbsent
           expr: absent(backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup"})
           for: 1h
