@@ -1,6 +1,8 @@
 # ADR: Chained Cilium — corrections found when implementation started
 
-Status: accepted. Extends
+Status: accepted; **decision 1 step 8 is blocked** — see
+[cilium-managed-endpoint-coverage](0027-cilium-managed-endpoint-coverage.md).
+Extends
 [networkpolicy-enforcement-via-chained-cilium](0012-networkpolicy-enforcement-via-chained-cilium.md)
 and [chained-cilium-rollout-sizing-and-proof](0013-chained-cilium-rollout-sizing-and-proof.md).
 The choice of chained Cilium is settled in the first and is not reopened. The
@@ -194,7 +196,12 @@ and remain the substance of the work. Its steps 6 through 11 are replaced by:
 - **7. Turn daemon-wide audit off, once.** A no-op while every namespace
   carries an allow-all pair, and the first end-to-end proof that the
   enforcement path works. Rollback is the same single flag.
-- **8. Isolate one namespace at a time with `enforce: true`.** `jdwlabs-non`
+- **8. Isolate one namespace at a time with `enforce: true`.** **BLOCKED** —
+  a namespace whose pods predate the agent has no CiliumEndpoint and no
+  identity, so opting it in protects nothing today and starts enforcing an
+  unverified allow-set at the first pod restart. 0027 adds the precondition:
+  `platformctl cluster netpol coverage -n <ns>` must report 100% before the
+  flag is set. The ordering below is unchanged. `jdwlabs-non`
   first, then `dotablaze-tech-non`, then the two `prd` namespaces, then the
   two `ci` runner namespaces. Rollback is reverting one line of
   `tenant.yaml`. `kube-system` is a platform-tier namespace and carries

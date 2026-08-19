@@ -45,6 +45,8 @@ var dryRunContract = map[string]bool{
 	"platformctl bootstrap seed":                  false,
 	"platformctl bootstrap verify":                false,
 	"platformctl cluster":                         false,
+	"platformctl cluster netpol":                  false,
+	"platformctl cluster netpol coverage":         false,
 	"platformctl cluster status":                  false,
 	"platformctl cluster volumes":                 false,
 	"platformctl cluster volumes list":            false,

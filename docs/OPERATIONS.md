@@ -979,6 +979,106 @@ and record a second, opposite hazard: the driver image runs from an unpinned
 `latest` tag, and upstream's announced next version drops REST support and
 requires 26.x. That one breaks provisioning with no commit in this repo.
 
+## 9. Closing the Cilium managed-endpoint gap
+
+Cilium only manages a pod whose sandbox it created. Every pod that was already
+running when the `cilium-agent` on its node started never received a
+`cilium-cni` ADD, so it has no `CiliumEndpoint`, no security identity, and
+every NetworkPolicy selecting it resolves against nothing — while the namespace
+still reports its policies applied and the agent still reports Ready. A pod is
+enrolled only by being **recreated**; nothing reconciles it in place.
+
+### 9.1 Measuring it
+
+```
+platformctl cluster netpol coverage                 # cluster-wide, exits non-zero below 100%
+platformctl cluster netpol coverage --by node       # which nodes still carry pre-agent pods
+platformctl cluster netpol coverage --unmanaged     # the restart worklist, pod by pod
+platformctl cluster netpol coverage -n <ns>         # per-namespace, for the step gate below
+```
+
+`platformctl cluster status` runs the same join as its `cilium-endpoint-coverage`
+check, so a regression shows up in the routine health report rather than only
+when someone remembers to look.
+
+Fallback when no `platformctl` binary is available — same join, two API reads:
+
+```
+comm -13 \
+  <(kubectl get ciliumendpoints -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' | sort) \
+  <(kubectl get pods -A --field-selector status.phase=Running \
+      -o jsonpath='{range .items[?(@.spec.hostNetwork!=true)]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' | sort)
+```
+
+**There is no Prometheus alert for this, and none can be written from
+cilium-agent metrics alone.** The agent exports counts of the endpoints it
+manages (`cilium_endpoint*`); it cannot export a count of pods it never learned
+about, because those pods are outside the world it can see. A real alert needs
+the *difference* between a kube-state-metrics pod count and a Cilium endpoint
+count, and this cluster scrapes neither — the Cilium values file sets no
+`prometheus`/`serviceMonitor` block, so no `cilium_*` series exists in
+Prometheus at all. Wiring that up is a separate change with its own resource
+and cardinality cost; until then the command above is the check.
+
+### 9.2 Remediation: recreate, do not reconfigure
+
+Two mechanisms enroll pods. Prefer the first.
+
+**Rolling node drain.** `kubectl drain <node> --ignore-daemonsets
+--delete-emptydir-data`, then `kubectl uncordon <node>`, one node at a time.
+This is the only mechanism that reaches Longhorn's `instance-manager` and
+`engine-image` pods, which must never be deleted directly, and it is the same
+procedure a Talos rolling upgrade already performs — so an upgrade closes the
+gap on the nodes it touches for free. Verify with
+`platformctl cluster netpol coverage --by node` between nodes.
+
+**Per-namespace workload restart**, for closing a specific namespace ahead of a
+node cycle. `kubectl -n <ns> rollout restart deployment,daemonset,statefulset`
+covers the ordinary case. It does **not** cover these, which each need their
+own mechanism:
+
+| Workload | Why a plain restart is wrong |
+|---|---|
+| `longhorn-system` `instance-manager-*`, `engine-image-*` | Not owned by a controller that recreates them on delete; deleting an instance-manager detaches every replica on that node. Drain the node instead |
+| `database`, `ai-sre` CNPG clusters (`platform-postgresql-cluster-*`, `platform-litellm-db-cluster-*`) | Deleting the primary is an unplanned failover. Use the operator's own restart, and switch the primary away first |
+| `vault` (`platform-vault-*`) | The StatefulSet is deliberately `OnDelete` (ADR 0007) and a restarted pod comes back sealed. Follow §2, one replica at a time, unsealing before moving on |
+| `monitoring` `prometheus-*`, `platform-loki-*`, `alertmanager-*` | Each carries a PVC and a Longhorn attach/detach cycle. Restart these when the observability gap they cause is acceptable, and confirm the volume reattached before the next step |
+| `nginx-gateway` | Restarting the DaemonSet drops in-flight ingress. Same blast radius as any gateway restart |
+
+### 9.3 Sequence and abort criteria
+
+Namespaces go in ascending blast-radius order, one per step. Between **every**
+step, all four gates must hold before continuing — these are the same gates the
+agent reconciliation used:
+
+1. DNS resolves from inside a pod-network pod
+2. Every CoreDNS pod is `Ready`
+3. No pod anywhere moved to `CrashLoopBackOff`, `Error`, or a new restart count
+4. `platformctl cluster status` is no worse than it was before the step
+
+Any gate failing **aborts the sequence**. Nothing is rolled back — a restarted
+pod cannot be un-restarted — so the recovery is to stop, diagnose, and leave
+the remaining namespaces alone. That asymmetry is why the order below puts the
+namespaces with no in-cluster dependents first.
+
+| Step | Namespaces | Note |
+|---|---|---|
+| 1 | `headlamp`, `porkbun-webhook`, `kubelet-serving-cert-approver`, `metrics-server`, `vault-config-operator`, `cnpg-system` | Stateless, nothing else reads them synchronously |
+| 2 | `dotablaze-tech-non`, `dotablaze-tech-prd`, `jdwillmsen-prd` | Tenant workloads; `jdwlabs-non`/`jdwlabs-prd` are already fully managed |
+| 3 | `external-secrets`, `cert-manager` | Only with no certificate renewal in flight — check §4 first |
+| 4 | `ai-sre`, `monitoring` | Accepts an observability blind spot for the duration; do this one when someone is watching |
+| 5 | `nginx-gateway` | Ingress interruption |
+| 6 | `database` | CNPG mechanism above, one instance at a time, primary last |
+| 7 | `vault` | §2 unseal procedure per replica |
+| 8 | `longhorn-system`, `kube-system` | Drain-only. `kube-system` is a `platform`-tier namespace that renders `allow-all` unconditionally, so it is never isolated by policy — it is here for coverage completeness, not for enforcement |
+
+`argocd` is deliberately absent: it is already fully managed, and it is the
+controller that would have to repair anything the other steps break.
+
+**Do not start this sequence to satisfy a coverage number.** Coverage matters
+only for a namespace that is, or is about to be, isolated by `enforce: true`.
+Enroll a namespace before you enforce it, not on a schedule.
+
 ## Self-hosted CI runners (ARC) — dormant
 
 All CI runs exclusively on GitHub-hosted runners (`ubuntu-latest`). The ARC

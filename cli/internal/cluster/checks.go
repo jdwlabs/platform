@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/jdwlabs/platform/internal/cilium"
 	"github.com/jdwlabs/platform/internal/rclone"
 )
 
@@ -39,7 +40,7 @@ func AllChecks(kube kubernetes.Interface, dyn dynamic.Interface) []Check {
 	checks = append(checks, secretChecks(kube, dyn)...)
 	checks = append(checks, tlsChecks(kube, dyn)...)
 	checks = append(checks, argocdChecks(kube, dyn)...)
-	checks = append(checks, policyChecks(kube)...)
+	checks = append(checks, policyChecks(kube, dyn)...)
 	return checks
 }
 
@@ -191,12 +192,45 @@ func argocdChecks(kube kubernetes.Interface, dyn dynamic.Interface) []Check {
 
 // --- Layer 6: Policy adoption ---
 
-func policyChecks(kube kubernetes.Interface) []Check {
+func policyChecks(kube kubernetes.Interface, dyn dynamic.Interface) []Check {
 	return []Check{
 		{Layer: 6, Group: "Policy", Name: "limitrange-adoption", Run: func(ctx context.Context) Result {
 			return checkLimitRangeAdoption(ctx, kube)
 		}},
+		{Layer: 6, Group: "Policy", Name: "cilium-endpoint-coverage", Run: func(ctx context.Context) Result {
+			return checkCiliumEndpointCoverage(ctx, kube, dyn)
+		}},
 	}
+}
+
+// checkCiliumEndpointCoverage reports the share of pods the policy engine can
+// actually resolve a policy against. Every other signal — agents Ready,
+// policies applied, audit mode off — reads healthy while a pod that predates
+// its node's agent is enforced against nothing, so without this the difference
+// between "enforcing" and "enforcing everywhere" is invisible.
+func checkCiliumEndpointCoverage(ctx context.Context, kube kubernetes.Interface, dyn dynamic.Interface) Result {
+	pods, err := cilium.ListPolicyPods(ctx, kube, "")
+	if err != nil {
+		return Unknown(err.Error())
+	}
+	endpoints, err := cilium.ListEndpoints(ctx, dyn, "")
+	if err != nil {
+		// A dynamic client asked for an unregistered resource gets a NotFound
+		// from discovery, which is a missing CRD rather than a broken cluster.
+		if k8serrors.IsNotFound(err) {
+			return Skip("CiliumEndpoint CRD absent — no policy engine installed")
+		}
+		return Unknown(err.Error())
+	}
+	total := cilium.Total(cilium.Join(pods, endpoints))
+	if total.Total == 0 {
+		return Skip("no pod-network pods to cover")
+	}
+	if total.Unmanaged == 0 {
+		return Passf("%d/%d pod-network pods managed (100%%)", total.Managed, total.Total)
+	}
+	return Warnf("%d/%d pod-network pods managed (%d%%) — %d unmanaged pods are enforced against nothing",
+		total.Managed, total.Total, total.Coverage(), total.Unmanaged)
 }
 
 // --- Check implementations ---

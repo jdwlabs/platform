@@ -31,11 +31,15 @@ endpointRoutes:
 ipam:
   mode: kubernetes
 
-# Enforcement is live. Only namespaces staged via the tenant-envelope
-# `enforce` flag carry a restrictive policy set (currently jdwlabs-runners,
-# dotablaze-tech-runners, both empty/dormant) — every other namespace still
-# renders an allow-all pair, so this flip only changes behavior in the
-# staged namespaces. Widen the enforce set gradually rather than here.
+# The engine enforces; coverage is the qualifier. Two independent conditions
+# sit between this flag and a pod actually being isolated. First, only
+# namespaces staged via the tenant-envelope `enforce` flag carry a restrictive
+# policy set — every other namespace still renders an allow-all pair, so this
+# flip only changes behavior in the staged ones. Second, a policy resolves
+# only against a pod Cilium holds an endpoint for, and pods that predate the
+# agent on their node have none; check with
+# `platformctl cluster netpol coverage` before opting any namespace in.
+# Widen the enforce set gradually, and per namespace, rather than here.
 policyAuditMode: false
 
 # L7 enforcement is unavailable in chaining mode, so the Envoy DaemonSet
