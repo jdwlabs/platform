@@ -38,9 +38,10 @@ const (
 	// provisioning, deletion, expansion and snapshots down on both TrueNAS
 	// classes until a human regenerated it in the UI
 	// (docs/adr/0025-truenas-metrics-what-the-graphite-push-can-and-cannot-carry.md).
-	// That ADR also records the key being refused by this very transport, so
-	// reaching for it by default spends a strike for a call that cannot
-	// succeed. Supply a throwaway key here instead.
+	// Whether the attempt would succeed is not the point and is not assumed
+	// here: it is a mutation with a cluster-wide blast radius either way, so it
+	// is opted into rather than spent silently. Supply a throwaway key here
+	// instead.
 	//
 	// AddrEnv lets a run that has no cluster access name the NAS by hand.
 	APIKeyEnv = "PLATFORMCTL_TRUENAS_API_KEY"
@@ -115,10 +116,11 @@ func (c DriverConfig) Endpoint() string {
 	return net.JoinHostPort(strings.TrimSuffix(strings.TrimPrefix(c.Host, "["), "]"), middlewarePort)
 }
 
-// ErrNoAPIKey is returned when nothing supplied a credential and the
-// driver-config key was not opted into. It is a sentinel so the CLI can print
-// the remedy rather than the generic connection help.
-var ErrNoAPIKey = errors.New("no TrueNAS API key: " + APIKeyEnv + " is unset")
+// ErrNoAPIKey is returned when no credential was resolved: nothing supplied one
+// and the driver-config key was not opted into, or the key that was opted into
+// is empty. It is a sentinel so the CLI can print the remedy rather than the
+// generic connection help.
+var ErrNoAPIKey = errors.New("no TrueNAS API key: " + APIKeyEnv + " is unset or empty")
 
 // LoadDriverConfigs reads both rendered driver configs. A class whose Secret is
 // absent is reported as an error rather than skipped: a missing config means
@@ -126,9 +128,9 @@ var ErrNoAPIKey = errors.New("no TrueNAS API key: " + APIKeyEnv + " is unset")
 //
 // allowCSIKey opts into authenticating with the credential inside those
 // Secrets. It defaults off everywhere: that key is what democratic-csi
-// provisions with, a rejection of it erodes it, and ADR-0025 records this
-// transport rejecting it — so a run that reached for it silently would spend a
-// strike on production storage for a call that cannot succeed.
+// provisions with, so an attempt against it is a mutation whose blast radius is
+// every volume operation on both classes. That is true whether or not the
+// attempt would succeed, which is why it is a decision rather than a default.
 func LoadDriverConfigs(ctx context.Context, kube kubernetes.Interface, classes []string,
 	allowCSIKey bool) ([]DriverConfig, error) {
 	out := make([]DriverConfig, 0, len(classes))
@@ -173,6 +175,12 @@ func loadDriverConfig(ctx context.Context, kube kubernetes.Interface, class stri
 
 func applyCredential(cfg DriverConfig, allowCSIKey bool) (DriverConfig, error) {
 	if os.Getenv(APIKeyEnv) == "" && !allowCSIKey {
+		return DriverConfig{}, ErrNoAPIKey
+	}
+	// The opt-in says which credential to use, not that one exists. A Secret
+	// that rendered with an empty apiKey would otherwise dial and send "",
+	// which is an authentication attempt like any other.
+	if cfg.apiKey == "" {
 		return DriverConfig{}, ErrNoAPIKey
 	}
 	return cfg, nil

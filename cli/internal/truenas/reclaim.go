@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -22,16 +23,24 @@ type Reclaimer struct {
 	call Caller
 	kube kubernetes.Interface
 
-	// refs is the cluster's PersistentVolumes, re-read once for the whole run
-	// and shared by every candidate whose verdict rests on their absence. One
-	// list call per run is the point: the alternative is either no re-check at
-	// all or a full list per candidate.
+	// refs is the cluster's PersistentVolumes, shared by every candidate whose
+	// verdict rests on their absence. One list call serves a whole batch: the
+	// alternative is either no re-check at all or a full list per candidate.
 	refs       []Reference
-	refsLoaded bool
+	refsReadAt time.Time
+	// refsMaxAge bounds how stale that list may be. An --all-orphaned run over
+	// a large NAS takes minutes, and the last candidate deserves the same
+	// freshness the first one got — this is the branch with the higher
+	// uncertainty, since nothing named the candidate to re-read by name.
+	refsMaxAge time.Duration
 }
 
+// refsMaxAge is short enough that a long run re-reads, and long enough that a
+// batch of adjacent candidates shares one list.
+const refsMaxAge = 30 * time.Second
+
 func NewReclaimer(call Caller, kube kubernetes.Interface) *Reclaimer {
-	return &Reclaimer{call: call, kube: kube}
+	return &Reclaimer{call: call, kube: kube, refsMaxAge: refsMaxAge}
 }
 
 // Run executes one candidate's whole plan: the cluster-side pre-flight first,
@@ -119,14 +128,14 @@ func (r *Reclaimer) preflightUnreferenced(ctx context.Context, c Candidate) erro
 }
 
 func (r *Reclaimer) references(ctx context.Context) ([]Reference, error) {
-	if r.refsLoaded {
+	if !r.refsReadAt.IsZero() && time.Since(r.refsReadAt) < r.refsMaxAge {
 		return r.refs, nil
 	}
 	refs, err := ResolveReferences(ctx, r.kube)
 	if err != nil {
 		return nil, err
 	}
-	r.refs, r.refsLoaded = refs, true
+	r.refs, r.refsReadAt = refs, time.Now()
 	return refs, nil
 }
 

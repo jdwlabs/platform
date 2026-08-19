@@ -67,9 +67,11 @@ exports something else is refused rather than deleted.
 
 Authentication reads PLATFORMCTL_TRUENAS_API_KEY. The democratic-csi
 driver-config credential is not used unless --truenas-use-csi-api-key says so:
-an authentication attempt against it is a mutation, and rejected attempts have
-invalidated it and taken provisioning, deletion, expansion and snapshots down on
-both TrueNAS classes (ADR-0025). Use a throwaway read-only key.
+an authentication attempt against it is a mutation with a cluster-wide blast
+radius — rejected attempts have invalidated it and taken provisioning, deletion,
+expansion and snapshots down on both TrueNAS classes (ADR-0025) — so it is
+opted into rather than spent silently, whether or not it would succeed. Use a
+throwaway read-only key.
 
 Run with no subcommand to list everything.`,
 		Args: cobra.NoArgs,
@@ -85,7 +87,8 @@ Run with no subcommand to list everything.`,
 		"accept the NAS certificate without verifying it (a stock TrueNAS ships a self-signed one)")
 	cmd.PersistentFlags().BoolVar(&shared.UseCSIKey, "truenas-use-csi-api-key", false,
 		"authenticate with the democratic-csi driver-config key instead of "+truenas.APIKeyEnv+
-			" (a rejection of that key takes CSI provisioning down on both classes — see ADR-0025)")
+			" (an attempt against that key is a mutation; a rejection takes CSI provisioning down "+
+			"on both classes — see ADR-0025)")
 
 	cmd.AddCommand(newTrueNASListCmd(g, shared))
 	cmd.AddCommand(newTrueNASReclaimCmd(g, shared))
