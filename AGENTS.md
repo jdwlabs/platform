@@ -83,7 +83,7 @@ against it — while the namespace still reports its policies applied.
   carry an endpoint, so counting them would report a gap no remediation closes
 - No Prometheus alert exists and none can be written from cilium-agent metrics
   alone — the agent cannot count pods it never learned about. See
-  [ADR 0027](docs/adr/0027-cilium-managed-endpoint-coverage.md); the sequenced
+  [ADR 0028](docs/adr/0028-cilium-managed-endpoint-coverage.md); the sequenced
   remediation is [OPERATIONS.md §9](docs/OPERATIONS.md)
 
 ### Grafana Git Sync

@@ -1,7 +1,7 @@
 # ADR: Chained Cilium — corrections found when implementation started
 
 Status: accepted; **decision 1 step 8 is blocked** — see
-[cilium-managed-endpoint-coverage](0027-cilium-managed-endpoint-coverage.md).
+[cilium-managed-endpoint-coverage](0028-cilium-managed-endpoint-coverage.md).
 Extends
 [networkpolicy-enforcement-via-chained-cilium](0012-networkpolicy-enforcement-via-chained-cilium.md)
 and [chained-cilium-rollout-sizing-and-proof](0013-chained-cilium-rollout-sizing-and-proof.md).
@@ -199,7 +199,7 @@ and remain the substance of the work. Its steps 6 through 11 are replaced by:
 - **8. Isolate one namespace at a time with `enforce: true`.** **BLOCKED** —
   a namespace whose pods predate the agent has no CiliumEndpoint and no
   identity, so opting it in protects nothing today and starts enforcing an
-  unverified allow-set at the first pod restart. 0027 adds the precondition:
+  unverified allow-set at the first pod restart. 0028 adds the precondition:
   `platformctl cluster netpol coverage -n <ns>` must report 100% before the
   flag is set. The ordering below is unchanged. `jdwlabs-non`
   first, then `dotablaze-tech-non`, then the two `prd` namespaces, then the
