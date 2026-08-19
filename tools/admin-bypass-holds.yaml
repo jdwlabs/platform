@@ -1,0 +1,35 @@
+# Merges the admin-bypass audit may see as unapproved-with-an-unsatisfied-check
+# without failing the run.
+#
+# A hold is for a bypass that is a decision, not a lapse — an incident fix that
+# could not wait for a queue, or a merge over a check already known broken for
+# a reason recorded elsewhere. It is not for "the check is flaky"; a flaky
+# required check is a bug in the check, and holding it here hides the evidence
+# that would get it fixed.
+#
+# Unapproved merges whose required checks all passed are never listed here.
+# They are the operating mode of a two-seat org and the audit already treats
+# them as routine — a hold would be silencing something that makes no noise.
+#
+# A hold is keyed on the repository and the pull-request number:
+#
+#   holds:
+#     - repo: platform
+#       pr: 299
+#       reason: >-
+#         Merged while `signatures / signatures` had produced no check run ...
+#         and what closes it.
+#
+# Every entry needs a reason stating why the bypass was intended and what
+# closes it. "Known issue" is not a reason; the next reader has to be able to
+# decide whether the hold still applies without asking whoever wrote it.
+#
+# Unlike the version-keyed holds in the promotion drift checker, a PR number
+# cannot expire on its own — so a hold is only evaluated while its PR still
+# falls inside the audit's rolling window. Once the window moves past it the
+# entry is inert and can be deleted at leisure. While the PR *is* in the
+# window, a hold that turns out not to be needed is reported as stale and
+# fails the run: an exception must not outlive the condition it excused.
+#
+# Nothing is held today.
+holds: []
