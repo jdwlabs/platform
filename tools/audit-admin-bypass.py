@@ -44,8 +44,25 @@ and it is rare. So:
     PR's head commit. Counted and printed, never fails the run. This is the
     number the success metric above is actually about.
   * **reportable** — unapproved *and* at least one required status check
-    missing or not successful on the head commit, and not covered by a
-    declared hold in tools/admin-bypass-holds.yaml.
+    either ran and did not succeed, or is absent while the window shows it was
+    running. Minus anything covered by a declared hold in
+    tools/admin-bypass-holds.yaml.
+
+Absence needs that liveness test, and without it this audit is unusable. The
+required contexts are read *live*, so every PR that merged before a check was
+introduced reads as "missing" it — and this org introduces checks often.
+Measured over a 21-day window, treating any absent context as a finding
+flagged 43 of 63 `apps` merges, 22 of 100 on `deployments` and 15 of 61 on
+`infrastructure`, and every single one of those was a check that did not exist
+at merge time rather than a gate anyone stepped over. The docstring warning
+below — that a ruleset changed since a PR merged is judged against today's
+rule — is precisely the trap.
+
+So an absent context is only a finding when some other PR in the same window
+produced it *before* this one merged. That is the window calibrating itself:
+no ruleset history to reconstruct, and a check that did not exist yet has no
+earlier producer. An absent context that no earlier PR produced is reported as
+`unevaluable` rather than passed over in silence.
 
 Required-check state is read from the check-runs API, never from the legacy
 combined-status endpoint: this org posts only check runs, so
@@ -53,21 +70,31 @@ combined-status endpoint: this org posts only check runs, so
 array on a commit whose every check succeeded. A tool reading that would
 grade every merge as bypassed.
 
-Where this is blind
--------------------
+What `deployments`' zero does and does not do
+--------------------------------------------
 
-`deployments`' Baseline requires zero approvals, so no merge there can be
-unapproved by this tool's definition and the whole repo is exempt from the
-review half of the audit. That zero is a decision with a narrow purpose, not
-a policy that the repo needs no review: ADR 0018 §1 records that a release-bot
-pull request dropped `required_approving_review_count` to 0 on Baseline and
-narrowed CODEOWNERS so the bot's own non-owned-path changes needed no
-reviewer, and concludes the surrounding bypass grant "looks vestigial, not
-intentional". The `required == 0 → nothing to bypass` logic below is
-mechanically correct and stays; what it costs is that this audit says nothing
-about `deployments` until that count changes. The ruleset-reconciliation work
-is where the count is being reconsidered — that is the change that un-blinds
-this, not a change here.
+`deployments`' Baseline requires zero approvals. That zero is a decision with
+a narrow purpose rather than a policy that the repo needs no review: ADR 0018
+§1 records that a release-bot pull request dropped
+`required_approving_review_count` to 0 on Baseline and narrowed CODEOWNERS so
+the bot's own non-owned-path changes needed no reviewer, and concludes the
+surrounding bypass grant "looks vestigial, not intentional".
+
+It does **not** exempt the repo from this audit, and it is worth being precise
+because the opposite is easy to assume. The requirement is the maximum across
+every ruleset covering the ref, and `deployments`' "PRD Promotion Review Gate"
+carries `require_code_owner_review: true`, which scores as one approval — so
+the effective requirement resolves to 1 and every unapproved merge there is
+evaluated. Verified live: `required_gates("deployments")` returns 1, from
+Baseline 0 / PRD Promotion Review Gate 1 / Production Gates 0.
+
+The inaccuracy runs the other way. That owner gate only covers the CODEOWNERS
+paths the promotion workflow touches (`values-prd.yaml`, `argocd/prd/`), while
+this tool applies the requirement to every PR on the ref — so a merge on an
+unowned path is judged against a rule that did not actually apply to it. That
+is deliberate: `reviewDecision` already folds CODEOWNERS in, and scoring the
+flag as zero would exempt every path an owner-gated ruleset protects. It makes
+this audit stricter than the rules on some paths, never blinder.
 
 A PR counts as agent-authored when any of its commits carries a
 `Co-Authored-By: ... <noreply@anthropic.com>` trailer — the same signal
@@ -237,22 +264,83 @@ def latest_check_conclusions(runs: list[dict]) -> dict[str, str | None]:
     return {name: run.get("conclusion") for name, run in latest.items()}
 
 
-def unsatisfied_contexts(required: set[str], conclusions: dict[str, str | None]) -> list[str]:
-    """Required contexts that did not succeed, as `name=<conclusion|MISSING>`.
+def split_required(
+    required: set[str], conclusions: dict[str, str | None]
+) -> tuple[list[str], list[str]]:
+    """Split `required` into contexts that ran and failed, and contexts absent.
 
-    A context with no check run at all is `MISSING`, and that is the more
-    serious of the two shapes: a red check is a decision to merge anyway, an
-    absent one means the gate never even reported.
+    The two are not the same evidence and must not be judged the same way. A
+    context that ran and did not succeed is a red gate someone merged over, and
+    it says so on its own. A context with no check run at all says only that
+    nothing of that name reported — which is what a bypass looks like, and also
+    what a check that did not exist yet looks like.
     """
-    unsatisfied = []
+    failed, absent = [], []
     for context in sorted(required):
         if context not in conclusions:
-            unsatisfied.append(f"{context}=MISSING")
+            absent.append(context)
             continue
         conclusion = conclusions[context]
         if conclusion not in SATISFYING_CONCLUSIONS:
-            unsatisfied.append(f"{context}={conclusion or 'INCOMPLETE'}")
-    return unsatisfied
+            failed.append(f"{context}={conclusion or 'INCOMPLETE'}")
+    return failed, absent
+
+
+def first_produced(prs: list[dict]) -> dict[str, str]:
+    """Earliest `mergedAt` at which any PR in the window produced each context.
+
+    This is the window's own evidence about which checks were actually running,
+    and it is what keeps an absent context from being read as a bypass by
+    default. Required contexts are read live, so every PR merged before a check
+    was introduced reads as "missing" it — measured over 21 days that mistake
+    flagged 43 of 63 `apps` merges and 22 of 100 on `deployments`, every one of
+    them a check that simply did not exist yet.
+    """
+    earliest: dict[str, str] = {}
+    for pr in prs:
+        merged_at = pr.get("mergedAt") or ""
+        for context, conclusion in pr.get("conclusions", {}).items():
+            if context not in earliest or merged_at < earliest[context]:
+                earliest[context] = merged_at
+    return earliest
+
+
+def judge_absent(
+    absent: list[str], earliest: dict[str, str], merged_at: str
+) -> tuple[list[str], list[str]]:
+    """Split absent contexts into reportable misses and unevaluable ones.
+
+    A context is *live* for this PR when some other PR in the window produced
+    it **before** this one merged. Then its absence here is a real miss: the
+    check was running, and this merge does not have it.
+
+    Deliberately "at least one earlier producer" rather than a majority of the
+    window. The two shapes that need exempting are a check that did not exist
+    yet and a check introduced mid-window, and both are temporal — neither has
+    an earlier producer, whatever the majority says. A majority test would
+    instead exempt a genuinely live check whenever the window happened to be
+    dominated by merges that skipped it, which is the failure that matters more
+    here: it hides real misses rather than adding noise. Measured across all
+    four repos, the two rules pick the same findings, so the stricter reading
+    costs nothing.
+
+    Earlier, not merely present: a check introduced mid-window is produced by
+    later PRs and by none of the earlier ones, and reading "present anywhere"
+    would flag every merge that preceded it.
+
+    A context absent here and never produced by any earlier PR is not judged at
+    all. It is reported as unevaluable rather than dropped — an audit that
+    cannot reach a verdict on a context has to say so, the same way a run that
+    could not execute exits 2 instead of 0.
+    """
+    reportable, unevaluable = [], []
+    for context in absent:
+        seen_at = earliest.get(context)
+        if seen_at is not None and seen_at < merged_at:
+            reportable.append(f"{context}=MISSING")
+        else:
+            unevaluable.append(context)
+    return reportable, unevaluable
 
 
 def check_conclusions_for(repo: str, sha: str) -> dict[str, str | None]:
@@ -355,6 +443,7 @@ def audit(since: date, holds: dict[tuple[str, int], str], repos: list[str]) -> d
     """Classify every agent-authored merge in the window. Raises ToolError."""
     routine: list[tuple[str, dict]] = []
     reportable: list[tuple[str, dict, list[str]]] = []
+    unevaluable: dict[str, set[str]] = {}
     seen: set[tuple[str, int]] = set()
     held: set[tuple[str, int]] = set()
     per_repo: list[str] = []
@@ -362,20 +451,35 @@ def audit(since: date, holds: dict[tuple[str, int], str], repos: list[str]) -> d
 
     for repo in repos:
         required_reviews, required_contexts = required_gates(repo)
-        agent_prs = [pr for pr in merged_prs_since(repo, since) if is_agent_authored(pr)]
+        prs = merged_prs_since(repo, since)
+
+        # Check-run state is fetched for *every* merged PR in the window, not
+        # only the agent-authored ones, because these are also the peers that
+        # establish which required checks were running at all. A human PR
+        # carrying `signatures / signatures` is proof the check existed just as
+        # good as an agent one.
+        for pr in prs:
+            pr["conclusions"] = check_conclusions_for(repo, pr["headRefOid"])
+        earliest = first_produced(prs)
+
+        agent_prs = [pr for pr in prs if is_agent_authored(pr)]
         total_agent += len(agent_prs)
 
         repo_routine = 0
         repo_reportable = 0
+        repo_unevaluable: set[str] = set()
         for pr in agent_prs:
             key = (repo, pr["number"])
             seen.add(key)
             if required_reviews < 1 or pr["reviewDecision"] == "APPROVED":
                 continue
-            unsatisfied = unsatisfied_contexts(
-                required_contexts, check_conclusions_for(repo, pr["headRefOid"])
+            failed, absent = split_required(required_contexts, pr["conclusions"])
+            missed, not_judged = judge_absent(
+                absent, earliest, pr.get("mergedAt") or ""
             )
-            if not unsatisfied:
+            repo_unevaluable |= set(not_judged)
+            findings = failed + missed
+            if not findings:
                 repo_routine += 1
                 routine.append((repo, pr))
                 continue
@@ -383,7 +487,10 @@ def audit(since: date, holds: dict[tuple[str, int], str], repos: list[str]) -> d
                 held.add(key)
                 continue
             repo_reportable += 1
-            reportable.append((repo, pr, unsatisfied))
+            reportable.append((repo, pr, findings))
+
+        if repo_unevaluable:
+            unevaluable[repo] = repo_unevaluable
 
         per_repo.append(
             f"{repo}: required_reviews={required_reviews} "
@@ -404,6 +511,7 @@ def audit(since: date, holds: dict[tuple[str, int], str], repos: list[str]) -> d
         "per_repo": per_repo,
         "routine": routine,
         "reportable": reportable,
+        "unevaluable": unevaluable,
         "held": sorted(held),
         "stale": stale,
         "total_agent": total_agent,
@@ -433,6 +541,14 @@ def render(result: dict, since: date, holds: dict[tuple[str, int], str], list_fl
         for repo, pr, unsatisfied in reportable:
             print(f"  {repo}#{pr['number']}  {pr['title']}  {pr['url']}")
             print(f"      unsatisfied: {', '.join(unsatisfied)}")
+
+    for repo, contexts in sorted(result["unevaluable"].items()):
+        for context in sorted(contexts):
+            print(
+                f"\nunevaluable: {repo} '{context}' (no PR in this window produced "
+                f"it before the merges missing it — cannot tell a bypass from a "
+                f"check that was not running yet)"
+            )
 
     if result["stale"]:
         print("\nSTALE HOLDS — inspected in this window and not reportable:")
