@@ -1,7 +1,7 @@
 {
   "title": "jdwlabs / Tenant Overview",
   "uid": "jdwlabs-tenant-overview",
-  "description": "USE-method resource usage for the jdwlabs tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2). A RED dashboard for tenant-owned services is deferred until jdwlabs ships app-level request metrics to scope it against.",
+  "description": "USE-method resource usage for the jdwlabs tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2). A RED dashboard for tenant-owned services is deferred until jdwlabs ships app-level request metrics to scope it against. Both datasource variables are pinned and hidden: the tenant Loki datasource carries the X-Scope-OrgID header that is the log tenancy boundary (§5.3), so a variable left to resolve to Grafana's default would answer with the platform tenant's store; metrics have no per-tenant datasource and are scoped by the namespace label instead (§5.2).",
   "tags": ["jdwlabs", "tenant"],
   "timezone": "browser",
   "schemaVersion": 39,
@@ -14,13 +14,15 @@
         "name": "datasource",
         "type": "datasource",
         "query": "prometheus",
-        "current": {}
+        "hide": 2,
+        "current": { "selected": false, "text": "Prometheus", "value": "PBFA97CFB590B2093" }
       },
       {
         "name": "loki_datasource",
         "type": "datasource",
         "query": "loki",
-        "current": {}
+        "hide": 2,
+        "current": { "selected": false, "text": "jdwlabs Loki", "value": "jdwlabs-loki" }
       },
       {
         "name": "namespace",

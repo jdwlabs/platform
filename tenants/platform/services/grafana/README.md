@@ -90,8 +90,18 @@ folder's UID, and a repository cannot adopt a folder that already exists
 outside provisioning. The tenant repositories therefore carry a
 `-dashboards` suffix — the bare tenant name collides with the folder
 tenant-envelope creates through the classic folders API, and that collision
-stops the sync outright. See `observability/README.md` for the full
-consequence, including the RBAC gap it leaves open.
+stops the sync outright. The folder that appears here is granted to the tenant
+team by tenant-envelope, off `observability.grafana.gitSyncFolder` in the
+tenant's `tenant.yaml` — a synced tenant folder left at Grafana's inherited
+permissions is readable by every user in the instance. See
+`observability/README.md` for the full consequence.
+
+Only `platform-dashboards` is health-gated here. This Job is an ArgoCD `Sync`
+hook, so anything it fails on fails the whole `platform-grafana` sync: a tenant
+repository that will not sync is reported as a warning and left to
+`platformctl gitsync status`, which still exits non-zero on it, rather than
+taking Grafana's own dashboards down with it. Creation is gated for all of
+them — a definition Grafana rejects is a broken commit, not a runtime state.
 
 The Job **creates but never updates**. An existing connection is left untouched,
 because the stored private key is write-once and re-applying it would disturb a
@@ -120,6 +130,22 @@ it, so recreating one folder leaves the other two syncing and the plan is a
 single delete; the retained connection is reported rather than left to be
 inferred from the short plan. To reset one resource on its own use
 `platformctl gitsync delete --kind repository --name platform-dashboards --confirm`.
+
+Changing the **connection** itself — rotating the GitHub App key, editing
+`connection.json` — is the one thing that shared connection blocks, and
+`--with-connection` is the way through it:
+
+```sh
+platformctl gitsync recreate --repository platform-dashboards --with-connection --dry-run
+platformctl gitsync recreate --repository platform-dashboards --with-connection --confirm
+```
+
+It widens the plan to every repository bound to that connection and then the
+connection last, because a connection cannot be deleted underneath a repository
+that still references it. All of them come back from the same apply Job run, so
+the interruption is one sync interval, not one per folder. `gitsync delete
+--kind connection` stays refused while any repository references it and now
+names them all in its refusal.
 
 Both paths refuse while a dashboard is owned by the repository being deleted,
 because its remove-orphan-resources finalizer collects whatever it owns; the

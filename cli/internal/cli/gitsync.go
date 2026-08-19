@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -119,11 +121,12 @@ Two preconditions are enforced rather than documented:
 
   * a repository still owning dashboards is refused, because its
     remove-orphan-resources finalizer collects whatever it owns on delete
-  * a connection still referenced by a repository is refused, because the
-    repository must be deleted first
+  * a connection still referenced by a repository is refused, because every
+    repository on it must be deleted first, and the refusal names them
 
 Recreation is the apply Job's job — it runs on the next sync of the Grafana
-Application. Use "gitsync recreate" to do both in the enforced order.`,
+Application. Use "gitsync recreate" to delete in the enforced order, with
+--with-connection when the connection definition itself is what changed.`,
 		Example: `  platformctl gitsync delete --kind repository --name platform-dashboards --dry-run
   platformctl gitsync delete --kind repository --name platform-dashboards --confirm`,
 		Args: cobra.NoArgs,
@@ -142,6 +145,7 @@ Application. Use "gitsync recreate" to do both in the enforced order.`,
 
 type gitSyncRecreateOptions struct {
 	Repository          string
+	WithConnection      bool
 	Confirm             bool
 	AllowOwnedDashboard bool
 	NoSync              bool
@@ -154,7 +158,7 @@ func newGitSyncRecreateCmd(g *Globals, shared *gitSyncGlobals) *cobra.Command {
 		Short: "Delete repository then connection in order and ask ArgoCD to re-run the apply Job",
 		Long: `Delete a repository and the connection it binds to, in that order, then
 request an ArgoCD refresh of the Grafana Application so its apply Job recreates
-both from the definitions in git.
+them from the definitions in git.
 
 This is the only supported way to change a Git Sync resource definition: the
 apply Job creates but never updates, so merging an edit alone changes nothing.
@@ -163,12 +167,18 @@ The connection is deleted only when no other repository still binds to it. One
 connection serves many repositories, so recreating one of them leaves a shared
 connection in place and the plan is a single delete.
 
+--with-connection is how a connection definition itself is changed — a rotated
+GitHub App key, an edited connection.json. It widens the plan to every
+repository bound to that connection, then the connection last, because a
+connection cannot be deleted underneath a repository that still references it.
+All of them are recreated by the same apply Job run.
+
 Destructive, so --confirm is required and --dry-run previews. The repository is
 resolved automatically when exactly one exists; otherwise name it with
 --repository.`,
-		Example: `  platformctl gitsync recreate --dry-run
-  platformctl gitsync recreate --confirm
-  platformctl gitsync recreate --repository platform-dashboards --confirm`,
+		Example: `  platformctl gitsync recreate --repository platform-dashboards --dry-run
+  platformctl gitsync recreate --repository platform-dashboards --confirm
+  platformctl gitsync recreate --repository platform-dashboards --with-connection --confirm`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runGitSyncRecreate(cmd, g, shared, opts)
@@ -176,7 +186,9 @@ resolved automatically when exactly one exists; otherwise name it with
 	}
 	cmd.Flags().StringVar(&opts.Repository, "repository", "",
 		"repository to recreate; required when more than one exists")
-	cmd.Flags().BoolVar(&opts.Confirm, "confirm", false, "actually delete both resources")
+	cmd.Flags().BoolVar(&opts.WithConnection, "with-connection", false,
+		"also recreate the connection, taking every repository bound to it along")
+	cmd.Flags().BoolVar(&opts.Confirm, "confirm", false, "actually delete the planned resources")
 	cmd.Flags().BoolVar(&opts.AllowOwnedDashboard, "allow-owned-dashboards", false,
 		"proceed even though the repository owns dashboards the finalizer will collect")
 	cmd.Flags().BoolVar(&opts.NoSync, "no-sync", false,
@@ -305,7 +317,8 @@ func runGitSyncDelete(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, op
 	}
 
 	if err := checkGitSyncDeletable(cmd.Context(), client, resources, opts.Kind, opts.Name, opts.AllowOwnedDashboard); err != nil {
-		return reportCLIError(out, err, gitSyncRefusalHelp(opts.Kind))
+		return reportCLIError(out, err,
+			gitSyncRefusalHelp(opts.Kind, repositoriesBlockingConnection(resources, opts.Name)))
 	}
 
 	mode := "delete"
@@ -360,30 +373,50 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 		return reportCLIError(out, err, "Run `platformctl gitsync status` to see which repositories exist")
 	}
 
-	owned, err := client.DashboardsOwnedBy(cmd.Context(), repo.Name)
-	if err != nil {
-		return reportCLIError(out, err,
-			"Ownership could not be verified, so nothing was deleted; retry once Grafana answers")
-	}
-	if len(owned) > 0 && !opts.AllowOwnedDashboard {
+	if opts.WithConnection && repo.ConnectionRef == "" {
 		return reportCLIError(out,
-			fmt.Errorf("repository %s owns %d dashboard(s): %s", repo.Name, len(owned), strings.Join(owned, " ")),
-			"Deleting it lets the remove-orphan-resources finalizer collect them; pass --allow-owned-dashboards only if that is intended")
+			fmt.Errorf("repository %s binds to no connection, so --with-connection has nothing to recreate", repo.Name),
+			"Drop --with-connection, or run `platformctl gitsync status --full` to see what each repository binds to")
+	}
+
+	// A connection serves every repository bound to it, so tearing it down for
+	// one of them strands the rest — and it strands them silently, because the
+	// damage shows up on the siblings rather than on the resource that was
+	// named. Only the last repository on a connection may take it with it,
+	// unless --with-connection takes them all deliberately.
+	var stillBound []string
+	if repo.ConnectionRef != "" {
+		stillBound = siblingRepositories(repos, repo.ConnectionRef, repo.Name)
+	}
+	deleting := []string{repo.Name}
+	if opts.WithConnection {
+		deleting = append(deleting, stillBound...)
+	}
+
+	// Every repository in the plan is checked, not just the named one:
+	// --with-connection deletes siblings the operator did not name, and the
+	// finalizer does not care which of them was typed.
+	for _, name := range deleting {
+		owned, err := client.DashboardsOwnedBy(cmd.Context(), name)
+		if err != nil {
+			return reportCLIError(out, err,
+				"Ownership could not be verified, so nothing was deleted; retry once Grafana answers")
+		}
+		if len(owned) > 0 && !opts.AllowOwnedDashboard {
+			return reportCLIError(out,
+				fmt.Errorf("repository %s owns %d dashboard(s): %s", name, len(owned), strings.Join(owned, " ")),
+				"Deleting it lets the remove-orphan-resources finalizer collect them; pass --allow-owned-dashboards only if that is intended")
+		}
 	}
 
 	// Ordering is the whole reason this command exists: the repository
 	// references the connection, so deleting the connection first strands it.
-	steps := [][]string{{"1", gitsync.KindRepository, repo.Name}}
-	// A connection serves every repository bound to it, so tearing it down for
-	// one of them strands the rest — and it strands them silently, because the
-	// damage shows up on the siblings rather than on the resource that was
-	// named. Only the last repository on a connection may take it with it.
-	var stillBound []string
-	if repo.ConnectionRef != "" {
-		stillBound = siblingRepositories(repos, repo.ConnectionRef, repo.Name)
-		if len(stillBound) == 0 {
-			steps = append(steps, []string{"2", gitsync.KindConnection, repo.ConnectionRef})
-		}
+	var steps [][]string
+	for _, name := range deleting {
+		steps = append(steps, []string{strconv.Itoa(len(steps) + 1), gitsync.KindRepository, name})
+	}
+	if repo.ConnectionRef != "" && (opts.WithConnection || len(stillBound) == 0) {
+		steps = append(steps, []string{strconv.Itoa(len(steps) + 1), gitsync.KindConnection, repo.ConnectionRef})
 	}
 
 	mode := "delete"
@@ -399,9 +432,18 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 	// Said out loud rather than left to be inferred from a one-row order table:
 	// an operator who expected two deletes needs to know which resource was held
 	// back and why, or the short plan reads as the command having missed a step.
-	if len(stillBound) > 0 {
+	if len(stillBound) > 0 && !opts.WithConnection {
 		if err := display.ToonScalar(out, "retained",
 			fmt.Sprintf("connection %s stays: still used by repository %s",
+				repo.ConnectionRef, strings.Join(stillBound, " "))); err != nil {
+			return err
+		}
+	}
+	// The mirror image: --with-connection deletes repositories nobody named, so
+	// the widened plan says whose sync it interrupts before it is confirmed.
+	if len(stillBound) > 0 && opts.WithConnection {
+		if err := display.ToonScalar(out, "cascade",
+			fmt.Sprintf("connection %s is shared, so repository %s goes with it and is recreated too",
 				repo.ConnectionRef, strings.Join(stillBound, " "))); err != nil {
 			return err
 		}
@@ -411,7 +453,9 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 			fmt.Sprintf("would delete %d resource(s) in this order — nothing was mutated", len(steps))); err != nil {
 			return err
 		}
-		return display.ToonList(out, "help", []string{"Re-run with --confirm to delete them and request a resync"})
+		return display.ToonList(out, "help", append(
+			[]string{"Re-run with --confirm to delete them and request a resync"},
+			gitSyncConnectionChangeHelp(repo.Name, stillBound, opts.WithConnection)...))
 	}
 
 	for _, step := range steps {
@@ -438,10 +482,26 @@ func runGitSyncRecreate(cmd *cobra.Command, g *Globals, shared *gitSyncGlobals, 
 		fmt.Sprintf("deleted %d resource(s) in order; ArgoCD refresh %s", len(steps), resync)); err != nil {
 		return err
 	}
-	return display.ToonList(out, "help", []string{
+	return display.ToonList(out, "help", append([]string{
 		"Run `platformctl gitsync status` after the sync to confirm everything is healthy again",
 		"A definition change only takes effect if it is merged before the apply Job re-runs",
-	})
+	}, gitSyncConnectionChangeHelp(repo.Name, stillBound, opts.WithConnection)...))
+}
+
+// gitSyncConnectionChangeHelp surfaces --with-connection exactly where the
+// operator learns the connection was left alone. Without it the flag is only
+// discoverable from --help, and the plan that retained a connection reads as
+// the one place the CLI cannot go — which is how an operator concludes a
+// rotated App key has no path through this command at all.
+func gitSyncConnectionChangeHelp(repository string, stillBound []string, withConnection bool) []string {
+	if withConnection || len(stillBound) == 0 {
+		return nil
+	}
+	return []string{
+		fmt.Sprintf("Changing the connection itself (rotated key, edited connection.json) needs "+
+			"`platformctl gitsync recreate --repository %s --with-connection --confirm`, which takes repository %s along",
+			repository, strings.Join(stillBound, " ")),
+	}
 }
 
 // requireGitSyncIntent refuses the ambiguous invocations: neither flag given, or
@@ -468,17 +528,23 @@ func checkGitSyncDeletable(ctx context.Context, client *gitsync.Client, resource
 			return fmt.Errorf("repository %s owns %d dashboard(s): %s", name, len(owned), strings.Join(owned, " "))
 		}
 	case gitsync.KindConnection:
-		var repos []gitsync.Resource
-		for _, r := range resources {
-			if r.Kind == gitsync.KindRepository {
-				repos = append(repos, r)
-			}
-		}
-		if bound := gitsync.RepositoriesUsingConnection(repos, name); len(bound) > 0 {
+		if bound := repositoriesBlockingConnection(resources, name); len(bound) > 0 {
 			return fmt.Errorf("connection %s is still referenced by repository %s", name, strings.Join(bound, " "))
 		}
 	}
 	return nil
+}
+
+// repositoriesBlockingConnection names every repository that references a
+// connection, from a mixed-kind resource list.
+func repositoriesBlockingConnection(resources []gitsync.Resource, connection string) []string {
+	var repos []gitsync.Resource
+	for _, r := range resources {
+		if r.Kind == gitsync.KindRepository {
+			repos = append(repos, r)
+		}
+	}
+	return sortedNames(gitsync.RepositoriesUsingConnection(repos, connection))
 }
 
 // siblingRepositories names the other repositories bound to a connection. It is
@@ -491,14 +557,32 @@ func siblingRepositories(repos []gitsync.Resource, connection, excluding string)
 			out = append(out, name)
 		}
 	}
-	return out
+	return sortedNames(out)
 }
 
-func gitSyncRefusalHelp(kind string) string {
-	if kind == gitsync.KindConnection {
-		return "Delete the repository first — `platformctl gitsync recreate --confirm` does both in order"
+// sortedNames keeps the delete plan, the refusal and the command it suggests
+// listing the same repositories in the same order — Grafana's list order is
+// not promised to be stable, and an order that shifts between runs reads as
+// the set having changed.
+func sortedNames(names []string) []string {
+	sort.Strings(names)
+	return names
+}
+
+// gitSyncRefusalHelp names the repositories in the way out, because for a
+// shared connection there is no generic one: `recreate` on its own now retains
+// a connection with siblings, so pointing at it without --with-connection sends
+// an operator round a loop that never deletes the thing they asked to delete.
+func gitSyncRefusalHelp(kind string, blocking []string) string {
+	if kind != gitsync.KindConnection {
+		return "Pass --allow-owned-dashboards only if losing those dashboards is intended"
 	}
-	return "Pass --allow-owned-dashboards only if losing those dashboards is intended"
+	if len(blocking) == 0 {
+		return "Delete the repositories that reference it first"
+	}
+	return fmt.Sprintf("Delete repository %s first — `platformctl gitsync recreate --repository %s "+
+		"--with-connection --confirm` does all of it in order",
+		strings.Join(blocking, " "), blocking[0])
 }
 
 func pickRepository(repos []gitsync.Resource, wanted string) (gitsync.Resource, error) {

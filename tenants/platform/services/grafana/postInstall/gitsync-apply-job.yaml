@@ -172,11 +172,21 @@ spec:
               # before POSTing the body: a pair that disagrees creates one
               # resource and then health-gates a different, absent one, which
               # fails loudly instead of passing over a repository that is not
-              # there. Adding a tenant folder is a line here plus a ConfigMap
-              # key -- the connection is shared and never repeated.
-              REPOSITORIES="platform-dashboards:/etc/gitsync/repository.json
-              jdwlabs-dashboards:/etc/gitsync/repository-jdwlabs.json
+              # there. Adding a tenant folder is a line in TENANT_REPOSITORIES
+              # plus a ConfigMap key -- the connection is shared and never
+              # repeated.
+              #
+              # The split is a blast-radius split, and only the health gate
+              # below reads it: this Job is an ArgoCD Sync hook, so whatever it
+              # fails on takes the whole platform-grafana sync with it. The
+              # platform folder is what that Application exists to serve, so it
+              # gates. A tenant folder failing its own sync is a tenant-sized
+              # problem and must not become a Grafana-sized one.
+              REQUIRED_REPOSITORY="platform-dashboards:/etc/gitsync/repository.json"
+              TENANT_REPOSITORIES="jdwlabs-dashboards:/etc/gitsync/repository-jdwlabs.json
               dotablaze-tech-dashboards:/etc/gitsync/repository-dotablaze-tech.json"
+              REPOSITORIES="$REQUIRED_REPOSITORY
+              $TENANT_REPOSITORIES"
 
               apply_if_absent connections jdwlabs-platform-github /tmp/connection.json
               for entry in $REPOSITORIES; do
@@ -218,10 +228,24 @@ spec:
               }
 
               wait_healthy connections jdwlabs-platform-github
-              for entry in $REPOSITORIES; do
-                wait_healthy repositories "${entry%%:*}"
+              wait_healthy repositories "${REQUIRED_REPOSITORY%%:*}"
+
+              # Reported, not gated, per the blast-radius split above. Nothing
+              # is swallowed: the resource keeps its own unhealthy status, and
+              # `platformctl gitsync status` still exits non-zero on it.
+              unhealthy=""
+              for entry in $TENANT_REPOSITORIES; do
+                name="${entry%%:*}"
+                if ! wait_healthy repositories "$name"; then
+                  unhealthy="$unhealthy $name"
+                fi
               done
-              echo "git sync is connected and healthy"
+              if [ -n "$unhealthy" ]; then
+                echo "WARNING: tenant repositories not healthy:$unhealthy"
+                echo "WARNING: the platform folder is syncing, so this sync is not failed on their account"
+                echo "WARNING: run platformctl gitsync status for the health messages"
+              fi
+              echo "git sync is connected and the platform folder is healthy"
           volumeMounts:
             - name: resources
               mountPath: /etc/gitsync

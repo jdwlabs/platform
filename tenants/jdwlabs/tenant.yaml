@@ -62,6 +62,7 @@ observability:
     folder: jdwlabs
     team: jdwlabs
     access: edit
+    gitSyncFolder: jdwlabs-dashboards
 
 services:
   # ARC is dormant: CI runs exclusively on GitHub-hosted runners. Kept

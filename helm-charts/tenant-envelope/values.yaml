@@ -27,6 +27,10 @@ observability:
     folder: ""
     team: ""
     access: view
+    # UID of the folder Git Sync creates for this tenant's dashboards, when it
+    # has one. Empty means no synced folder to permission — it is not created
+    # here either way, only granted to the tenant team.
+    gitSyncFolder: ""
 
 _platform:
   repoURL: https://github.com/jdwlabs/platform.git
