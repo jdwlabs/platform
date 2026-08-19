@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -150,8 +152,9 @@ func findSeedCmd(t *testing.T) *cobra.Command {
 
 // The failure the ticket is about: with no terminal and no value, the command
 // must refuse before it connects to anything. runSeed has no reachable Vault,
-// so a regression here hangs this test rather than failing it — which is the
-// same way it hangs a caller.
+// so a regression fails here — by blocking on a prompt where a terminal exists,
+// or on the next call out where one does not. Either way the assertion on the
+// refusal's own text is what proves the refusal came first.
 func TestSeed_NoTerminalAndNoValueRefusesBeforeAnyVaultCall(t *testing.T) {
 	withoutTerminal(t)
 	t.Setenv("PLATFORMCTL_TRUENAS_CSI_API_KEY", "")
@@ -193,11 +196,16 @@ func TestSeed_NoTerminalWithEnvPassesPreflight(t *testing.T) {
 }
 
 // --from-file is the value source, so preflight must not demand an env var it
-// was never going to read.
+// was never going to read. The file has to exist and hold bytes, because
+// preflight reads it rather than merely noting that a source was named.
 func TestSeed_FromFileSatisfiesPreflight(t *testing.T) {
 	withoutTerminal(t)
 	t.Setenv("PLATFORMCTL_TRUENAS_CSI_API_KEY", "")
-	src, err := bootstrap.NewSeedValueSource("-", false, nil, []string{"truenas-csi"}, nil)
+	path := filepath.Join(t.TempDir(), "api-key")
+	if err := os.WriteFile(path, []byte("2-abcdef\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	src, err := bootstrap.NewSeedValueSource(path, false, nil, []string{"truenas-csi"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

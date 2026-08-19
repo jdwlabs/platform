@@ -183,7 +183,11 @@ func trimOneTrailingNewline(v string) string {
 // the flag that would have worked.
 func PreflightSeedInput(tenants, selected, fields []string, src *SeedValueSource, nonInteractive bool) error {
 	if src != nil {
-		return nil
+		// Reading the source here rather than in Apply is the whole point: an
+		// unreadable path must cost an error, not a port-forward. Read
+		// memoizes, so Apply re-reads nothing and a stdin source survives.
+		_, err := src.Read()
+		return err
 	}
 	interactive := !nonInteractive && prompt.HasTerminal()
 	if interactive {
