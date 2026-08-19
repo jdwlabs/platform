@@ -10,6 +10,11 @@ spec:
     # until now produced no signal at all: an iSCSI session dropped, ext4 aborted
     # its journal and latched the mount read-only, and the first anyone knew was
     # the application crashlooping on EROFS.
+    #
+    # Both rules are deliberately cluster-wide. Neither underlying metric even
+    # carries a namespace — they are node- and kubelet-level — and any tenant's
+    # volume can latch, including tenants that define no services of their own
+    # and so have nothing else watching them.
     - name: storage-integrity
       rules:
         # Reads the ro flag on the CSI staging mounts, where every attached PVC
@@ -32,6 +37,11 @@ spec:
         # stays 0 through the whole event. It fires for a genuine remount, and
         # for a target that presents its LUN read-only. It did not, and could
         # not, fire for the incident that prompted it.
+        #
+        # It is still the only rule here that can detect the latch at all: the
+        # staging-failure rule below sees the recovery, never the event. So the
+        # exporter override this depends on is load-bearing, not a nicety —
+        # reverting it removes the last detector rather than degrading one.
         - alert: FilesystemReadOnly
           expr: node_filesystem_readonly{mountpoint=~"/var/lib/kubelet/plugins/kubernetes.io/csi/.+/globalmount"} == 1
           for: 2m
@@ -41,12 +51,16 @@ spec:
             summary: "CSI volume mounted read-only on {{ $labels.instance }}"
             description: "{{ $labels.mountpoint }} on {{ $labels.instance }} ({{ $labels.device }}) is mounted read-only. Writes to the workload using it are failing with EROFS."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
-        # The signal that does survive the gap above. A filesystem left damaged
-        # by an aborted journal cannot be staged: the iSCSI driver preens it with
-        # fsck before mounting, and fsck refuses anything needing a decision, so
-        # the volume fails to stage over and over instead of mounting and going
-        # unwritable again. Any driver's staging failures are worth the same
-        # alert, so this is deliberately not scoped to one.
+        # This does NOT detect the read-only latch, and must not be read as if
+        # it did. While a volume is latched the CSI layer is never called at all
+        # — it is already staged, so the node plugin logs nothing and the
+        # VolumeAttachment stays true; observed twice. What this catches is the
+        # recovery failing: once the pod is deleted the volume is unstaged and
+        # restaged, the iSCSI driver preens it with fsck before mounting, and
+        # fsck refuses anything needing a decision, so a filesystem left damaged
+        # by an aborted journal fails to stage over and over instead of mounting
+        # and going unwritable again. Any driver's staging failures are worth
+        # the same alert, so this is deliberately not scoped to one.
         #
         # Scoped to NodeStageVolume alone. Publish is the per-pod bind of an
         # already-staged volume and never reaches the fsck path, so its failures

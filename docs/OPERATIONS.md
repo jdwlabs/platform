@@ -409,7 +409,7 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | CNPG clusters not healthy                                        | Check Longhorn pods in `longhorn-system`; check PVC binding                                                |
 | Pod stuck in `CrashLoopBackOff` 100+ restarts, no logs          | Liveness restarts reuse same overlay fs; stale state survives. Full pod delete breaks the cycle: `kubectl delete pod <name> -n <ns>`. If pod is a CNPG standby with I/O errors, also delete its PVC — CNPG will pg_basebackup from primary. |
 | CNPG standby `input/output error` on pgdata chmod               | Longhorn remount stuck. Delete pod + PVC: `kubectl delete pod <name> -n database && kubectl delete pvc <name> -n database`. CNPG creates replacement via pg_basebackup automatically. |
-| Pod crashlooping on `EROFS`, PVC not full, device reads clean    | An iSCSI session drop aborted the ext4 journal and the mount latched read-only; it stays that way after the session comes back. Since Linux 6.12 the kernel no longer flips the superblock flag when it does this, so `/proc/mounts` still says `rw` and `node_filesystem_readonly` stays 0 — confirm from the node instead: `talosctl -n <node-ip> dmesg \| grep -E 'EXT4-fs error\|Remounting filesystem read-only\|session recovery timed out'`. The recurring `I/O error ... comm kubelet` lines afterwards are the volume-stats poll hitting an already-aborted filesystem, not a failing device. Recover by detaching cleanly — see "Volumes that latch read-only" in §8. |
+| Pod crashlooping on `EROFS`, PVC not full, device reads clean    | An iSCSI session drop aborted the ext4 journal and the mount latched read-only; it stays that way after the session comes back. Since Linux 6.12 the kernel no longer flips the superblock flag when it does this, so `/proc/mounts` still says `rw` and `node_filesystem_readonly` stays 0 — confirm from the node instead: `talosctl -n <node-ip> dmesg \| grep -E 'EXT4-fs error\|Remounting filesystem read-only\|session recovery timed out'`. The recurring `I/O error ... comm kubelet` lines afterwards are the volume-stats poll hitting an already-aborted filesystem, not a failing device. Recover by deleting the **pod** (`kubectl delete pod <name> -n <ns>`) — restarting the container reuses the same read-only mount and can never fix it. See "Volumes that latch read-only" in §8. |
 | `platformctl bootstrap heal --cert-approver` fails "not found"  | ArgoCD app is named `platform-kubelet-serving-cert-approver`, not `kubelet-serving-cert-approver`. Refresh directly: `kubectl annotate application platform-kubelet-serving-cert-approver -n argocd argocd.argoproj.io/refresh=normal --overwrite` |
 | `platform-nginx-gateway-fabric` stuck `OutOfSync` / `Running`   | Helm cert-generator Job TTL race; run `platformctl bootstrap heal --stuck-sync --sync-app platform-nginx-gateway-fabric` |
 | Gateway HTTPS listener `InvalidListener` / all HTTPS routes failing | `wildcard-jdwlabs-tls` secret missing; `kubectl apply -f tenants/platform/services/nginx-gateway-fabric/postInstall/certificate.yaml` then wait 5–15 min for DNS-01 |
@@ -760,11 +760,29 @@ silent permanently rather than noisily, so a silent one is only "no evidence"
 while the override is in place — check it before concluding anything from
 silence.
 
-What does surface it is `CSIVolumeStagingFailing`, one step later. The iSCSI
-driver preens the filesystem with `fsck -f -p` before mounting, so once the pod
-is deleted the damage stops being silent: either the repair succeeds and the
-volume mounts, or staging keeps failing and the alert fires. That converts a
-condition with no signal into one with a bounded delay.
+`CSIVolumeStagingFailing` does not close that gap either, and it matters not to
+read it as though it did. Observed twice: while a volume is latched read-only
+the CSI layer sees nothing at all. The volume is already staged, so no CSI call
+is made — the node plugin's logs stay empty, its restart count stays 0, and the
+`VolumeAttachment` stays `true` throughout. That alert keys on `NodeStageVolume`
+failures, so it fires when the *recovery* cannot complete, not when the latch
+happens. Read it as "this volume could not be brought back", never as detection.
+
+Root cause is still unexplained. Both occurrences landed in the hour after the
+04:00 backup, but the second was ~10 minutes after the backup pod had already
+exited, and the NFS-backed backup PVC wrote 386 MB successfully in the same
+window — so "backup teardown disturbs the surviving mount" fits the timing
+poorly, and the NAS was reachable throughout. Do not treat the timing
+correlation as a diagnosis.
+
+**A container restart cannot fix this — only deleting the pod can.** The kubelet
+re-running the entrypoint reuses the same already-mounted filesystem, so a
+crashlooping container grinds against a read-only mount indefinitely; one
+occurrence burned 7 restarts over ~13 minutes that way. Only removing the pod
+triggers `NodeUnpublishVolume`/`NodeUnstageVolume` and a fresh mount on
+recreate. For the same reason, do not reach for a liveness probe to automate
+this: a probe restarts the container, never the pod, so it would spend the
+restart budget and still never remount.
 
 To confirm it directly, read the node's kernel ring buffer — this is the only
 place the evidence exists, since node logs are not shipped to Loki:
@@ -773,13 +791,27 @@ place the evidence exists, since node logs are not shipped to Loki:
 talosctl -n <node-ip> dmesg | grep -E 'EXT4-fs error|Remounting filesystem read-only|Journal has aborted|detected conn error|session recovery timed out'
 ```
 
+That command needs a populated `~/.talos/config` with a context selected; an
+unconfigured `talosctl` fails to reach the node and this evidence path silently
+disappears. Confirm the client works *before* you need it — see §1 for where the
+talosconfig comes from.
+
+`FilesystemReadOnly` names a node and a staging path, not a workload: the path
+segment under `plugins/kubernetes.io/csi/` is a hash of the volume handle, so
+identify the affected volume from the `EROFS` crashloops on that node rather
+than by reading the mountpoint.
+
 Recovery, in order:
 
-1. Suspend auto-sync on the workload's ArgoCD Application, so scaling it down
-   is not immediately reverted.
-2. Scale the workload to 0 and wait for its `VolumeAttachment` to disappear.
-   The unmount is what makes repair possible; nothing can fix the filesystem
-   while it is still mounted.
+1. Delete the pod: `kubectl delete pod <name> -n <ns>`. Its controller recreates
+   it, and the unmount and remount in between is the entire repair — both
+   observed occurrences came back cleanly here, world intact. Do not restart the
+   container instead; see above.
+2. If it returns read-only, the filesystem is damaged rather than merely
+   latched. Suspend auto-sync on the workload's ArgoCD Application so scaling it
+   down is not immediately reverted, then scale to 0 and wait for its
+   `VolumeAttachment` to disappear. The unmount is what makes repair possible;
+   nothing can fix the filesystem while it is still mounted.
 3. Scale back up. The driver runs `fsck -f -p` before mounting. A journal
    replay reports "errors corrected", which is a non-zero exit and fails that
    staging attempt — the retry then finds a clean filesystem and mounts it, so
