@@ -535,10 +535,30 @@ rather than by eye.
 Discord. `severity: warning` reaches the relay only — deliberately, because
 mirroring the chart's warning population into Discord as well would bury the
 criticals. Anything else (`info`, no `severity`) falls through to the root
-`discord` receiver, and `Watchdog`/`InfoInhibitor` are dropped at `null`.
-A `continue: true` route resumes at the next *sibling* only; it never falls
-back to the parent's receiver, so an alert that matches a child route and no
-later sibling reaches that child's receiver and nothing else.
+`discord` receiver. `Watchdog` and `InfoInhibitor` are dropped at `null`
+routes that sit at the top of the list, so they are dropped whatever other
+labels they carry. A `continue: true` route resumes at the next *sibling*
+only; it never falls back to the parent's receiver, so an alert that matches a
+child route and no later sibling reaches that child's receiver and nothing
+else.
+
+An untenanted critical therefore produces **two** Discord messages, from two
+independent senders on unrelated schedules:
+
+| Sender | Carries | Timing |
+|---|---|---|
+| Alertmanager `discord` receiver | the raw alert — labels, summary, runbook link | Alertmanager's `group_wait`/`repeat_interval` (30s / 4h) |
+| `ai-sre` relay's own Discord post | **the Holmes RCA**, plus any Jira ticket and gated PR it opened | whenever the investigation finishes, and only once per dedupe window |
+
+The RCA is only ever in the relay's message. The Alertmanager one arrives
+first and is the page; the relay one arrives later and is the analysis.
+Neither deduplicates the other — that duplication is accepted so a dark relay
+still leaves a human notified.
+
+A `critical` alert is also a **source** in the `inhibit_rules` block (it
+suppresses a `warning` sharing the same `alertname` and `namespace`), so
+raising a rule's severity to `critical` changes what it inhibits as well as
+where it routes.
 
 **Tenant alert routing:** a `PrometheusRule` alert only reaches a tenant's
 route if the rule's `labels` block sets `tenant: jdwlabs` or
@@ -639,6 +659,11 @@ switches, `AiSreRelayProcessingNothing` and `AiSreRelayMetricsTargetDown`, are
 only to the dark relay. The other two stay `warning` because the relay is
 still handling traffic in those states and fans the alert out itself. While a
 dead-man's switch is firing, treat the Alertmanager UI as the warning feed.
+
+Being `critical` also makes those two inhibit sources (see "Who gets what"
+above). No warning currently shares an `alertname` with either, so nothing is
+suppressed in practice today — but the promotion is a change to the inhibit
+graph, not only to the route tree.
 
 **Where to look first when X is broken:**
 
