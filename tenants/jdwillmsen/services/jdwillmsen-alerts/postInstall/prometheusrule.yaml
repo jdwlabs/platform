@@ -52,3 +52,142 @@ spec:
             summary: "No backup freshness signal exists for the Minecraft world"
             description: "No freshness signal exists for the Minecraft world backup. It is not merely stale — nothing is reporting on it at all, so every other backup alert for it is silent too. Check the backup exporter Deployment and its ServiceMonitor in jdwillmsen-prd."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # The two rules below watch the volume-recovery actor: the CronJob in
+        # the tenant's deployment repo that deletes the Minecraft server pod
+        # when its volume latches read-only. It is the only thing in the stack
+        # that detects that fault class at all — the CSI layer reports no
+        # failing operation because nothing re-stages a latched mount, and
+        # since Linux 6.12 ext4 sets an internal emergency-read-only bit
+        # instead of the superblock flag, so /proc/mounts keeps saying `rw`
+        # and node_filesystem_readonly stays 0 throughout. So the actor is the
+        # detector of last resort, and nothing was watching it.
+        #
+        # They live here rather than beside the CronJob for the same reason
+        # the rule above does: a rule shipped by the thing it watches
+        # disappears with it, and the actor's CronJob vanishing is precisely
+        # the case these exist for. The same tenant-namespace caveat applies —
+        # deleting jdwillmsen-prd removes both of these at the moment it
+        # removes the actor. It is accepted here for the same reasons, and
+        # keeping the tenant's alerts in one file is worth more than diverging
+        # from the convention for one rule.
+        #
+        # Two rules, not one, because the question splits cleanly in half and
+        # each half wants a different instrument. "Could it act?" is answered
+        # by the Jobs the CronJob leaves behind. "Is it scheduled at all?"
+        # cannot be answered from Jobs at all, because a CronJob that is
+        # suspended or deleted produces neither failed Jobs nor successful
+        # ones — it simply goes quiet. A single compromise rule would have to
+        # pick one of those and would be blind to the other.
+
+        # Half one: could it act?
+        #
+        # The actor runs under `set -euo pipefail` with `backoffLimit: 0` and
+        # the pod delete is its last statement, so a denied delete exits
+        # non-zero with no retry left and the Job lands Failed rather than
+        # Complete. That is what makes this rule see the case a "did it run"
+        # check cannot: an actor that is scheduled, runs on time, and cannot
+        # do the one thing it exists to do looks exactly like a healthy no-op
+        # to anything counting executions. A healthy no-op exits 0.
+        #
+        # kube-state-metrics is the producer, not the actor, so this costs no
+        # instrumentation in the thing being watched and does not go dark with
+        # it.
+        #
+        # Ownership is resolved through kube_job_owner rather than a job_name
+        # prefix. A generated Job name is the CronJob's name plus a suffix, so
+        # a prefix match is a guess that also claims any future workload named
+        # into the same space; the owner reference is the cluster's own
+        # statement of which CronJob a Job belongs to.
+        #
+        # The start-time bound is what stops this latching forever. A CronJob
+        # retains its last few failed Jobs and nothing evicts them once
+        # failures stop — successful runs are kept under a separate limit — so
+        # "a failed Job exists" stays true indefinitely after the fault is
+        # fixed, and the alert would never resolve. Bounding on when the Job
+        # started means the condition clears on its own once the actor is
+        # succeeding again. 30m is six runs at the actor's five-minute
+        # schedule.
+        #
+        # Two failures rather than one, inside that window, because a single
+        # denied or evicted run is covered by the next run five minutes later,
+        # while two inside half an hour is an actor that is not recovering by
+        # itself. Critical because the failure it describes is silent
+        # everywhere else.
+        - alert: JdwillmsenMinecraftVolumeRecoveryFailing
+          expr: |
+            count(
+                (max by (namespace, job_name) (kube_job_status_failed{namespace="jdwillmsen-prd"}) > 0)
+              and on (namespace, job_name)
+                (max by (namespace, job_name) (kube_job_status_start_time{namespace="jdwillmsen-prd"}) > time() - 1800)
+              and on (namespace, job_name)
+                max by (namespace, job_name) (
+                  kube_job_owner{namespace="jdwillmsen-prd", owner_kind="CronJob", owner_name="jdwillmsen-minecraft-fwb-prd-volume-recovery"}
+                )
+            ) >= 2
+          for: 5m
+          labels:
+            severity: critical
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+          annotations:
+            summary: "The Minecraft volume-recovery actor is running but failing"
+            description: >-
+              {{ $value }} runs of jdwillmsen-minecraft-fwb-prd-volume-recovery failed in the last 30 minutes. The actor
+              is scheduled and executing, so every check that only asks whether it ran reports it healthy — but its pod
+              delete is the last thing it does, so a failed run means it could not act. Usually a revoked or narrowed
+              RBAC grant on the delete. Read the last failed Job's pod log in jdwillmsen-prd. Until it is fixed, a
+              read-only latch will not be recovered by anything.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # Half two: is it scheduled at all?
+        #
+        # The rule above reads Jobs, and a CronJob that is suspended, deleted,
+        # or never created produces none — no failed ones and no successful
+        # ones. Nothing derived from its output can distinguish that from an
+        # actor with nothing to do, which is why this half has to be a static
+        # expectation this repository holds rather than a measurement.
+        #
+        # It must not be windowed, and that is the whole point of the shape.
+        # A lookback-based expectation stops firing when its window runs out
+        # and Alertmanager then sends a resolved notification — an affirmative
+        # all-clear delivered at the exact moment the failure became
+        # permanent. absent() over a literal series has no lookback and
+        # structurally cannot expire; it fires from the moment the expectation
+        # is unmet and keeps firing, including on a cluster rebuilt from
+        # scratch where the actor was never deployed at all.
+        #
+        # `== 0` inside absent() is what makes one rule cover both halves of
+        # "not scheduled". A deleted CronJob has no series; a suspended one
+        # has a series valued 1, which the comparison filters away, leaving
+        # absent() with nothing either way. Suspension is not a lesser state
+        # here: a suspended recovery actor recovers exactly as much as a
+        # deleted one.
+        #
+        # absent() derives its output labels from a plain selector only, so a
+        # comparison inside it yields none. The identifying labels are stated
+        # here instead, which also keeps grouping and inhibition — both keyed
+        # on alertname and namespace — working the way they do for every other
+        # alert.
+        #
+        # 30m, well past any kube-state-metrics restart or scrape gap, which
+        # would otherwise read as a missing series. Shorter than the backup
+        # producer's hour above because this actor's whole job is to act
+        # within minutes.
+        - alert: JdwillmsenMinecraftVolumeRecoveryAbsent
+          expr: absent(kube_cronjob_spec_suspend{namespace="jdwillmsen-prd", cronjob="jdwillmsen-minecraft-fwb-prd-volume-recovery"} == 0)
+          for: 30m
+          labels:
+            severity: critical
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+            cronjob: jdwillmsen-minecraft-fwb-prd-volume-recovery
+          annotations:
+            summary: "No scheduled volume-recovery actor exists for the Minecraft server"
+            description: >-
+              The CronJob jdwillmsen-minecraft-fwb-prd-volume-recovery is either suspended, deleted, or was never
+              created in jdwillmsen-prd. It is the only thing in the cluster that detects an ext4 emergency-read-only
+              latch on the world volume, so while this fires that fault recovers only when a human notices it. Check the
+              CronJob and that ArgoCD has the tenant's deployment repo synced. If the actor is being retired
+              deliberately, delete this rule in the same change — it exists to force that decision, not to be silenced.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"

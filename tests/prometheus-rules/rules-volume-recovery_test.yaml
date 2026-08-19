@@ -1,0 +1,258 @@
+# Unit tests for the volume-recovery actor's liveness alerts.
+#
+# The actor is the only thing in the stack that detects an ext4 emergency
+# read-only latch, so the interesting assertions here are the negative ones:
+# each rule has to stay silent for the failure the other one owns, or the two
+# collapse back into a single check with a blind spot on one side.
+#
+# Note the synthetic clock. promtool starts time() at the Unix epoch, so
+# "recent" and "stale" job start times are absolute values either side of the
+# rule's 30m bound at the evaluation time, not plausible-looking timestamps.
+rule_files:
+  - rules/jdwillmsen-tenant-alerts.yaml
+evaluation_interval: 1m
+tests:
+  # A scheduled, unsuspended actor whose runs all complete. Neither half of
+  # the watchdog should have anything to say.
+  - interval: 1m
+    name: healthy actor is silent
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-volume-recovery"}'
+        values: '0+0x180'
+      - series: 'kube_job_status_failed{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-1"}'
+        values: '0+0x180'
+      - series: 'kube_job_status_failed{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-2"}'
+        values: '0+0x180'
+      - series: 'kube_job_status_start_time{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-1"}'
+        values: '7000+0x180'
+      - series: 'kube_job_status_start_time{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-2"}'
+        values: '7000+0x180'
+      - series: 'kube_job_owner{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-1",owner_kind="CronJob",owner_name="jdwillmsen-minecraft-fwb-prd-volume-recovery",owner_is_controller="true"}'
+        values: '1+0x180'
+      - series: 'kube_job_owner{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-2",owner_kind="CronJob",owner_name="jdwillmsen-minecraft-fwb-prd-volume-recovery",owner_is_controller="true"}'
+        values: '1+0x180'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftVolumeRecoveryFailing
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftVolumeRecoveryAbsent
+        exp_alerts: []
+
+  # Acceptance case: it runs but cannot act. The CronJob is present and
+  # unsuspended and its Jobs are being created on schedule, so every check
+  # that asks "did it run" reports healthy — the absent() half included, which
+  # is asserted here rather than assumed. Only the Job outcome shows the
+  # denial. The three `reason` series are what kube-state-metrics actually
+  # emits per failed Job; if the rule stopped collapsing them the count would
+  # be wrong.
+  - interval: 1m
+    name: RBAC-denied actor runs on schedule and still alerts
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-volume-recovery"}'
+        values: '0+0x180'
+      - series: 'kube_job_status_failed{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-1",reason="BackoffLimitExceeded"}'
+        values: '1+0x180'
+      - series: 'kube_job_status_failed{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-1",reason="DeadlineExceeded"}'
+        values: '0+0x180'
+      - series: 'kube_job_status_failed{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-1",reason="Evicted"}'
+        values: '0+0x180'
+      - series: 'kube_job_status_failed{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-2",reason="BackoffLimitExceeded"}'
+        values: '1+0x180'
+      - series: 'kube_job_status_failed{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-2",reason="DeadlineExceeded"}'
+        values: '0+0x180'
+      - series: 'kube_job_status_failed{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-2",reason="Evicted"}'
+        values: '0+0x180'
+      - series: 'kube_job_status_start_time{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-1"}'
+        values: '7000+0x180'
+      - series: 'kube_job_status_start_time{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-2"}'
+        values: '7000+0x180'
+      - series: 'kube_job_owner{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-1",owner_kind="CronJob",owner_name="jdwillmsen-minecraft-fwb-prd-volume-recovery",owner_is_controller="true"}'
+        values: '1+0x180'
+      - series: 'kube_job_owner{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-2",owner_kind="CronJob",owner_name="jdwillmsen-minecraft-fwb-prd-volume-recovery",owner_is_controller="true"}'
+        values: '1+0x180'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftVolumeRecoveryFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+            exp_annotations:
+              summary: "The Minecraft volume-recovery actor is running but failing"
+              description: "2 runs of jdwillmsen-minecraft-fwb-prd-volume-recovery failed in the last 30 minutes. The actor is scheduled and executing, so every check that only asks whether it ran reports it healthy — but its pod delete is the last thing it does, so a failed run means it could not act. Usually a revoked or narrowed RBAC grant on the delete. Read the last failed Job's pod log in jdwillmsen-prd. Until it is fixed, a read-only latch will not be recovered by anything."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftVolumeRecoveryAbsent
+        exp_alerts: []
+
+  # Acceptance case: suspended. No Job is ever created, so nothing fails and
+  # the failure half stays silent — which is the entire reason this second
+  # rule exists. A suspended recovery actor recovers exactly as much as a
+  # deleted one, so it is not a lesser state.
+  - interval: 1m
+    name: suspended actor alerts as not scheduled
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-volume-recovery"}'
+        values: '1+0x180'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftVolumeRecoveryAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              cronjob: jdwillmsen-minecraft-fwb-prd-volume-recovery
+            exp_annotations:
+              summary: "No scheduled volume-recovery actor exists for the Minecraft server"
+              description: "The CronJob jdwillmsen-minecraft-fwb-prd-volume-recovery is either suspended, deleted, or was never created in jdwillmsen-prd. It is the only thing in the cluster that detects an ext4 emergency-read-only latch on the world volume, so while this fires that fault recovers only when a human notices it. Check the CronJob and that ArgoCD has the tenant's deployment repo synced. If the actor is being retired deliberately, delete this rule in the same change — it exists to force that decision, not to be silenced."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftVolumeRecoveryFailing
+        exp_alerts: []
+
+  # Acceptance case: deleted. The only CronJob left in the namespace is the
+  # backup, which is present and healthy — so this also pins that the
+  # expectation is about one named actor and is not satisfied by a sibling
+  # CronJob still existing.
+  - interval: 1m
+    name: deleted actor alerts while a sibling CronJob still exists
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-backup"}'
+        values: '0+0x180'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftVolumeRecoveryAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              cronjob: jdwillmsen-minecraft-fwb-prd-volume-recovery
+            exp_annotations:
+              summary: "No scheduled volume-recovery actor exists for the Minecraft server"
+              description: "The CronJob jdwillmsen-minecraft-fwb-prd-volume-recovery is either suspended, deleted, or was never created in jdwillmsen-prd. It is the only thing in the cluster that detects an ext4 emergency-read-only latch on the world volume, so while this fires that fault recovers only when a human notices it. Check the CronJob and that ArgoCD has the tenant's deployment repo synced. If the actor is being retired deliberately, delete this rule in the same change — it exists to force that decision, not to be silenced."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftVolumeRecoveryFailing
+        exp_alerts: []
+
+  # One failed run is covered by the next run five minutes later. Paging on it
+  # would make the alert a thing people mute.
+  - interval: 1m
+    name: a single failed run does not page
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-volume-recovery"}'
+        values: '0+0x180'
+      - series: 'kube_job_status_failed{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-1",reason="BackoffLimitExceeded"}'
+        values: '1+0x180'
+      - series: 'kube_job_status_failed{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-2"}'
+        values: '0+0x180'
+      - series: 'kube_job_status_start_time{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-1"}'
+        values: '7000+0x180'
+      - series: 'kube_job_status_start_time{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-2"}'
+        values: '7000+0x180'
+      - series: 'kube_job_owner{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-1",owner_kind="CronJob",owner_name="jdwillmsen-minecraft-fwb-prd-volume-recovery",owner_is_controller="true"}'
+        values: '1+0x180'
+      - series: 'kube_job_owner{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-2",owner_kind="CronJob",owner_name="jdwillmsen-minecraft-fwb-prd-volume-recovery",owner_is_controller="true"}'
+        values: '1+0x180'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftVolumeRecoveryFailing
+        exp_alerts: []
+
+  # A CronJob keeps its last few failed Jobs and nothing evicts them once
+  # failures stop, so without the start-time bound this alert would fire
+  # forever after a fault that has already been fixed. Same two failed Jobs as
+  # the RBAC case, aged past the window.
+  - interval: 1m
+    name: retained old failures do not keep the alert firing
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-volume-recovery"}'
+        values: '0+0x180'
+      - series: 'kube_job_status_failed{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-1",reason="BackoffLimitExceeded"}'
+        values: '1+0x180'
+      - series: 'kube_job_status_failed{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-2",reason="BackoffLimitExceeded"}'
+        values: '1+0x180'
+      - series: 'kube_job_status_start_time{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-1"}'
+        values: '600+0x180'
+      - series: 'kube_job_status_start_time{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-2"}'
+        values: '600+0x180'
+      - series: 'kube_job_owner{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-1",owner_kind="CronJob",owner_name="jdwillmsen-minecraft-fwb-prd-volume-recovery",owner_is_controller="true"}'
+        values: '1+0x180'
+      - series: 'kube_job_owner{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-volume-recovery-2",owner_kind="CronJob",owner_name="jdwillmsen-minecraft-fwb-prd-volume-recovery",owner_is_controller="true"}'
+        values: '1+0x180'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftVolumeRecoveryFailing
+        exp_alerts: []
+
+  # The backup CronJob shares the namespace and a name prefix. Ownership is
+  # read from kube_job_owner precisely so its failures are not attributed to
+  # the recovery actor.
+  - interval: 1m
+    name: failures owned by a sibling CronJob are not attributed here
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-volume-recovery"}'
+        values: '0+0x180'
+      - series: 'kube_job_status_failed{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-backup-1",reason="BackoffLimitExceeded"}'
+        values: '1+0x180'
+      - series: 'kube_job_status_failed{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-backup-2",reason="BackoffLimitExceeded"}'
+        values: '1+0x180'
+      - series: 'kube_job_status_start_time{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-backup-1"}'
+        values: '7000+0x180'
+      - series: 'kube_job_status_start_time{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-backup-2"}'
+        values: '7000+0x180'
+      - series: 'kube_job_owner{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-backup-1",owner_kind="CronJob",owner_name="jdwillmsen-minecraft-fwb-prd-backup",owner_is_controller="true"}'
+        values: '1+0x180'
+      - series: 'kube_job_owner{namespace="jdwillmsen-prd",job_name="jdwillmsen-minecraft-fwb-prd-backup-2",owner_kind="CronJob",owner_name="jdwillmsen-minecraft-fwb-prd-backup",owner_is_controller="true"}'
+        values: '1+0x180'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftVolumeRecoveryFailing
+        exp_alerts: []
+
+  # The expectation must not expire, and this is the case that proves it. The
+  # actor is healthy for three hours and is then deleted, so its series stops
+  # — the same shape as a producer going dark. A lookback-based dead-man's
+  # switch fires for as long as its window still holds a sample and then
+  # stops, and Alertmanager sends a resolved notification: an affirmative
+  # all-clear delivered at the moment the failure became permanent. absent()
+  # over a literal series has no window to fall off, so the third assertion
+  # here is the one any windowed rewrite fails while still passing the first
+  # two.
+  - interval: 1m
+    name: the expectation still fires three days after the actor is deleted
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-volume-recovery"}'
+        values: '0+0x180'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftVolumeRecoveryAbsent
+        exp_alerts: []
+      - eval_time: 4h
+        alertname: JdwillmsenMinecraftVolumeRecoveryAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              cronjob: jdwillmsen-minecraft-fwb-prd-volume-recovery
+            exp_annotations:
+              summary: "No scheduled volume-recovery actor exists for the Minecraft server"
+              description: "The CronJob jdwillmsen-minecraft-fwb-prd-volume-recovery is either suspended, deleted, or was never created in jdwillmsen-prd. It is the only thing in the cluster that detects an ext4 emergency-read-only latch on the world volume, so while this fires that fault recovers only when a human notices it. Check the CronJob and that ArgoCD has the tenant's deployment repo synced. If the actor is being retired deliberately, delete this rule in the same change — it exists to force that decision, not to be silenced."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 72h
+        alertname: JdwillmsenMinecraftVolumeRecoveryAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              cronjob: jdwillmsen-minecraft-fwb-prd-volume-recovery
+            exp_annotations:
+              summary: "No scheduled volume-recovery actor exists for the Minecraft server"
+              description: "The CronJob jdwillmsen-minecraft-fwb-prd-volume-recovery is either suspended, deleted, or was never created in jdwillmsen-prd. It is the only thing in the cluster that detects an ext4 emergency-read-only latch on the world volume, so while this fires that fault recovers only when a human notices it. Check the CronJob and that ArgoCD has the tenant's deployment repo synced. If the actor is being retired deliberately, delete this rule in the same change — it exists to force that decision, not to be silenced."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
