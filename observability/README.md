@@ -63,15 +63,53 @@ guaranteed to fail.
 
 So a tenant holds **two** folders: `<tenant>`, which tenant-envelope creates,
 and `<tenant>-dashboards`, which its Git Sync repository creates. Both are
-permissioned the same way, from the same `observability.grafana` block — the
-Job in `helm-charts/tenant-envelope/templates/observability.yaml` waits for the
-Git Sync folder to appear and replaces its permission list with the tenant team
-at the tenant's access level, exactly as it does for the folder it created
-itself. That replacement is what drops Grafana's inherited Viewer/Editor
-grants, and without it a folder is readable by every user in the instance,
-the other tenants' teams included. The UID goes in `tenant.yaml` as
-`observability.grafana.gitSyncFolder`; a tenant without a synced folder leaves
-it unset.
+permissioned the same way, from the same `observability.grafana` block. A
+folder created by provisioning carries Grafana's inherited Admin/Editor/Viewer
+grants — readable by every user in the instance, the other tenants' teams
+included — until a full-replace permission write drops them, and that write is
+what makes a folder tenant-private rather than merely tenant-named.
+
+Which hook does it matters, so both templates live in
+`helm-charts/tenant-envelope/templates/observability.yaml`:
+
+| Hook | Job | Does |
+| --- | --- | --- |
+| `Sync` | `tenant-<t>-grafana-observability-apply` | Folder, team, folder-RBAC on `<tenant>`, Loki/Tempo datasources |
+| `PostSync` | `tenant-<t>-grafana-gitsync-folder-rbac` | Waits for `<tenant>-dashboards`, grants the tenant team on it |
+
+The split is deliberate. The git sync folder is created by the separate
+`platform-grafana` Application, so waiting for it means waiting on something
+this Application does not control — and fail-closed is the only correct posture
+for a permission step, because "the folder is not there" and "the folder is
+there and open" are the same observation without asking. Inside the `Sync` hook
+that failure would take the tenant's namespaces, quotas, NetworkPolicies and
+AppProject with it. `PostSync` fails the operation without withdrawing what the
+`Sync` phase already applied, so the blast radius is this tenant's
+observability rather than this tenant's governance.
+
+Neither Job ever *creates* the git sync folder: the repository owns that UID,
+and a folder Git Sync did not create is one it refuses to adopt.
+
+### Adding a tenant folder
+
+Three files, and all three or none — `tools/check-gitsync-tenant-folders.py`
+fails CI on any subset, because each missing piece is silent in the cluster:
+
+1. `tenants/<t>/tenant.yaml` — `observability.grafana.gitSyncFolder:
+   <t>-dashboards`. Missing: the folder is created and stays readable by every
+   Grafana user, with the apply Job exiting 0 and ArgoCD green.
+2. `tenants/platform/services/grafana/postInstall/gitsync-resources.yaml` — a
+   `Repository` whose `metadata.name` is that folder UID and whose
+   `spec.github.path` is `observability/dashboards/<t>`.
+3. The same service's `gitsync-apply-job.yaml` — one line in
+   `TENANT_REPOSITORIES` pairing that name with its ConfigMap key. Missing: the
+   tenant's PostSync hook waits five minutes for a folder nothing creates, then
+   fails that tenant's sync every time.
+
+The permission write itself depends on the `provisioningFolderMetadata` feature
+toggle, which Grafana requires before it will accept a permissions write on any
+provisioned folder. It is pinned in the grafana service's `values.yaml` rather
+than left at its default for exactly that reason.
 
 **Known gap.** Two folders is one more than the design calls for — the
 dashboards do not land *inside* the tenant folder, they sit beside it. The
@@ -99,6 +137,14 @@ Changing the **connection** definition (a rotated GitHub App key, an edited
 `--with-connection`, which widens the plan to every repository bound to it and
 then the connection, since a connection cannot be deleted underneath a
 repository that still references it.
+
+Deleting a tenant repository is not a neutral act, because the folder is a
+resource the repository owns: the remove-orphan-resources finalizer takes the
+folder with it, and the one Grafana recreates comes back with the inherited
+grants. `recreate` therefore re-syncs the claiming tenant's
+`governance-<tenant>` alongside `platform-grafana`, and reports which. `gitsync
+delete` requests no sync at all, so it *refuses* a repository a tenant claims —
+`--accept-open-folder` overrides it and prints what is then owed.
 
 ## Conventions
 

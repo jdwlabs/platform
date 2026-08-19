@@ -203,9 +203,18 @@ persistence:
 
 # Git Sync (dashboards-as-code). The `provisioning` feature toggle is on by
 # default in Grafana v13 OSS; repository_types must be set explicitly so the
-# GitHub repository type is selectable. No other toggle is needed — the secrets
-# service that stores the connection's private key is embedded in Grafana and
-# is not separately enableable.
+# GitHub repository type is selectable. The secrets service that stores the
+# connection's private key is embedded in Grafana and is not separately
+# enableable.
+#
+# provisioningFolderMetadata is pinned rather than left to its default because
+# the per-tenant folder boundary depends on it: pkg/api/folder_permission.go
+# refuses a permissions write on any folder whose ManagedBy is the repo manager
+# unless that toggle is enabled, and every Git Sync folder is exactly that. The
+# tenant-envelope Job that grants a tenant's team on its synced folder would
+# take a 403 and fail the tenant's observability sync. It is GA and defaults on
+# at this pinned version, so this line changes nothing today and is what stops
+# a future default flip from silently reopening the folders.
 #
 # The Connection and Repository resources are not created by hand in the UI:
 # postInstall/gitsync-resources.yaml holds them and the companion apply Job
@@ -217,6 +226,8 @@ persistence:
 grafana.ini:
   provisioning:
     repository_types: "git|github|bitbucket|gitlab|local"
+  feature_toggles:
+    enable: provisioningFolderMetadata
   # Required so Git Sync can build PR/commit deep links back to the instance.
   server:
     root_url: https://grafana.jdwlabs.com

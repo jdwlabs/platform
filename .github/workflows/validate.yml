@@ -158,6 +158,24 @@ jobs:
       - name: Reject mutable image tags in remote chart defaults
         run: python3 tools/check-remote-chart-image-pins.py
 
+  # Separate job from the checkers above because this one is a cross-file
+  # agreement check, not a content check: its failure means two files that must
+  # describe the same tenant folder have drifted, and the fix is in whichever
+  # of the three was not updated.
+  gitsync-tenant-folders:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.x"
+      - name: Install dependencies
+        run: pip install PyYAML
+      - name: Test the checker against its known false negatives
+        run: python3 -m unittest discover -s tools/tests -t tools/tests
+      - name: Reject a git sync tenant folder that is created but not granted
+        run: python3 tools/check-gitsync-tenant-folders.py
+
   adr-numbering:
     runs-on: ubuntu-latest
     steps:

@@ -91,17 +91,28 @@ outside provisioning. The tenant repositories therefore carry a
 `-dashboards` suffix — the bare tenant name collides with the folder
 tenant-envelope creates through the classic folders API, and that collision
 stops the sync outright. The folder that appears here is granted to the tenant
-team by tenant-envelope, off `observability.grafana.gitSyncFolder` in the
-tenant's `tenant.yaml` — a synced tenant folder left at Grafana's inherited
-permissions is readable by every user in the instance. See
+team by tenant-envelope's `PostSync` hook, off
+`observability.grafana.gitSyncFolder` in the tenant's `tenant.yaml` — a synced
+tenant folder left at Grafana's inherited permissions is readable by every user
+in the instance. That grant is also why `grafana.ini`'s `feature_toggles` pins
+`provisioningFolderMetadata`: Grafana refuses a permissions write on a
+provisioned folder without it. Adding a folder means the repository definition,
+the `TENANT_REPOSITORIES` line **and** the tenant's key — `python3
+tools/check-gitsync-tenant-folders.py` fails CI on any subset. See
 `observability/README.md` for the full consequence.
 
-Only `platform-dashboards` is health-gated here. This Job is an ArgoCD `Sync`
-hook, so anything it fails on fails the whole `platform-grafana` sync: a tenant
-repository that will not sync is reported as a warning and left to
-`platformctl gitsync status`, which still exits non-zero on it, rather than
-taking Grafana's own dashboards down with it. Creation is gated for all of
-them — a definition Grafana rejects is a broken commit, not a runtime state.
+Only `platform-dashboards` is gated here, for creation and health alike. This
+Job is an ArgoCD `Sync` hook, so anything it fails on fails the whole
+`platform-grafana` sync: a tenant repository that cannot be created or cannot
+become healthy is reported as a warning and left to `platformctl gitsync
+status`, which still exits non-zero on it, rather than taking Grafana's own
+dashboards down with it. Creation is not exempt from that, because the
+realistic creation failure is not a malformed definition — CI parses those —
+but an unmanaged-folder collision, which is live state and is rejected at
+admission with a 422.
+
+A repository that failed to be created is skipped by the health wait rather
+than proved unhealthy over 90 seconds it cannot pass.
 
 The Job **creates but never updates**. An existing connection is left untouched,
 because the stored private key is write-once and re-applying it would disturb a

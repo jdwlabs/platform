@@ -53,7 +53,18 @@ kind: ConfigMap
 metadata:
   name: tenant-{{ .Values.name }}-grafana-observability
   namespace: monitoring
+  labels:
+    # The tenant label is what makes this ConfigMap findable by tenant rather
+    # than by guessing at its name. `platformctl gitsync` reads it to answer
+    # "which tenant's RBAC covers this git sync folder" before deleting the
+    # repository that owns the folder -- a question nothing else in the cluster
+    # can answer, since the Job carrying the UID is a hook and is garbage
+    # collected minutes after it runs.
+    platform.jdwlabs.io/tenant: {{ .Values.name }}
 data:
+  {{- if $gitSyncFolderUID }}
+  gitsync-folder: {{ $gitSyncFolderUID | quote }}
+  {{- end }}
   folder.json: |
     {"uid": {{ $folderUID | quote }}, "title": {{ .Values.displayName | default $folderUID | quote }}}
   team.json: |
@@ -322,38 +333,15 @@ spec:
               ensure_datasource "$LOKI_DS_UID" /etc/observability/loki-datasource.json
               ensure_datasource "$TEMPO_DS_UID" /etc/observability/tempo-datasource.json
 
-              # The Git Sync folder gets the same treatment, and comes last
-              # because it is the only step waiting on another Application --
-              # everything above is this Job's own to converge. It is waited for
-              # rather than probed once: it is created by the separate
-              # platform-grafana Application, which this Job's sync-wave does
-              # not order against (see the template comment). Never created
-              # here -- with sync.target folder the repository owns that UID,
-              # and a folder Git Sync did not create is one it refuses to
-              # adopt, so creating it would break the sync it belongs to.
-              #
-              # Giving up is an error rather than a skip. The only reason to
-              # skip would be "the folder is not there", which is
-              # indistinguishable from "the folder is there and open" without
-              # asking, and a tenant folder every other tenant can read is a
-              # worse outcome than a failed sync.
+              # Named rather than left to silence: an unset gitSyncFolder and a
+              # granted one produce identical output otherwise, and the first
+              # of those is how a synced folder stays world-readable.
               if [ -n "$GITSYNC_FOLDER_UID" ]; then
-                i=0
-                code=000
-                while [ "$i" -lt 60 ]; do
-                  code=$(curl -sS -o /dev/null -w '%{http_code}' \
-                    -u "$GF_USER:$GF_PASS" "$API/folders/$GITSYNC_FOLDER_UID" || echo 000)
-                  [ "$code" = "200" ] && break
-                  i=$((i + 1))
-                  sleep 5
-                done
-                if [ "$code" != "200" ]; then
-                  echo "git sync folder $GITSYNC_FOLDER_UID never appeared (last status $code)"
-                  echo "it is created by the $GITSYNC_FOLDER_UID repository in platform-grafana; check platformctl gitsync status"
-                  exit 1
-                fi
-                set_folder_permissions "$GITSYNC_FOLDER_UID"
+                echo "git sync folder $GITSYNC_FOLDER_UID is granted separately by the folder-rbac hook"
+              else
+                echo "no gitSyncFolder set for this tenant; no git sync folder permissions to apply"
               fi
+
           volumeMounts:
             - name: resources
               mountPath: /etc/observability
@@ -366,4 +354,178 @@ spec:
             name: tenant-{{ .Values.name }}-grafana-observability
         - name: tmp
           emptyDir: {}
+{{- if $gitSyncFolderUID }}
+---
+# Grants the tenant team on the folder Git Sync creates for this tenant's
+# dashboards, and does it from a Job of its own for one reason: blast radius.
+#
+# A folder created by provisioning carries Grafana's inherited Admin/Editor/
+# Viewer grants, so it is readable by every user in the instance until this
+# permission list is replaced -- fail-closed is the only correct posture for
+# that step. But the folder is created by the separate `platform-grafana`
+# Application, so waiting on it means waiting on something this Application
+# does not control, and a failure inside the Sync-hook Job above would take the
+# tenant's namespaces, quotas, NetworkPolicies and AppProject down with it. A
+# PostSync hook fails the operation without withdrawing what the Sync phase
+# already applied, which scopes the failure to what it is: this tenant's
+# observability, not this tenant's governance.
+#
+# It repeats the team lookup rather than sharing one with the Job above because
+# hooks in different phases are different pods; the lookup is a read, and the
+# Sync-phase Job has already created the team by the time this runs, so this
+# one only ever resolves an existing team and refuses if it is missing.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tenant-{{ .Values.name }}-grafana-gitsync-folder-rbac
+  namespace: monitoring
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  # One attempt inside the deadline: the folder wait is already the retry, and
+  # a second attempt would only re-run it after the deadline has expired.
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: grant
+          image: docker.io/grafana/grafana:13.1.1@sha256:7cb8c64c4d57a57e734073f3cc94620adb24a0acb929bd80ba9f14017e3a975b
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          env:
+            - name: GF_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin-credentials
+                  key: admin-user
+            - name: GF_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin-credentials
+                  key: admin-password
+            - name: FOLDER_UID
+              value: {{ $gitSyncFolderUID | quote }}
+            - name: TEAM_NAME
+              value: {{ $teamName | quote }}
+            - name: PERM_LEVEL
+              value: {{ $permLevel | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+
+              API="http://platform-grafana.monitoring.svc/api"
+              LAST_BODY=/tmp/last-response
+
+              # Shorter than the Sync-phase Job's wait on purpose: PostSync
+              # runs after that Job succeeded, which already proved Grafana
+              # answers. This covers a restart in between, not a cold boot.
+              i=0
+              while [ "$i" -lt 60 ]; do
+                code=$(curl -sS -o /dev/null -w '%{http_code}' "$API/health" || echo 000)
+                [ "$code" = "200" ] && break
+                i=$((i + 1))
+                sleep 5
+              done
+              if [ "$code" != "200" ]; then
+                echo "grafana never became healthy at $API/health"
+                exit 1
+              fi
+
+              # Exactly one exact-name match, same rule as the Job that creates
+              # the team: the search endpoint matches substrings, so anything
+              # else is ambiguous rather than close enough.
+              code=$(curl -sS -o "$LAST_BODY" -w '%{http_code}' \
+                -u "$GF_USER:$GF_PASS" "$API/teams/search?query=$TEAM_NAME")
+              if [ "$code" != "200" ]; then
+                echo "GET /api/teams/search returned $code:"
+                cat "$LAST_BODY"
+                exit 1
+              fi
+              if grep -q '"totalCount":1' "$LAST_BODY" \
+                && [ "$(grep -o "\"name\":\"$TEAM_NAME\"" "$LAST_BODY" | wc -l)" -eq 1 ]; then
+                TEAM_ID=$(grep -oE '"id":[0-9]+' "$LAST_BODY" | head -1 | cut -d: -f2)
+              else
+                echo "expected exactly one team named '$TEAM_NAME'; the sync-phase job creates it:"
+                cat "$LAST_BODY"
+                exit 1
+              fi
+              if [ -z "${TEAM_ID:-}" ]; then
+                echo "could not resolve a team id for $TEAM_NAME from:"
+                cat "$LAST_BODY"
+                exit 1
+              fi
+
+              # Waited for, never created: with sync.target folder the Git Sync
+              # repository owns this UID, and a folder it did not create is one
+              # it refuses to adopt -- creating it here would break the sync it
+              # belongs to. Giving up is an error rather than a skip, because
+              # "the folder is not there" and "the folder is there and open"
+              # are the same observation without asking.
+              i=0
+              code=000
+              while [ "$i" -lt 60 ]; do
+                code=$(curl -sS -o /dev/null -w '%{http_code}' \
+                  -u "$GF_USER:$GF_PASS" "$API/folders/$FOLDER_UID" || echo 000)
+                [ "$code" = "200" ] && break
+                i=$((i + 1))
+                sleep 5
+              done
+              if [ "$code" != "200" ]; then
+                echo "git sync folder $FOLDER_UID never appeared (last status $code)"
+                echo "it is created by the $FOLDER_UID repository in platform-grafana; check platformctl gitsync status"
+                exit 1
+              fi
+
+              # Full replace, not additive: dropping the inherited
+              # Admin/Editor/Viewer grants is the step that makes the folder
+              # tenant-private, and re-running it can only ever converge on the
+              # same single-item list.
+              code=$(curl -sS -o "$LAST_BODY" -w '%{http_code}' -X POST \
+                -H 'Content-Type: application/json' \
+                -u "$GF_USER:$GF_PASS" \
+                --data-binary "{\"items\":[{\"teamId\":$TEAM_ID,\"permission\":$PERM_LEVEL}]}" \
+                "$API/folders/$FOLDER_UID/permissions")
+              case "$code" in
+                200) echo "folder $FOLDER_UID permissions set: team $TEAM_NAME ($TEAM_ID) -> level $PERM_LEVEL" ;;
+                403)
+                  echo "POST /api/folders/$FOLDER_UID/permissions returned 403:"
+                  cat "$LAST_BODY"
+                  echo "a provisioned folder rejects permission writes unless the provisioningFolderMetadata feature toggle is enabled (see the grafana service values.yaml)"
+                  exit 1
+                  ;;
+                *)
+                  echo "POST /api/folders/$FOLDER_UID/permissions returned $code:"
+                  cat "$LAST_BODY"
+                  exit 1
+                  ;;
+              esac
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}
 {{- end }}
