@@ -445,9 +445,9 @@ every process on the host and is kept by the shell history, so a credential
 passed that way outlives the rotation meant to retire it.
 
 The bytes are stored exactly as given, except for one trailing line terminator,
-which is dropped unless --keep-trailing-newline is passed. Quotes and leading
-or interior whitespace are never stripped, because they can be part of a
-secret; wrap nothing in quotes that the shell will not remove.
+which is dropped unless --keep-trailing-newline is passed. Quotes and leading,
+interior or trailing whitespace are never stripped, because they can be part of
+a secret; wrap nothing in quotes that the shell will not remove.
 
 An unknown spec key or field name is an error, not a narrower seed: selecting a
 spec this binary does not know would otherwise write nothing and still report

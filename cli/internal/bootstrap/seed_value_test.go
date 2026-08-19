@@ -218,3 +218,33 @@ func writeTemp(t *testing.T, content string) string {
 	}
 	return path
 }
+
+// An unreadable --from-file must cost an error, not a port-forward: reaching
+// Apply to discover it defeats the reason the check exists.
+func TestPreflightSeedInput_UnreadableFromFileIsCaughtBeforeAnyConnection(t *testing.T) {
+	src := &SeedValueSource{Path: "/nonexistent/api-key", Field: "api_key"}
+	err := PreflightSeedInput(nil, []string{"truenas-csi"}, []string{"api_key"}, src, false)
+	if err == nil {
+		t.Fatal("preflight must read the source, not merely accept its presence")
+	}
+	if !strings.Contains(err.Error(), "/nonexistent/api-key") {
+		t.Fatalf("error should name the path: %v", err)
+	}
+}
+
+// Preflight consumes stdin, so the value must survive to the write.
+func TestPreflightSeedInput_ReadDoesNotConsumeTheValue(t *testing.T) {
+	src := &SeedValueSource{Path: "-", Field: "api_key", Stdin: strings.NewReader("2-abcdef\n")}
+	if err := PreflightSeedInput(nil, []string{"truenas-csi"}, []string{"api_key"}, src, false); err != nil {
+		t.Fatal(err)
+	}
+	p := NewVaultSeedPhase(nil, false, "kv", nil, []string{"truenas-csi"})
+	p.SetValueSource(src)
+	got, err := p.fieldValue(seedField{"api_key", "PLATFORMCTL_TRUENAS_CSI_API_KEY", true, false}, "truenas-csi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "2-abcdef" {
+		t.Fatalf("got %q, want 2-abcdef", got)
+	}
+}
