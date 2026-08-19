@@ -339,10 +339,14 @@ rest is CLI.
    merges over the path, so nothing else there is disturbed:
 
    ```bash
-   PLATFORMCTL_RCLONE_CONF="$(cat gdrive.conf)" \
-     platformctl bootstrap seed rclone-gdrive --field rclone_conf --non-interactive
+   platformctl bootstrap seed rclone-gdrive --field rclone_conf --from-file gdrive.conf
    rm gdrive.conf
    ```
+
+   `--from-file` reads the block's bytes directly. Prefer it over
+   `PLATFORMCTL_RCLONE_CONF="$(cat gdrive.conf)"`: command substitution strips
+   every trailing newline and the value lands in the environment, where the
+   whole block is visible to anything that reads `/proc/<pid>/environ`.
 
 9. The ExternalSecret refreshes hourly; force it rather than wait:
 
@@ -416,6 +420,7 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | `Released` PVs on `local-path` linger after a node is lost | The provisioner reclaims by scheduling a busybox helper pod **onto the volume's own node** to `rm -rf` the directory. The helper tolerates everything, so a cordoned or tainted node still reclaims normally, but a node that is `NotReady` or removed from the cluster can never run it — the PV stays `Released` and the on-disk `_work` stays on that node's `/var` forever. Longhorn's `Delete` needed no node scheduling, so this failure mode is new since CI `_work` moved to `local-path`. See "Self-hosted CI runners (ARC)" below for the post-incident check. |
 | Grafana dashboards stop syncing from git, or `platform-grafana` goes red with `never became healthy` in the hook log | `platformctl gitsync status` reports each Connection and Repository with `health` and `sync.state`; it exits non-zero when any is unhealthy and prints the full health message. These resources live in Grafana's own API server, so `kubectl` and ArgoCD cannot see them and a red `platform-grafana` sync here means Git Sync is reporting itself broken, not that the deploy failed. Read the message on the **repository**, not the connection: a connection saying `GitHub App lacks required 'webhooks' permission` is describing a requirement derived from a bound repository's `write` workflow, and the App needs no webhooks grant. An empty result means Git Sync is credentialed but not connected. |
 | An edit to `gitsync-resources.yaml` merged but changed nothing | The apply Job creates and never updates, so the next run finds both resources present and skips them. `platformctl gitsync recreate --dry-run`, then `--confirm`, deletes the repository **before** the connection (the repository references it) and requests an ArgoCD refresh of `platform-grafana` so the Job re-runs. Both delete paths refuse while the repository still owns dashboards, because its remove-orphan-resources finalizer collects whatever it owns — `--allow-owned-dashboards` overrides that only when losing them is intended. |
+| A credential must be rotated from a script or an agent, with no terminal | `platformctl bootstrap seed <spec> --field <name> --from-file <path>` (`--from-file -` reads stdin) writes one field with no TTY. With no value source the command refuses before it connects to Vault, exits 1, and prints the command that would have worked — it never blocks on a prompt it cannot display. The value is stored byte-for-byte apart from one trailing newline; see §6.1 for the full rule and why no `--value` flag exists. |
 | A new field must be added to an already-seeded Vault path | `platformctl bootstrap seed <spec> --field <name>` writes that property alone, merging over what is there, so the other credentials are neither re-supplied nor prompted for. An unknown spec key or field name is refused with the valid set listed — a mistyped key used to select an empty spec, write nothing and still report success. |
 | `CronJobHasNotSucceededRecently` / `CronJobNeverSucceeded` / `CronJobLastRunDidNotSucceed` | The named CronJob is failing, not being scheduled, or its jobs never complete. `kubectl get cronjob <name> -n <ns>` for `LAST SCHEDULE`, then `kubectl get jobs -n <ns> --sort-by=.metadata.creationTimestamp | tail` and read the last pod's logs. A CronJob scheduled less often than every 6h will trip these on a healthy run — the 24h threshold assumes nothing slower exists, so such a job needs its own rule rather than a bumped threshold. |
 | `BackupArtifactStale` (critical) | The producer has published no verified artifact inside the budget it publishes for itself as `backup_max_age_seconds`. The archive store is what to look at, not the job's exit code — the whole point of the rule is that a job can exit 0 having written nothing. Check the CronJob's last runs first (the rules above usually fire alongside), then list the artifact directory. Do not silence this by widening the budget; widen it only if the schedule genuinely changed. |
@@ -426,6 +431,12 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | `BackupBudgetMissing` / `BackupArtifactSizeMissing` (warning) | A producer publishes a success timestamp but not `backup_max_age_seconds` / `backup_last_artifact_bytes`. The matching critical (`BackupArtifactStale` / `BackupArtifactEmpty`) has nothing to compare against and can never fire for that producer, so it is unmonitored while looking healthy. Fix the producer's gauge set rather than the rule; the contract's three gauges are all required. |
 
 ## 6. Non-interactive / CI mode
+
+Two non-interactive paths exist, for two different jobs. `--non-interactive`
+supplies **every** prompt from environment variables and is what a full CI
+bootstrap uses. `bootstrap seed --from-file` supplies **one** field's value
+from a file or stdin, and is what rotating a single credential uses — see
+§6.1.
 
 When `--non-interactive` is set, `platformctl` reads every prompt value
 from environment variables. The contract:
@@ -465,6 +476,50 @@ Every `kv/<tenant>-*` path is optional: a tenant is not obliged to deploy the
 service that consumes one, and the ARC runner sets that consume `-github-app`
 are dormant. Seeding skips an unsupplied tenant path and says so rather than
 prompting. Naming a field with `--field` writes it regardless.
+
+### 6.1 Seeding one credential with no TTY
+
+`platformctl bootstrap seed` used to drive an interactive form unconditionally,
+so with no terminal it failed inside the form library naming `/dev/tty`, or
+blocked. An automated actor facing a bad credential therefore had no sanctioned
+way to replace it. `--from-file` is that way:
+
+```bash
+# from a file
+platformctl bootstrap seed truenas-csi --field api_key --from-file ./api-key
+rm ./api-key
+
+# from stdin — "-" is the path
+some-secret-source | platformctl bootstrap seed truenas-csi --field api_key --from-file -
+```
+
+It takes exactly one spec and exactly one field; `--field` may be omitted when
+the spec has only one field. There is no `--value` flag on purpose: argv is
+readable through `/proc` and the shell records it in history, so a credential
+passed that way outlives the rotation meant to retire it.
+
+**What is stored.** The bytes exactly as supplied, minus one trailing line
+terminator (`\n` or `\r\n`), which `printf`, `echo` and every editor append and
+no seeded credential ends in by intent. `--keep-trailing-newline` keeps it.
+Quotes and leading, interior or trailing whitespace are never stripped — they
+can be part of a secret, and nothing at write time can distinguish a deliberate
+quote from an accidental one. So do not wrap the value in quotes the shell will
+not itself remove: `--from-file` receives whatever the file holds.
+
+**When nothing can supply the value**, the command refuses before it connects
+to Vault or opens a port-forward, exits 1, and prints the command that would
+have worked. It never blocks on a prompt it cannot display:
+
+```
+error: "seed truenas-csi/api_key has no value source: no terminal is attached and PLATFORMCTL_TRUENAS_CSI_API_KEY is unset"
+help[3]:
+  - platformctl bootstrap seed truenas-csi --field api_key --from-file <path>
+  - platformctl bootstrap seed truenas-csi --field api_key --from-file -   # reads the value from stdin
+  - or set PLATFORMCTL_TRUENAS_CSI_API_KEY in the environment
+```
+
+The value itself never reaches stdout, stderr or the event stream. Success
+names the path, the field, and whether it was `created` or `updated`.
 
 **`--json` event stream:** every state transition emits one
 newline-delimited JSON line. Schema:

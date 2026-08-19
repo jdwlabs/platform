@@ -81,6 +81,27 @@ Connection and Repository live in Grafana's own API server — invisible to `kub
 - An unknown spec key or field name is now an error listing the valid set. Previously an unrecognised key selected an empty spec, wrote nothing, and still reported success — which is how a binary older than the seed spec it is asked to write skips the field silently
 - Seeding has no preview mode. `--dry-run` is accepted **only** by `cluster volumes reclaim`, `cluster volumes truenas reclaim`, `gitsync delete`, and `gitsync recreate` — the four commands that implement it. Every other command, `bootstrap seed` included, rejects the flag with an unknown-flag error rather than mutating while reporting a preview
 
+### Seeding without a terminal
+
+An agent has no TTY, so this is the only seed path available to one.
+
+- `platformctl bootstrap seed <spec> --from-file <path>` reads the value from a file; `--from-file -` reads stdin. It needs exactly one spec and exactly one field — named with `--field`, or inferred when the spec has only one field (`truenas-csi` → `api_key`). Example: `platformctl bootstrap seed truenas-csi --from-file ./api-key`
+- There is deliberately **no `--value` flag**. argv is world-readable through `/proc` and the shell keeps it in history, so a credential passed that way outlives the rotation meant to retire it. A file (deleted after) or stdin from a pipe is the sanctioned way in
+- `--non-interactive` still reads `PLATFORMCTL_*` env vars and is unchanged; `--from-file` is for the far commoner case of rotating one credential
+- **Byte rule:** the value is stored exactly as supplied, except that one trailing line terminator (`\n` or `\r\n`) is dropped — `printf`, `echo` and every editor append one, and no seeded credential ends in a newline by intent. Pass `--keep-trailing-newline` when it must be kept. Quotes and leading, interior or trailing whitespace are **never** stripped: they can legitimately be part of a secret, and a guard cannot tell those apart from an accident. Do not wrap the value in quotes the shell will not remove
+- A seed with no value source refuses **before** it connects to Vault or opens a port-forward, exits 1, and names the exact command that would work on stdout. It never blocks on a prompt it cannot show:
+
+  ```
+  error: "seed truenas-csi/api_key has no value source: no terminal is attached and PLATFORMCTL_TRUENAS_CSI_API_KEY is unset"
+  help[3]:
+    - platformctl bootstrap seed truenas-csi --field api_key --from-file <path>
+    - platformctl bootstrap seed truenas-csi --field api_key --from-file -   # reads the value from stdin
+    - or set PLATFORMCTL_TRUENAS_CSI_API_KEY in the environment
+  ```
+
+- The value is never echoed to stdout or stderr. Success names the path, the field and whether it was `created` or `updated`, and nothing else
+- The interactive form still runs when a terminal is actually attached, and is now only reached then
+
 ## Architecture Overview
 
 ### GitOps Flow
