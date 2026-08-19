@@ -72,6 +72,23 @@ func softAntiAffinity(app string) func(*Pod) {
 	}
 }
 
+// podAffinityOn gives a pod the required hostname pod affinity that pins it
+// beside another workload.
+func podAffinityOn(app string) func(*Pod) {
+	return func(p *Pod) {
+		p.Spec.Affinity = &corev1.Affinity{PodAffinity: &corev1.PodAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+				LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": app}},
+				TopologyKey:   HostnameTopologyKey,
+			}},
+		}}
+	}
+}
+
+func labelled(app string) func(*Pod) {
+	return func(p *Pod) { p.Labels["app"] = app }
+}
+
 func verdictOf(t *testing.T, r Result, name string) NodeResult {
 	t.Helper()
 	for _, n := range r.Nodes {
@@ -174,6 +191,70 @@ func TestSimulateNode_PreferredAntiAffinityLetsTheReplicaMove(t *testing.T) {
 	got := verdictOf(t, Simulate(c), "small")
 	if got.Verdict != VerdictDrainable {
 		t.Fatalf("verdict = %s, want drainable (blockers: %v)", got.Verdict, got.Blockers)
+	}
+}
+
+// Required pod affinity is the mirror of the anti-affinity case: the pod must
+// land beside something, and a node that does not hold it is no candidate.
+func TestSimulateNode_RequiredPodAffinityNeedsItsNeighbourOnTheTargetNode(t *testing.T) {
+	nodes := []Node{node("a", 1000), node("b", 8000)}
+	sidecar := pod("ns", "app-0", "a", 64, podAffinityOn("cache"))
+
+	blocked := verdictOf(t, Simulate(Cluster{Nodes: nodes, Pods: []Pod{sidecar}}), "a")
+	if blocked.Verdict != VerdictBlocked {
+		t.Fatalf("verdict = %s, want blocked — nothing it must sit beside exists", blocked.Verdict)
+	}
+	if !strings.Contains(blocked.Blockers[0].Reason, "nothing it must sit beside") {
+		t.Errorf("reason = %q, want it to name the missing neighbour", blocked.Blockers[0].Reason)
+	}
+
+	withCache := Cluster{Nodes: nodes, Pods: []Pod{sidecar, pod("ns", "cache-0", "b", 64, labelled("cache"))}}
+	if got := verdictOf(t, Simulate(withCache), "a"); got.Verdict != VerdictDrainable {
+		t.Fatalf("verdict = %s, want drainable once the neighbour is on b (blockers: %v)",
+			got.Verdict, got.Blockers)
+	}
+}
+
+// The scheduler checks anti-affinity in both directions, so the simulation must
+// too: a pod declaring nothing is still refused by a node whose occupant
+// forbids it, and a one-way check would call that placement a witness.
+func TestSimulateNode_ResidentAntiAffinityRefusesAPodCarryingNoRule(t *testing.T) {
+	c := Cluster{
+		Nodes: []Node{node("a", 1000), node("b", 8000)},
+		Pods: []Pod{
+			pod("ns", "picky-0", "b", 64, antiAffinity("web")),
+			pod("ns", "web-0", "a", 64, labelled("web")),
+		},
+	}
+	got := verdictOf(t, Simulate(c), "a")
+	if got.Verdict != VerdictBlocked {
+		t.Fatalf("verdict = %s, want blocked — b's occupant excludes web-0", got.Verdict)
+	}
+	if got.Blockers[0].Class != ReasonHard {
+		t.Errorf("class = %s, want hard — picky-0 was there before the evacuation", got.Blockers[0].Class)
+	}
+	if !strings.Contains(got.Blockers[0].Reason, "its own rule excludes this pod") {
+		t.Errorf("reason = %q, want it to say whose rule refused the pod", got.Blockers[0].Reason)
+	}
+}
+
+// `hard` claims no packing order could have helped. A node excluded only by a
+// pod this same evacuation put there does not support that claim.
+func TestSimulateNode_ARefusalThisEvacuationCausedIsNotCalledAProof(t *testing.T) {
+	c := Cluster{
+		Nodes: []Node{node("a", 1000), node("b", 8000)},
+		Pods: []Pod{
+			pod("ns", "web-0", "a", 192, antiAffinity("web")),
+			pod("ns", "web-1", "a", 64, antiAffinity("web")),
+		},
+	}
+	got := verdictOf(t, Simulate(c), "a")
+	if got.Verdict != VerdictBlocked {
+		t.Fatalf("verdict = %s, want blocked — one node cannot hold two mutually exclusive pods", got.Verdict)
+	}
+	if got.Blockers[0].Class != ReasonCapacity {
+		t.Errorf("class = %s, want capacity — b refused web-1 only because web-0 had just "+
+			"been placed there, which is order-dependent", got.Blockers[0].Class)
 	}
 }
 
@@ -402,14 +483,33 @@ func TestUsesUnmodelledConstraint_StaysQuietOnWhatItDoesEvaluate(t *testing.T) {
 	}
 }
 
+func TestUsesUnmodelledConstraint_NamesASelectorItCannotParse(t *testing.T) {
+	spec := &corev1.PodSpec{Affinity: &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+			TopologyKey: HostnameTopologyKey,
+			LabelSelector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
+				Key: "app", Operator: metav1.LabelSelectorOpIn,
+			}}},
+		}},
+	}}}
+	got := UsesUnmodelledConstraint(spec)
+	if len(got) != 1 || !strings.Contains(got[0], "does not parse") {
+		t.Fatalf("got %v, want the unreadable selector named — an anti-affinity term that "+
+			"cannot be parsed matches nothing, which makes the verdict quietly optimistic", got)
+	}
+}
+
+// An over-committed node has less than nothing free, and that figure has to be
+// distinguishable from the "-" the report prints for what nobody measured.
 func TestFormatMemory(t *testing.T) {
 	cases := map[int64]string{
-		0:         "0Mi",
-		192 * mi:  "192Mi",
-		2363 * mi: "2.3Gi",
-		-1:        "-",
-		1023 * mi: "1023Mi",
-		1024 * mi: "1.0Gi",
+		0:          "0Mi",
+		192 * mi:   "192Mi",
+		2363 * mi:  "2.3Gi",
+		-192 * mi:  "-192Mi",
+		-1536 * mi: "-1.5Gi",
+		1023 * mi:  "1023Mi",
+		1024 * mi:  "1.0Gi",
 	}
 	for in, want := range cases {
 		if got := FormatMemory(in); got != want {

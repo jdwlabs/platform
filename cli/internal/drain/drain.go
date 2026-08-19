@@ -13,18 +13,23 @@
 // onto what is left under the scheduler predicates that actually bind here:
 // node readiness and cordon state, taints and tolerations, nodeSelector and
 // required node affinity, required pod affinity and anti-affinity, PersistentVolume
-// node affinity, and memory/CPU/pod-count capacity.
+// node affinity, and memory/CPU/pod-count capacity. Anti-affinity is evaluated
+// in both directions, as the scheduler evaluates it: a pod carrying no rule of
+// its own is still refused by a node whose occupant forbids it.
 //
 // # What a verdict means
 //
 // The packing is greedy (largest request first, onto the target with the most
 // free memory), so a "fits" verdict is a witness — an assignment that would
-// work — and is therefore sound. A "blocked" verdict on capacity alone is not a
-// proof, because some other packing order might have succeeded; it is a strong
-// signal that wants a human's eye. A "blocked" verdict where some pod has no
-// candidate node at all before capacity is even consulted IS a proof: no
-// ordering can conjure a node that the pod's own constraints exclude. The two
-// are reported distinctly, as reason class `hard` versus `capacity`.
+// work — and is therefore sound.
+//
+// A "blocked" verdict is a proof only when every surviving node was excluded by
+// something no packing order can influence: a taint, node or volume affinity,
+// or an anti-affinity rule against a pod that was already resident before the
+// evacuation started. That is reason class `hard`. Everything else is
+// order-dependent — nodes that ran out of room, and nodes excluded only because
+// this same evacuation had already placed something there — and is reported as
+// `capacity`: a strong signal that wants a human's eye rather than a proof.
 //
 // # What is deliberately not modelled
 //
@@ -167,13 +172,16 @@ const (
 type ReasonClass string
 
 const (
-	// ReasonHard means no surviving node satisfies the pod's own constraints,
-	// independently of how much room any of them has. No packing order changes
-	// this, so it is a proof of infeasibility.
+	// ReasonHard means no surviving node satisfies the pod's constraints
+	// against cluster state the evacuation does not change — taints, node and
+	// volume affinity, and pods resident before it began. No packing order
+	// changes that, so it is a proof of infeasibility.
 	ReasonHard ReasonClass = "hard"
-	// ReasonCapacity means candidate nodes exist but none had room left once
-	// the rest of this node's evacuation was packed. Order-dependent, so it is
-	// a strong signal rather than a proof.
+	// ReasonCapacity means the refusal is order-dependent: either eligible
+	// nodes existed and none had room left once the rest of this evacuation
+	// was packed, or the only refusals came from pods this evacuation had
+	// already placed. Another order might have succeeded, so it is a strong
+	// signal rather than a proof.
 	ReasonCapacity ReasonClass = "capacity"
 	// ReasonUnmanaged means the pod has no controller to recreate it.
 	ReasonUnmanaged ReasonClass = "unmanaged"
@@ -386,6 +394,10 @@ type targetSet struct {
 	freeCPU   map[string]int64
 	freePods  map[string]int64
 	residents map[string][]Pod
+	// placed holds the references of pods this evacuation moved. An inter-pod
+	// rule that only fires against one of them is order-dependent, and telling
+	// the two apart is what keeps `hard` a proof.
+	placed map[string]bool
 }
 
 func newTargetSet(c Cluster, drained string) *targetSet {
@@ -394,6 +406,7 @@ func newTargetSet(c Cluster, drained string) *targetSet {
 		freeCPU:   map[string]int64{},
 		freePods:  map[string]int64{},
 		residents: map[string][]Pod{},
+		placed:    map[string]bool{},
 	}
 	for _, n := range c.Nodes {
 		if n.Name == drained || !n.Schedulable() {
@@ -425,18 +438,25 @@ func newTargetSet(c Cluster, drained string) *targetSet {
 func (ts *targetSet) place(p Pod) (string, *Blocker) {
 	var eligible []Node
 	rejections := map[string]string{}
+	orderDependent := false
 	for _, n := range ts.nodes {
-		if why := admits(p, n, ts.residents[n.Name]); why != "" {
+		why, dependsOnOrder := admits(p, n, ts.residents[n.Name], ts.placed)
+		if why != "" {
 			rejections[n.Name] = why
+			orderDependent = orderDependent || dependsOnOrder
 			continue
 		}
 		eligible = append(eligible, n)
 	}
 
 	if len(eligible) == 0 {
+		class := ReasonHard
+		if orderDependent {
+			class = ReasonCapacity
+		}
 		return "", &Blocker{
 			Pod:    p,
-			Class:  ReasonHard,
+			Class:  class,
 			Reason: summariseRejections(ts.nodes, rejections),
 		}
 	}
@@ -470,9 +490,10 @@ func (ts *targetSet) place(p Pod) (string, *Blocker) {
 	ts.freeMem[best] -= p.Memory
 	ts.freeCPU[best] -= p.CPU
 	ts.freePods[best]--
-	placed := p
-	placed.NodeName = best
-	ts.residents[best] = append(ts.residents[best], placed)
+	moved := p
+	moved.NodeName = best
+	ts.residents[best] = append(ts.residents[best], moved)
+	ts.placed[moved.Ref()] = true
 	return best, nil
 }
 

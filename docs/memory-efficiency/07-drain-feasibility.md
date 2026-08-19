@@ -132,11 +132,50 @@ clusters and everything else untouched:
 | talos-lx0-6a4 | blocked | **blocked** |
 
 **Not every worker can be drained after this change.** `talos-lx0-6a4` still
-cannot. Adding 8Gi to `talos-4h8-zy6` takes its blocker count from 35 to 5, at
-which point the binding constraint becomes CPU rather than memory. Draining the
-64Gi worker needs capacity in the worker pool, not configuration — the same
-conclusion doc 06 reached about the small workers, reached again from the other
-end of the cluster.
+cannot: 13.3Gi of movable load against about 10Gi everywhere else. Giving the
+pool more room helps but does not close it — adding 8Gi to `talos-4h8-zy6`
+takes **`talos-lx0-6a4`'s** blocker count from 35 down to 5, at which point the
+binding constraint becomes CPU rather than memory. Draining the 64Gi worker
+needs capacity in the worker pool, not configuration — the same conclusion doc
+06 reached about the small workers, reached again from the other end of the
+cluster.
+
+## Rolling this out
+
+This is not a no-op sync. `podAntiAffinityType` is part of the pod spec CNPG
+generates, so merging it rolls **both** clusters:
+
+1. ArgoCD syncs the new value and the CNPG operator marks all three instances of
+   each cluster for update.
+2. Replicas are recreated one at a time, each rejoining before the next goes.
+3. `primaryUpdateStrategy` is unset, so CNPG's `unsupervised` default applies:
+   the operator promotes an in-sync replica and restarts the old primary on its
+   own. **The prd primary switches over on merge, unattended.**
+
+`supervised` was considered and rejected. It does not avoid the roll — it stops
+after the replicas and waits for a manual promotion (OPERATIONS.md §3) — and it
+is a standing setting rather than a gate on this one change, so every later edit
+to either cluster would also land half-applied until someone noticed. Worse for
+this change specifically: until that promotion ran, the primary would still be
+running the old pod spec and therefore the `required` rule. One instance per
+cluster would stay un-relocatable, `drain-check` would still fail on its node,
+and the change would read as landed while the problem it fixes was still live.
+
+The switchover is the cheap half of an operation whose expensive half — three
+instance restarts — happens under either strategy. It promotes a replica that is
+already in sync, and clients see a connection reset on the `-rw` service.
+
+Check either side of the merge:
+
+```
+platformctl cluster drain-check          # one blocked node (talos-lx0-6a4) before and after
+platformctl cluster drain-check --full   # the small workers still hold their margin
+```
+
+Afterwards the `colocated` table is the thing to read. If the roll lands two
+instances of one cluster on the same node, that is the accepted cost of
+`preferred` and it is now visible; deleting the doubled pod lets the operator
+place it again once there is room.
 
 ## Longhorn `instance-manager` — a correctness bug that cannot be corrected here
 
@@ -191,12 +230,17 @@ make the effective default nondeterministic. Change both or neither.
 `drain-check` evaluates readiness and cordon state, taints and tolerations,
 `nodeSelector` and required node affinity, required pod affinity and
 anti-affinity, PersistentVolume node affinity, and memory/CPU/pod-count
-capacity. DaemonSet and static pods are skipped, as `kubectl drain` skips them.
+capacity. Anti-affinity is read in both directions, as the scheduler reads it: a
+pod carrying no rule of its own is still refused by a node whose occupant
+forbids it. DaemonSet and static pods are skipped, as `kubectl drain` skips them.
 
 A `drainable` verdict is a witness — a concrete assignment that would work — so
-it is sound. A `blocked` verdict of class `hard` is a proof, because no packing
-order conjures a node the pod's own constraints exclude. A `blocked` verdict of
-class `capacity` is order-dependent and so a strong signal rather than a proof.
+it is sound. A `blocked` verdict of class `hard` is a proof: every surviving
+node was excluded by something the evacuation cannot influence — a taint, node
+or volume affinity, or an anti-affinity rule against a pod that was already
+sitting there. Class `capacity` covers everything order-dependent, which is both
+nodes that ran out of room and nodes excluded only by what this same evacuation
+had already placed on them; it is a strong signal rather than a proof.
 
 Deliberately not modelled: preferred affinity and topology spread constraints,
 which never make a placement impossible. Hard topology spread constraints are

@@ -44,29 +44,43 @@ func LoadUsage(ctx context.Context, dc dynamic.Interface) (map[string]Usage, err
 		if err != nil || !found {
 			continue
 		}
-		var total int64
-		for _, c := range containers {
-			m, ok := c.(map[string]any)
-			if !ok {
-				continue
-			}
-			usage, ok := m["usage"].(map[string]any)
-			if !ok {
-				continue
-			}
-			raw, ok := usage["memory"].(string)
-			if !ok {
-				continue
-			}
-			q, err := resource.ParseQuantity(raw)
-			if err != nil {
-				continue
-			}
-			total += q.Value()
+		total, complete := containerMemory(containers)
+		// A pod missing one container's figure would report a total lower than
+		// its real usage, which reads as a workload living within its request —
+		// the exact conclusion this column exists to challenge. So a pod that
+		// cannot be totalled is left unmeasured rather than understated.
+		if !complete {
+			continue
 		}
 		out[item.GetNamespace()+"/"+item.GetName()] = Usage{Memory: total}
 	}
 	return out, nil
+}
+
+// containerMemory sums observed memory across a pod's containers, reporting
+// whether every one of them could be read.
+func containerMemory(containers []any) (int64, bool) {
+	var total int64
+	for _, c := range containers {
+		m, ok := c.(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		usage, ok := m["usage"].(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		raw, ok := usage["memory"].(string)
+		if !ok {
+			return 0, false
+		}
+		q, err := resource.ParseQuantity(raw)
+		if err != nil {
+			return 0, false
+		}
+		total += q.Value()
+	}
+	return total, true
 }
 
 func unstructuredSlice(obj map[string]any, key string) ([]any, bool, error) {
