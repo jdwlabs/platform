@@ -1,0 +1,139 @@
+# Unit tests for JdwillmsenMinecraftBackupVisibilityLost — the critical
+# escalation of a sustained backup_state_reported=0 gap.
+#
+# BackupStateNeverReported (warning, rules-job-freshness_test.yaml) already
+# covers "the exporter has not seen a completed run yet". This file is about
+# the case that rule cannot tell apart from that one: the same reading held
+# for so long, with the CronJob itself having actually succeeded in the
+# meantime, that it stops being a young deployment and becomes the sustained
+# blindness JDWLABS-338 was. The central assertion in every fixture below is
+# not "does it fire" alone, but "does it fire only when it should" — the join
+# against kube_cronjob_status_last_successful_time exists specifically to
+# keep this rule out of the case a producer that has never once succeeded
+# already owns elsewhere.
+#
+# Rule files are extracted from the PrometheusRule manifests under tenants/ by
+# run.sh, since promtool reads bare rule groups and not the CRD wrapper.
+rule_files:
+  - rules/jdwillmsen-tenant-alerts.yaml
+evaluation_interval: 1m
+tests:
+  # THE REGRESSION FIXTURE.
+  #
+  # The CronJob has completed a run — kube_cronjob_status_last_successful_time
+  # is set — but backup_state_reported has stayed 0 the whole time, well past
+  # twice the producer's own 48h budget (96h). This is a broken publish path,
+  # not a young deployment: the backup happened and nothing downstream of it
+  # ever found out.
+  - interval: 1m
+    name: state never reported despite a completed run pages critical past two intervals
+    input_series:
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x6000'
+      - series: 'backup_exporter_start_time_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x6000'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x6000'
+      - series: 'kube_cronjob_status_last_successful_time{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-backup"}'
+        values: '1000+0x6000'
+    alert_rule_test:
+      # Under one interval — the case BackupStateNeverReported does not even
+      # consider abnormal yet — this stays silent.
+      - eval_time: 40h
+        alertname: JdwillmsenMinecraftBackupVisibilityLost
+        exp_alerts: []
+      # Past one interval, BackupStateNeverReported (rules-job-freshness.yaml)
+      # is already warning — this file does not re-assert that rule, only
+      # that the critical here has not joined it yet. A transient reporting
+      # gap must still only warn.
+      - eval_time: 70h
+        alertname: JdwillmsenMinecraftBackupVisibilityLost
+        exp_alerts: []
+      # Past two intervals (96h) plus the rule's own for: 1h, with a
+      # completed run on record, this pages.
+      - eval_time: 98h
+        alertname: JdwillmsenMinecraftBackupVisibilityLost
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+            exp_annotations:
+              summary: "The Minecraft world backup has been unobserved for multiple backup intervals"
+              description: >-
+                backup_state_reported has read 0 for over twice jdwillmsen-minecraft-fwb-prd-backup's own freshness
+                budget, and the CronJob has completed at least one successful run in that time — so this is not an
+                exporter that simply has not seen a run yet, it is a reporting path that stopped working while the
+                backup itself kept succeeding. BackupArtifactStale and BackupArtifactEmpty stay suppressed for as long
+                as this is true, so nothing has been watching the artifact for multiple backup cycles — sustained
+                blindness, not a transient gap. Check that the job's last step is writing its state to the
+                …-backup-metrics ConfigMap in jdwillmsen-prd and that its ServiceAccount can still create it.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # The join's whole reason to exist. Same shape as the regression fixture —
+  # backup_state_reported stuck at 0 for well past two intervals — but the
+  # CronJob has never once completed, so kube_cronjob_status_last_successful_time
+  # has no series at all. This is CronJobNeverSucceeded's and
+  # JdwillmsenMinecraftBackupCronJobAbsent's failure to describe, not this
+  # rule's: without a join this fixture would page a second critical for the
+  # same root cause under a name that implies the backup ran fine and only
+  # reporting broke, which would be false here.
+  - interval: 1m
+    name: state never reported and the CronJob has never once succeeded stays silent here
+    input_series:
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x6000'
+      - series: 'backup_exporter_start_time_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x6000'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x6000'
+      # No kube_cronjob_status_last_successful_time series for this CronJob at
+      # all — the never-succeeded case, not merely a stale one.
+      - series: 'kube_cronjob_spec_suspend{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-backup"}'
+        values: '0+0x6000'
+    alert_rule_test:
+      - eval_time: 98h
+        alertname: JdwillmsenMinecraftBackupVisibilityLost
+        exp_alerts: []
+
+  # A producer that has reported real state stays outside this rule
+  # regardless of how stale that state later gets — BackupArtifactStale
+  # (critical, rules-job-freshness.yaml) is what owns a reporting producer
+  # going quiet, and it must not be duplicated here. Kept as the negative
+  # control against the reported side of the state gauge, the mirror of the
+  # never-succeeded fixture above on the state_reported side.
+  - interval: 1m
+    name: a producer that has reported state is never a candidate here
+    input_series:
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '1+0x6000'
+      - series: 'backup_exporter_start_time_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x6000'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x6000'
+      - series: 'kube_cronjob_status_last_successful_time{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-backup"}'
+        values: '1000+0x6000'
+    alert_rule_test:
+      - eval_time: 98h
+        alertname: JdwillmsenMinecraftBackupVisibilityLost
+        exp_alerts: []
+
+  # The live 2026-08-19 posture, restated against this rule specifically: a
+  # freshly deployed exporter that has not been up long enough to see a run
+  # yet. Healthy, and must stay silent from both this rule and the warning it
+  # escalates.
+  - interval: 1m
+    name: a freshly started exporter with nothing overdue yet is silent
+    input_series:
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x200'
+      - series: 'backup_exporter_start_time_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '0+0x200'
+      - series: 'backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '172800+0x200'
+      - series: 'kube_cronjob_status_last_successful_time{namespace="jdwillmsen-prd",cronjob="jdwillmsen-minecraft-fwb-prd-backup"}'
+        values: '1000+0x200'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: JdwillmsenMinecraftBackupVisibilityLost
+        exp_alerts: []
