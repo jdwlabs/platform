@@ -461,6 +461,7 @@ from environment variables. The contract:
 | `kv/grafana` `admin-password`                     | `PLATFORMCTL_GRAFANA_ADMIN_PASSWORD`             |
 | `kv/longhorn` `htpasswd_string`                   | `PLATFORMCTL_LONGHORN_HTPASSWD`                  |
 | `kv/alertmanager` `discord_webhook_url`           | `PLATFORMCTL_ALERTMANAGER_DISCORD_WEBHOOK`       |
+| `kv/alertmanager` `htpasswd_string`               | `PLATFORMCTL_ALERTMANAGER_HTPASSWD`              |
 | `kv/holmes` `webhook_token`                       | `PLATFORMCTL_HOLMES_WEBHOOK_TOKEN`               |
 | `kv/usersrole` `jwt_secret`                       | `PLATFORMCTL_USERSROLE_JWT_SECRET`               |
 | `kv/argocd-dex` `admin-password-hash`             | `PLATFORMCTL_ARGOCD_DEX_ADMIN_PASSWORD_HASH`     |

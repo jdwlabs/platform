@@ -1,0 +1,11 @@
+apiVersion: gateway.nginx.org/v1alpha1
+kind: AuthenticationFilter
+metadata:
+  name: alertmanager-auth
+  namespace: monitoring
+spec:
+  type: Basic
+  basic:
+    realm: "Authentication Required - Alertmanager"
+    secretRef:
+      name: alertmanager-basic-auth
