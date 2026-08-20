@@ -18,6 +18,7 @@ func newClusterCmd(g *Globals) *cobra.Command {
 	cmd.AddCommand(newClusterStatusCmd(g))
 	cmd.AddCommand(newClusterVolumesCmd(g))
 	cmd.AddCommand(newClusterNetpolCmd(g))
+	cmd.AddCommand(newClusterAlertsCmd(g))
 	return cmd
 }
 
