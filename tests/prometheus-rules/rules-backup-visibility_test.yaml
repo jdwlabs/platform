@@ -5,12 +5,12 @@
 # covers "the exporter has not seen a completed run yet". This file is about
 # the case that rule cannot tell apart from that one: the same reading held
 # for so long, with the CronJob itself having actually succeeded in the
-# meantime, that it stops being a young deployment and becomes the sustained
-# blindness JDWLABS-338 was. The central assertion in every fixture below is
-# not "does it fire" alone, but "does it fire only when it should" — the join
-# against kube_cronjob_status_last_successful_time exists specifically to
-# keep this rule out of the case a producer that has never once succeeded
-# already owns elsewhere.
+# meantime, that it stops being a young deployment and becomes sustained
+# blindness. The central assertion in every fixture below is not "does it
+# fire" alone, but "does it fire only when it should" — the join against
+# kube_cronjob_status_last_successful_time exists specifically to keep this
+# rule out of the case a producer that has never once succeeded already
+# owns elsewhere.
 #
 # Rule files are extracted from the PrometheusRule manifests under tenants/ by
 # run.sh, since promtool reads bare rule groups and not the CRD wrapper.

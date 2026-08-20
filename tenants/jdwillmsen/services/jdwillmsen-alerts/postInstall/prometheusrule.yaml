@@ -146,9 +146,9 @@ spec:
         # exporter's own gauges cannot manufacture: has this CronJob actually
         # completed a run? That is a question only kube-state-metrics can
         # answer, and answering it needs the tenant's own CronJob name — which
-        # is exactly the join 395 could not fold in and stay generic, and
-        # exactly why this rule lives beside the CronJob it names rather than
-        # in the shared rule set.
+        # is exactly the join the platform rule could not fold in and stay
+        # generic, and exactly why this rule lives beside the CronJob it
+        # names rather than in the shared rule set.
         #
         # Three conditions, all required:
         #   - backup_state_reported has read 0 for over twice the producer's
