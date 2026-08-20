@@ -79,6 +79,7 @@ Write-Host "  Root token retrieved (length: $($script:ROOT_TOKEN.Length))" -Fore
 # PLATFORMCTL_GRAFANA_ADMIN_PASSWORD
 # PLATFORMCTL_LONGHORN_HTPASSWD          (pre-computed htpasswd string)
 # PLATFORMCTL_ALERTMANAGER_DISCORD_WEBHOOK
+# PLATFORMCTL_ALERTMANAGER_HTPASSWD       (pre-computed htpasswd string)
 # PLATFORMCTL_DISCORD_BOT_TOKEN          (dotablaze-tech meowbot)
 # PLATFORMCTL_USERSROLE_JWT_KEY_NON
 # PLATFORMCTL_USERSROLE_JWT_KEY_PRD
@@ -113,6 +114,7 @@ VaultPut "longhorn" @{
 # kv/alertmanager
 VaultPut "alertmanager" @{
     "discord_webhook_url" = Require-Env "PLATFORMCTL_ALERTMANAGER_DISCORD_WEBHOOK"
+    "htpasswd_string"     = Require-Env "PLATFORMCTL_ALERTMANAGER_HTPASSWD"
 }
 
 # kv/dotablaze-tech-discord-bot-token

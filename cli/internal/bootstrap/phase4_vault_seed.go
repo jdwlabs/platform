@@ -53,6 +53,7 @@ var staticSeedSpecs = map[string]seedSpec{
 	}},
 	"alertmanager": {Path: "alertmanager", Fields: []seedField{
 		{"discord_webhook_url", "PLATFORMCTL_ALERTMANAGER_DISCORD_WEBHOOK", true, false},
+		{"htpasswd_string", "PLATFORMCTL_ALERTMANAGER_HTPASSWD", true, false},
 	}},
 	"usersrole": {Path: "usersrole", Fields: []seedField{
 		{"jwt_key_non", "PLATFORMCTL_USERSROLE_JWT_KEY_NON", true, false},

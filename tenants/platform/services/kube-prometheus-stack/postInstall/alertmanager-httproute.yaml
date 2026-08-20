@@ -13,6 +13,12 @@ spec:
   hostnames:
     - alertmanager.jdwlabs.com
   rules:
-    - backendRefs:
+    - filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.nginx.org
+            kind: AuthenticationFilter
+            name: alertmanager-auth
+      backendRefs:
         - name: platform-kube-prometheus-s-alertmanager
           port: 9093
