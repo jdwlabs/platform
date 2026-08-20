@@ -435,7 +435,7 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | `BackupStateNeverReported` (warning) | A producer's exporter has been serving placeholder values for longer than the freshness budget that producer publishes for itself, and still nothing has written real state. **`BackupArtifactStale` and `BackupArtifactEmpty` are suppressed for it while this fires**, so the artifact is unmonitored — that is why this exists rather than letting the suppression be silent. Normal only for a backup deployed but not yet run; past the budget it means the job is completing without publishing its metrics. Check that the job's last step actually wrote its state (for the Minecraft world backup, the `…-backup-metrics` ConfigMap in `jdwillmsen-prd`) and that its ServiceAccount may still create it. |
 | `JdwillmsenMinecraftBackupCronJobAbsent` (critical) | The dead-man's switch for the world backup itself: its CronJob in `jdwillmsen-prd` is suspended, deleted, or was never created. Read from kube-state-metrics, **not** from the backup's own gauges, which is the whole point — the exporter Deployment outlives the CronJob and goes on publishing the freshness series on its behalf, so nothing derived from those gauges can see the CronJob disappear. Check `kubectl get cronjob -n jdwillmsen-prd` and that ArgoCD has the tenant's deployment repo synced. A static expectation, so it keeps firing indefinitely and cannot resolve itself. If the backup is being retired on purpose, delete the rule in the same change — it exists to force that decision, not to be silenced. |
 | `JdwillmsenMinecraftBackupProducerAbsent` (critical) | The static expectation that something **reports on** the Minecraft world backup — the exporter Deployment, not the backup. It is not the dead-man's switch for the backup itself and must not be read as one: the exporter publishes the freshness series whether or not any backup is happening, so a deleted CronJob leaves this perfectly quiet. `JdwillmsenMinecraftBackupCronJobAbsent` above is the switch that covers that. Not derived from the producer's own metrics, so it fires on a cluster where the exporter was never deployed and keeps firing indefinitely. Check the backup exporter Deployment, its Service and ServiceMonitor in `jdwillmsen-prd`, and that ArgoCD has the deployment repo synced. If the world backup is being decommissioned on purpose, delete the rule in the same change — it is meant to force that decision, not be silenced. |
-| `JdwillmsenMinecraftVolumeRecoveryAbsent` (critical) | No scheduled volume-recovery actor exists in `jdwillmsen-prd` — its CronJob is suspended, deleted, or was never created. That actor is the only thing in the cluster that detects an ext4 emergency read-only latch on the world volume: the CSI layer reports no failing operation because nothing re-stages a latched mount, and since Linux 6.12 ext4 sets an internal emergency-RO bit instead of the superblock flag, so `node_filesystem_readonly` stays 0. While this fires, that fault recovers only when a human notices it. Check `kubectl get cronjob -n jdwillmsen-prd`, and that ArgoCD has the tenant's deployment repo synced. **Until it is back, you are the actor:** when the server pod is not ready and its log carries the read-only signature, recover it by deleting the **pod** — `kubectl delete pod <server-pod> -n jdwillmsen-prd`. Never restart the container. Only a pod delete triggers `NodeUnpublish`/`NodePublish` and a fresh mount; a container restart re-runs the entrypoint against the same already-mounted read-only filesystem and loops forever. Like the producer-absent rule above, this is a static expectation and not a measurement, so it keeps firing indefinitely and cannot resolve itself. If the actor is being retired on purpose, delete the rule in the same change — it exists to force that decision, not to be silenced. |
+| `JdwillmsenMinecraftVolumeRecoveryAbsent` (critical) | No scheduled volume-recovery actor exists in `jdwillmsen-prd` — its CronJob is suspended, deleted, or was never created. Detecting an ext4 emergency read-only latch on the world volume no longer depends on this actor alone: `NodeKernelFilesystemFault`/`NodeKernelISCSISessionRecovery` read the kernel's own `EXT4-fs error` and session-recovery lines directly and would catch the latch on their own (see "Health signal semantics" below). The CSI layer and `node_filesystem_readonly` still can't — the CSI layer reports no failing operation because nothing re-stages a latched mount, and since Linux 6.12 ext4 sets an internal emergency-RO bit instead of the superblock flag, so `node_filesystem_readonly` stays 0 — but that blind spot is no longer the whole picture. What this actor uniquely provides is *recovery*, not detection: it is the only thing in the cluster that automatically remounts a latched volume, so while this fires, that fault recovers only when a human notices it and does the pod delete by hand. Check `kubectl get cronjob -n jdwillmsen-prd`, and that ArgoCD has the tenant's deployment repo synced. **Until it is back, you are the actor:** when the server pod is not ready and its log carries the read-only signature, recover it by deleting the **pod** — `kubectl delete pod <server-pod> -n jdwillmsen-prd`. Never restart the container. Only a pod delete triggers `NodeUnpublish`/`NodePublish` and a fresh mount; a container restart re-runs the entrypoint against the same already-mounted read-only filesystem and loops forever. Like the producer-absent rule above, this is a static expectation and not a measurement, so it keeps firing indefinitely and cannot resolve itself. If the actor is being retired on purpose, delete the rule in the same change — it exists to force that decision, not to be silenced. |
 | `JdwillmsenMinecraftVolumeRecoveryFailing` (critical) | The volume-recovery actor is scheduled and running on time, and its runs are failing — so every check that only asks whether it ran reports it healthy. Its pod delete is the last statement under `set -euo pipefail` with `backoffLimit: 0`, so a failed Job means the delete was refused: usually an RBAC grant that was revoked, narrowed, or lost its `resourceNames` entry for the server pod. A healthy no-op exits 0 and emits `{"event":"healthy"}`. Find the last failed run with `kubectl get jobs -n jdwillmsen-prd --sort-by=.metadata.creationTimestamp | tail` and read its pod log. The manual recovery while it is broken is the same as above: delete the **pod**, never restart the container. The alert clears on its own once runs stop failing — it is bounded to failures started in the last 30 minutes, because a CronJob retains its last failed Jobs and nothing evicts them once failures stop. |
 | `BackupBudgetMissing` / `BackupArtifactSizeMissing` (warning) | A producer publishes a success timestamp but not `backup_max_age_seconds` / `backup_last_artifact_bytes`. The matching critical (`BackupArtifactStale` / `BackupArtifactEmpty`) has nothing to compare against and can never fire for that producer, so it is unmonitored while looking healthy. Fix the producer's gauge set rather than the rule; the contract's three gauges are all required. |
 | A pod reports `Read-only file system` while every layer above the kernel looks healthy | The filesystem is latched read-only without `/proc/mounts` ever changing: since Linux 6.12 ext4's error handler sets an internal emergency-RO bit instead of `SB_RDONLY`, so `node_filesystem_readonly` stays 0, the `VolumeAttachment` stays `true`, and the CSI node pod logs nothing. The evidence is in the node's kernel ring buffer only. Query it in Loki: `{job="integrations/talos/kernel", node="<node>"} |~ "(?i)ext4-fs error"`. `NodeKernelFilesystemFault` fires on this within a minute; if it did not, check the collector is receiving at all before trusting the absence. Recovery is a remount, which in practice means deleting the pod (and, if the journal aborted, detaching/reattaching the volume). |
@@ -795,8 +795,10 @@ graph, not only to the route tree.
 > deployments repo, not here, deliberately not gated on readiness because
 > readiness alone would loop forever on faults deletion cannot fix. The broader
 > "every layer we collect reported green through a total data-path failure" gap
-> is tracked as JDWLABS-383. Do not read a quiet Alertmanager as a healthy
-> volume.
+> is addressed below in "Health signal semantics — what an assertion is allowed
+> to claim," which is also where `NodeKernelFilesystemFault` — the first alert
+> in this stack that reads the kernel directly instead of the CSI layer — is
+> covered. Do not read a quiet Alertmanager as a healthy volume.
 
 A filesystem that has gone read-only under its workload is close to invisible
 here, and the shape of that blind spot decides how you diagnose it.
@@ -858,18 +860,27 @@ recreate. For the same reason, do not reach for a liveness probe to automate
 this: a probe restarts the container, never the pod, so it would spend the
 restart budget and still never remount.
 
-To confirm it directly, read the node's kernel ring buffer — this is the only
-place the evidence exists, since node logs are not shipped to Loki:
+To confirm it directly, query the kernel ring buffer shipped to Loki (see
+"Node kernel logs" above):
+
+```
+{job="integrations/talos/kernel"} |~ "(?i)ext4-fs error|remounting filesystem read-only|journal has aborted|detected conn error|session recovery timed out"
+```
+
+That stream is unauthenticated and bound on every node address, so treat a hit
+there as a lead, not proof — corroborate straight from the node itself before
+acting on it:
 
 ```
 talosctl -n <node-ip> dmesg | grep -E 'EXT4-fs error|Remounting filesystem read-only|Journal has aborted|detected conn error|session recovery timed out'
 ```
 
 That command needs a populated `~/.talos/config` with a context selected; an
-unconfigured `talosctl` cannot reach the node and this evidence path silently
-disappears — which is exactly what happened during the 2026-08-19 occurrence.
-Confirm `talosctl -n <node-ip> version` works *before* you need it. The
-read-only (`os:reader`) talosconfig this repo already knows about is the one
+unconfigured `talosctl` cannot reach the node, which is exactly what happened
+during the 2026-08-19 occurrence — Loki had no kernel-log pipeline yet either,
+so that occurrence had no evidence path at all until the node was reached some
+other way. Confirm `talosctl -n <node-ip> version` works *before* you need it.
+The read-only (`os:reader`) talosconfig this repo already knows about is the one
 seeded to Vault as the `holmes` spec's `talosconfig` field; it is not written to
 an operator workstation by anything here.
 
@@ -904,14 +915,87 @@ the iSCSI driver config. It is not the Go mount helper that does this for
 in-tree volumes — that code is not on this driver's path at all, so do not
 assume a clean detach repairs anything on a driver where the option is off.
 
-Closing the remaining gap needs node-level logs. Talos kernel messages reach
-nothing queryable today: `nodeLogs` is disabled in the monitoring collector
-(and Talos has no journald for it to read anyway), and Loki's ruler has
-`enable_api` but no rule storage and no Alertmanager URL. Shipping Talos logs
-to Loki and wiring the ruler would let the kernel's own `EXT4-fs error` line
-page directly, at the moment it happens, instead of one pod restart later. A
-node-level exporter for `/sys/fs/ext4/<dev>/errors_count` would do the same job
-with a metric rather than a log.
+That gap is closed. `nodeLogs` stays disabled in the monitoring collector for
+the reason given above — Talos has no journald for it to read — but the
+kernel's ring buffer reaches Loki over the separate `alloy-logs` DaemonSet
+listener described under "Node kernel logs" earlier in this section, and the
+ruler's `rulerConfig` now supplies real rule storage and an
+`alertmanager_url` (`tenants/platform/services/loki/values.yaml`).
+`NodeKernelFilesystemFault` and `NodeKernelISCSISessionRecovery`
+(`tenants/platform/services/loki/postInstall/rules-node-kernel.yaml`) page
+directly off the kernel's own `EXT4-fs error` and iSCSI session-recovery
+lines — the moment they happen, not one pod restart later — and neither
+depends on the CSI layer noticing anything, which is what makes this the one
+signal in the stack that would have caught the 2026-08-19-shaped latch
+directly. See "Health signal semantics" below for how this fits the rest of
+the audit. A node-level exporter for `/sys/fs/ext4/<dev>/errors_count` would
+still be a useful second instrument, built from a metric rather than a log,
+but the log path is no longer a gap.
+
+**Health signal semantics — what an assertion is allowed to claim:**
+
+Every signal in this stack is one of two kinds, and conflating them is how
+"every layer we collect reported green" happens through a total data-path
+failure. **Point-in-time** signals assert that one specific operation
+succeeded once — an attach call, a bind, a Job's `Complete` condition — and
+then sit there unchanged regardless of what happens to the thing they
+described afterward. **Live** signals are re-evaluated on a schedule short
+enough to catch a fault while it still matters, which is what makes
+Kubernetes readiness a live signal rather than a point-in-time one: kubelet
+re-runs the readiness probe on every `periodSeconds` tick for the life of the
+pod, not once at container start — which is why `vault-pod` readiness in the
+table below is audited as Live, not point-in-time. (A `startupProbe` really is
+point-in-time by contrast: it runs once, hands off to liveness/readiness, and
+never re-fires.) `VolumeAttachment` and a PVC's
+`status.phase == Bound` are both point-in-time: the control plane sets them
+once, at attach or bind, and has no reason to ever revisit them, so both held
+`true`/`Bound` through the full read-only latch described above. Read either
+as "storage works" and the result is exactly the false-green this incident
+produced.
+
+The rule this repo writes to, on that evidence: a point-in-time signal is
+never read, alerted on, or surfaced as "healthy" by itself. It is either
+paired with a live signal for the same fault class before anyone treats it as
+coverage, or — where no live signal exists yet — it is documented, at the
+point it gets read, as covering only the instant it fired rather than the time
+since. `FilesystemReadOnly` and `CSIVolumeStagingFailing` above are the model
+either way: both are live, and both carry an explicit statement of the fault
+class they do *not* cover instead of being left to imply full coverage.
+
+Audited against that rule, scoped to the volume/storage-attach-time signals
+implicated in the 2026-08-19 incident, plus `vault-pod` readiness as a
+comparison point for what a genuinely live signal looks like:
+
+| Signal | Kind | Where it's read | Note |
+|---|---|---|---|
+| `VolumeAttachment.status.attached` | Point-in-time | Nowhere in this repo's alerts or dashboards | Named directly above so silence here is never mistaken for evidence |
+| PVC `status.phase == Bound` | Point-in-time | ArgoCD's built-in per-resource health assessment, rolled into `checkAllApplicationsHealthy` (`cli/internal/cluster/checks.go`) — the "applications" row `platformctl cluster status` prints, and the Healthy/Degraded badge ArgoCD's UI shows | The one place in this repo a bind-time success reads as "Healthy" with no live signal behind it. ArgoCD's `PersistentVolumeClaim` health assessment is built into the tool, not configurable per-field from here — overriding it is a separate, larger piece of work than this decision covers, so it is named as an open gap rather than left silent |
+| `node_filesystem_readonly` (`FilesystemReadOnly`) | Live | `storage-integrity` `PrometheusRule` | Live but partial — misses the emergency-RO bit on 6.12+ kernels; caveat documented above |
+| `csi_operations_seconds_count` (`CSIVolumeStagingFailing`) | Live | `storage-integrity` `PrometheusRule` | Live but only sees a failing *recovery*, never the initial latch; caveat documented above |
+| Kernel ring buffer (`NodeKernelFilesystemFault`, `NodeKernelISCSISessionRecovery`) | Live | Loki ruler, `rules-node-kernel.yaml` | Reads the kernel directly; does not depend on the CSI layer noticing anything |
+| `jdwillmsen-minecraft-fwb-prd-volume-recovery` CronJob presence/success | Live | `JdwillmsenMinecraftVolumeRecoveryAbsent` / `...Failing` | Watches the one actor able to recover a latch, not the latch itself |
+| `vault-pod` readiness | Live | `checkVaultPodReady` (`cli/internal/cluster/checks.go`) | Continuously-probed seal state, not pod phase — documented under Vault above |
+
+Within that scope, no `PrometheusRule` or Loki-ruler alert asserts health from
+a point-in-time success alone. The one instance this audit found is the
+ArgoCD-derived PVC health folded into `checkAllApplicationsHealthy` — a
+status-CLI/UI surface rather than an alert, and not remediated in this pass:
+overriding ArgoCD's built-in `PersistentVolumeClaim` health assessment is
+larger and riskier than this decision's scope, so it is recorded here as a
+named, open gap rather than left for someone to rediscover during the next
+outage.
+
+This is not a repo-wide sweep, and nothing above should be read as one. TLS/
+cert readiness, `Gateway` `Programmed`, `HTTPRoute` `Accepted`,
+`limitrange-adoption`, `cilium-endpoint-coverage`, and image-drift — all in
+`cli/internal/cluster/checks.go` alongside `checkVaultPodReady` and
+`checkAllApplicationsHealthy` above — have not been walked through the
+point-in-time/live test here, nor have the other `PrometheusRule` files
+outside `rules-storage-integrity.yaml` and `rules-node-kernel.yaml` (argocd,
+longhorn, truenas, cnpg, job-freshness, cert-manager, tempo, and the
+per-tenant alert rules, among others). Whether any of those assert health
+from a point-in-time success alone is an open question this pass did not
+answer.
 
 **Where to look first when X is broken:**
 
