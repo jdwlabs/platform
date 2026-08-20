@@ -40,9 +40,8 @@ func runAlerts(t *testing.T, prometheusURL, alertmanagerURL string, args ...stri
 // alerts list
 // ---------------------------------------------------------------------------
 
-// Reproduces JDWLABS-366's acceptance evidence in miniature: one alert routed
-// to both receivers, readable through platformctl rather than resolved
-// offline against the config tree.
+// One alert routed to both receivers, readable through platformctl rather
+// than resolved offline against the config tree.
 const twoReceiverAlert = `[
 	{"labels":{"alertname":"TrueNASPoolDegraded","severity":"critical"},
 	 "annotations":{"summary":"pool tank is degraded"},
@@ -173,8 +172,8 @@ func TestAlertsTargets_UpWithSamplesIsHealthy(t *testing.T) {
 }
 
 func TestAlertsTargets_UpWithZeroSamplesIsUnhealthy(t *testing.T) {
-	// This is the JDWLABS-335 shape the ticket names explicitly: reachable and
-	// reporting Up, serving nothing.
+	// Reachable and reporting Up while serving nothing: health alone would
+	// call this target fine.
 	upOnly := `{"status":"success","data":{"activeTargets":[
 		{"labels":{"job":"truenas","instance":"truenas:9633"},"scrapeUrl":"http://truenas:9633/metrics",
 		 "lastScrape":"2026-08-20T10:00:00Z","lastScrapeDuration":0.05,"health":"up"}

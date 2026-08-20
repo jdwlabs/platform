@@ -234,9 +234,9 @@ func newAlertsTargetsCmd(g *Globals, shared *alertsGlobals) *cobra.Command {
 timestamp, and (unless --skip-samples-check) the samples its last scrape
 actually parsed.
 
-Health alone is not the check: JDWLABS-335's failure was a target that
-Prometheus reported Up while it served an empty response body, and "Up" says
-nothing about that. samplesScraped reads the scrape_samples_scraped
+Health alone is not the check: a target can report Up while Prometheus
+serves an empty response body from it, and "Up" says nothing about that.
+samplesScraped reads the scrape_samples_scraped
 meta-metric per target — a target reporting Up with zero samples is exactly
 that shape, so it is treated as unhealthy alongside a target reporting Down.
 
@@ -452,8 +452,7 @@ metric the rule's query names.
 
 A rule can read cleanly and still be worthless: a rule referencing a metric
 nothing emits stays permanently inactive and reads as coverage, which is worse
-than no rule at all — this has already happened twice (JDWLABS-335,
-JDWLABS-357). seriesStatus is one of:
+than no rule at all. seriesStatus is one of:
 
   found    at least one metric name extracted from the query has series now
   missing  metric names were extracted and none of them has series
