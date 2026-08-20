@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// The fixture reproduces JDWLABS-366's shape: one alert routed to both
-// receivers, which is exactly the acceptance evidence that ticket's Definition
-// of Done asked for and platformctl could not, before this, produce live.
+// The fixture reproduces the shape that matters for routing evidence: one
+// alert routed to both receivers, produced live rather than resolved offline
+// against the config tree.
 const alertsJSON = `[
 	{"labels":{"alertname":"TrueNASPoolDegraded","severity":"critical"},
 	 "annotations":{"summary":"pool tank is degraded"},

@@ -17,9 +17,9 @@ func NewAlertmanagerClient(base string) *AlertmanagerClient {
 }
 
 // Alert is one Alertmanager alert reduced to what answers "this alert reaches
-// these receivers" — the acceptance evidence JDWLABS-366's Definition of Done
-// asked for and could only be produced by resolving the routing config
-// offline, because nothing in platformctl could read live routing state.
+// these receivers" — previously only answerable by resolving the routing
+// config offline, because nothing in platformctl could read live routing
+// state.
 type Alert struct {
 	Name        string
 	Labels      map[string]string

@@ -14,8 +14,7 @@ const (
 	// rule's query currently has series in Prometheus.
 	SeriesFound SeriesStatus = "found"
 	// SeriesMissing: candidate metric names were extracted and none of them
-	// currently has series — the JDWLABS-335 shape, a rule reading a metric
-	// nothing emits.
+	// currently has series — a rule reading a metric nothing emits.
 	SeriesMissing SeriesStatus = "missing"
 	// SeriesUnknown: no candidate metric name could be extracted from the
 	// query, so nothing was checked. This is not "found" — an unreadable

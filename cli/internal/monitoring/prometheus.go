@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 )
 
 // PrometheusClient reads Prometheus's HTTP API. It never issues a mutating
@@ -18,8 +19,7 @@ func NewPrometheusClient(base string) *PrometheusClient {
 
 // Target is one scrape target reduced to what answers "is this Up, and when
 // did it last scrape". SamplesScraped is the second rung: a target can be Up
-// while genuinely serving nothing, which JDWLABS-335 already found — health
-// alone is the check that missed it.
+// while genuinely serving nothing — health alone is a check that misses that.
 type Target struct {
 	Job                string
 	Instance           string
@@ -95,8 +95,8 @@ func (p *PrometheusClient) Targets(ctx context.Context) ([]Target, error) {
 // SamplesScraped reads the scrape_samples_scraped meta-metric for one
 // job/instance pair — the count of samples Prometheus parsed out of that
 // target's last successful scrape. A target reporting Up with zero samples is
-// exactly the JDWLABS-335 shape: reachable, authenticating, and returning a
-// response body with nothing in it.
+// reachable, authenticating, and returning a response body with nothing in
+// it — exactly the case health alone cannot distinguish from a real success.
 func (p *PrometheusClient) SamplesScraped(ctx context.Context, job, instance string) (int64, error) {
 	query := fmt.Sprintf(`scrape_samples_scraped{job=%s,instance=%s}`, quotePromString(job), quotePromString(instance))
 	result, err := p.instantQuery(ctx, query)
@@ -200,7 +200,15 @@ func (p *PrometheusClient) instantQuery(ctx context.Context, query string) ([]st
 	return resp.Data.Result, nil
 }
 
+// quotePromString double-quotes a PromQL label-matcher value, escaping the
+// characters that would otherwise end the string or alter the next one —
+// job/instance come from Prometheus's own target labels, but nothing stops
+// an operator from naming a target with a quote or backslash in it, and an
+// unescaped one there would turn SamplesScraped's query into a syntax error
+// instead of a clean result.
 func quotePromString(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
 	return `"` + s + `"`
 }
 
