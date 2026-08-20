@@ -123,6 +123,104 @@ spec:
             description: "No freshness signal exists for the Minecraft world backup. It is not merely stale — nothing is reporting on it at all, so every other backup alert for it is silent too. Check the backup exporter Deployment and its ServiceMonitor in jdwillmsen-prd."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
+        # BackupStateNeverReported (warning, in rules-job-freshness.yaml) is
+        # right about the condition it was reasoned against: a producer whose
+        # exporter has not yet seen a completed run is not broken, it is
+        # young. But the same condition sustained is exactly how this
+        # cluster's worst backup incident happened before — the world's
+        # backups were never observably failing, they were simply
+        # unobserved, for months. A gap that clears in an hour and
+        # one that persists for days produce the identical warning, and only
+        # the second is the original incident recurring. This rule is what
+        # tells them apart, at the only severity that gets looked at
+        # immediately.
+        #
+        # It cannot be a wider threshold on the platform rule, because the
+        # platform rule has nothing to widen against. backup_exporter_start_time_seconds
+        # resets on every exporter restart, so "time since the exporter
+        # started" can understate true elapsed blindness by as much as one
+        # restart interval — honest for a young deployment, where a restart
+        # replaying real state is meant to resolve the warning immediately,
+        # but not a distinction a generic rule can draw for a producer it
+        # knows nothing else about. What proves the difference is evidence the
+        # exporter's own gauges cannot manufacture: has this CronJob actually
+        # completed a run? That is a question only kube-state-metrics can
+        # answer, and answering it needs the tenant's own CronJob name — which
+        # is exactly the join 395 could not fold in and stay generic, and
+        # exactly why this rule lives beside the CronJob it names rather than
+        # in the shared rule set.
+        #
+        # Three conditions, all required:
+        #   - backup_state_reported has read 0 for over twice the producer's
+        #     own backup_max_age_seconds. Two intervals, not one, so a normal
+        #     gap between the moment a fresh exporter comes up and its first
+        #     completed run never pages critical on its own — that gap is
+        #     BackupStateNeverReported's to own, at warning, and this rule
+        #     starts exactly where that one already considers the wait
+        #     unreasonable, doubled again for margin. The multiplier is read
+        #     from the producer's own budget rather than a constant, so the
+        #     threshold follows this producer's cadence and not an assumption
+        #     borrowed from it.
+        #   - backup_state_reported is 0 right now, not merely 0 at some point
+        #     in the window — `and`, not `unless`, keeps this from latching on
+        #     a gap that has already closed.
+        #   - kube_cronjob_status_last_successful_time exists for this
+        #     CronJob: proof, independent of anything the exporter says, that
+        #     a run has actually completed. Without this a producer that has
+        #     genuinely never once succeeded — covered already by
+        #     CronJobNeverSucceeded and JdwillmsenMinecraftBackupCronJobAbsent
+        #     above — would also cross the two-interval mark and page a second,
+        #     redundant critical for the same root cause under a worse name.
+        #     With it, crossing the mark can only mean the backup ran and
+        #     something afterward stopped the exporter from ever finding out
+        #     — a broken publish path, not a backup that has not gotten around
+        #     to running yet. `on ()` because the two series share no label at
+        #     all: kube-state-metrics knows this CronJob as
+        #     namespace/cronjob, the exporter knows it only as backup_job.
+        #
+        # Deliberately not folded into a single rule with BackupStateNeverReported:
+        # that rule has to stay generic across every producer that ever
+        # adopts the contract, and the CronJob join is not something a
+        # producer's own gauges can express.
+        - alert: JdwillmsenMinecraftBackupVisibilityLost
+          expr: |
+            (
+              (
+                time() - max by (backup_job) (
+                  backup_exporter_start_time_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup"}
+                )
+              )
+              > on (backup_job) group_left() (
+                  2 * min by (backup_job) (
+                    backup_max_age_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup"}
+                  )
+                )
+            )
+            and on (backup_job) (
+              max by (backup_job) (
+                backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup"}
+              ) == 0
+            )
+            and on ()
+            (
+              kube_cronjob_status_last_successful_time{namespace="jdwillmsen-prd", cronjob="jdwillmsen-minecraft-fwb-prd-backup"}
+            )
+          for: 1h
+          labels:
+            severity: critical
+            tenant: jdwillmsen
+          annotations:
+            summary: "The Minecraft world backup has been unobserved for multiple backup intervals"
+            description: >-
+              backup_state_reported has read 0 for over twice jdwillmsen-minecraft-fwb-prd-backup's own freshness
+              budget, and the CronJob has completed at least one successful run in that time — so this is not an
+              exporter that simply has not seen a run yet, it is a reporting path that stopped working while the
+              backup itself kept succeeding. BackupArtifactStale and BackupArtifactEmpty stay suppressed for as long
+              as this is true, so nothing has been watching the artifact for multiple backup cycles — sustained
+              blindness, not a transient gap. Check that the job's last step is writing its state to the
+              …-backup-metrics ConfigMap in jdwillmsen-prd and that its ServiceAccount can still create it.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
         # The two rules below watch the volume-recovery actor: the CronJob in
         # the tenant's deployment repo that deletes the Minecraft server pod
         # when its volume latches read-only. It is the only thing in the stack

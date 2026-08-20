@@ -201,6 +201,45 @@ lookback. Two consequences worth knowing:
   Before the first exporter is deployed these rules are inert by design, which
   is why they ship paired with a producer rather than ahead of one.
 
+### A transient gap and sustained blindness are not the same warning
+
+`BackupStateNeverReported` is right about the condition it was reasoned
+against — a producer whose exporter has not yet seen a completed run is young,
+not broken — but the same reading held for days is the failure this whole
+document exists for, recurring: a backup that is not observably failing
+because nothing is observing it at all. Warning is the right severity for the
+first case and the wrong one for the second, and the metric alone cannot say
+which one is happening — a producer serving `backup_state_reported 0` looks
+identical whether that has been true for ten minutes or ten weeks.
+
+Telling them apart needs evidence the exporter's own gauges cannot supply: has
+the CronJob actually completed a run? That comes from kube-state-metrics, not
+from this contract, and reading it means naming the tenant's own CronJob — the
+platform rule above stays generic across every producer that adopts this
+contract and cannot do that join. The escalation is therefore a tenant-scoped
+rule, `JdwillmsenMinecraftBackupVisibilityLost` (critical) in
+`tenants/jdwillmsen/services/jdwillmsen-alerts/postInstall/prometheusrule.yaml`,
+beside the CronJob it names — same placement reasoning as the static
+expectations below. It fires once `backup_state_reported` has read 0 for over
+**twice** the producer's own `backup_max_age_seconds` *and*
+`kube_cronjob_status_last_successful_time` shows the CronJob has completed a
+run in that time; without the second half a producer that has never once
+succeeded — already `CronJobNeverSucceeded`'s and
+`JdwillmsenMinecraftBackupCronJobAbsent`'s to describe — would also cross the
+threshold and page a second, redundant critical under a name that implies the
+backup ran fine and only reporting broke.
+
+**The `backup_state_reported = 0` leg remains fixture-only.** No live
+Prometheus has ever carried a sustained `backup_state_reported = 0` for this
+producer — by the time the exporter shipped, state had already been written,
+so it came up at `1` and the zero path has only ever been exercised by the
+unit tests in `tests/prometheus-rules/rules-backup-visibility_test.yaml` and
+`rules-job-freshness_test.yaml`. Deleting the state ConfigMap to force it live
+would page for real and was correctly not done to prove a test. Whoever next
+touches this exporter — a redeploy, a ConfigMap migration, a rebuilt tenant —
+is well placed to confirm the zero path once, deliberately, against a
+throwaway producer rather than the production one.
+
 ### Every producer needs a static expectation, and it cannot live with the producer
 
 The two points above have the same consequence, and it is the one thing in this
