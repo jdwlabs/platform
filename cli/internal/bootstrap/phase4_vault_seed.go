@@ -76,6 +76,21 @@ var staticSeedSpecs = map[string]seedSpec{
 		{"installation-id", "PLATFORMCTL_GRAFANA_GITSYNC_INSTALLATION_ID", false, false},
 		{"private-key", "PLATFORMCTL_GRAFANA_GITSYNC_PRIVATE_KEY", true, false},
 	}},
+	// jdwlabs-agent-bot's GitHub App identity (docs/adr/0018), mirroring
+	// grafana-gitsync's shape above: an App/installation ID pair and a
+	// private key that the consumer mints its own short-lived installation
+	// tokens from, rather than a single long-lived static token. This is the
+	// only spec that carries the App identity into cluster Vault — the App ID
+	// and a path to the same private key also live in
+	// ~/.config/jdwlabs/agent-app-identity.env (setup-agentic-app-identity.sh)
+	// for local `gh pr create` use, and as AGENT_APP_ID/AGENT_APP_PRIVATE_KEY
+	// GitHub Actions secrets on all four repos for CI use — three separate
+	// consumers of one App, none of which read this path.
+	"agent-bot": {Path: "agent-bot", Fields: []seedField{
+		{"app-id", "PLATFORMCTL_AGENT_BOT_APP_ID", false, false},
+		{"installation-id", "PLATFORMCTL_AGENT_BOT_INSTALLATION_ID", false, false},
+		{"private-key", "PLATFORMCTL_AGENT_BOT_PRIVATE_KEY", true, false},
+	}},
 	"truenas-csi": {Path: "truenas-csi", Fields: []seedField{
 		{"api_key", "PLATFORMCTL_TRUENAS_CSI_API_KEY", true, false},
 	}},

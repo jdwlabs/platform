@@ -157,6 +157,36 @@ func TestVaultSeedPhase_ArgoCDDexFromEnv(t *testing.T) {
 	}
 }
 
+func TestStaticSeedSpecs_AgentBot(t *testing.T) {
+	spec, ok := staticSeedSpecs["agent-bot"]
+	if !ok {
+		t.Fatal("agent-bot seed spec missing")
+	}
+	if spec.Path != "agent-bot" {
+		t.Fatalf("path = %q, want agent-bot", spec.Path)
+	}
+	want := map[string]string{
+		"app-id":          "PLATFORMCTL_AGENT_BOT_APP_ID",
+		"installation-id": "PLATFORMCTL_AGENT_BOT_INSTALLATION_ID",
+		"private-key":     "PLATFORMCTL_AGENT_BOT_PRIVATE_KEY",
+	}
+	got := map[string]string{}
+	for _, f := range spec.Fields {
+		got[f.Name] = f.EnvVar
+		if f.Optional {
+			t.Errorf("field %s must not be Optional: a partial App identity is a hard misconfiguration, not something to seed quietly incomplete", f.Name)
+		}
+		if f.Name == "private-key" && !f.Secret {
+			t.Error("private-key must be Secret")
+		}
+	}
+	for name, env := range want {
+		if got[name] != env {
+			t.Fatalf("field %s env = %q, want %q (all: %v)", name, got[name], env, got)
+		}
+	}
+}
+
 func TestStaticSeedSpecs_TruenasCSI(t *testing.T) {
 	spec, ok := staticSeedSpecs["truenas-csi"]
 	if !ok {
