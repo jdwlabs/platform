@@ -12,20 +12,15 @@ namespaces:
   - name: jdwlabs-non
     quotaTier: standard
     networkPolicy: default
-    # enforce is deferred: this namespace's pods predate the policy engine and
-    # carry no Cilium identity, so a restrictive set resolves against nothing
-    # today and would instead bite whichever pod restarts first — an unrelated
-    # deploy, eviction, drain or OOM kill — under an allow-set no observation
-    # window ever covered, because audit mode is per-endpoint and these
-    # endpoints did not exist. Set it once this namespace's pods are
-    # Cilium-managed and the allow-set below has been checked against their
-    # observed traffic.
-    #
-    # Inter-app calls (authui/rolesui/usersui/container -> usersrole,
-    # servicediscovery) go out via their public *.jdwlabs.com hostnames and
-    # hairpin back through the gateway rather than using in-cluster Service
-    # DNS, so egress needs the external allow, not just the ingress-controller
-    # allow that already covers the inbound leg.
+    enforce: true
+    # All 6 pods (authui/rolesui/usersui/container/usersrole/servicediscovery)
+    # confirmed Cilium-managed (CiliumEndpoint present) on 2026-08-21. Allow-set
+    # checked against observed traffic: every inter-app call goes out via public
+    # *.jdwlabs.com hostnames and hairpins back through the gateway rather than
+    # using in-cluster Service DNS (confirmed via env vars — no same-namespace
+    # Service references anywhere), so the external-egress allow covers it, not
+    # just the ingress-controller allow for the inbound leg. usersrole's only
+    # other dependency is cross-namespace Postgres on 5432, already allowed.
     externalEgress: true
   - name: jdwlabs-prd
     quotaTier: standard
