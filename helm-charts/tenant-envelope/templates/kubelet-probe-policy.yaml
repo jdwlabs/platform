@@ -1,20 +1,40 @@
-{{- range .Values.namespaces }}
----
 {{- /*
 kubelet's HTTP/TCP startup and liveness probes connect to the pod's own IP
 directly from the node -- host-to-pod traffic that vanilla NetworkPolicy has
 no vocabulary for (ipBlock is the only source selector it offers, and this
 cluster's nodes share a /24 with the rest of the LAN, so an ipBlock allow
 here would open every probed pod to the whole LAN, not just kubelet).
-Cilium's `host` entity is the precise equivalent: traffic originating from
-the local node's own network namespace, which is exactly what a probe is and
-nothing broader. Rendered unconditionally, independent of the enforce toggle
-above and every policy tier, so it's already validated everywhere -- non-
-enforcing namespaces still allow-all today, but the moment any of them sets
-enforce: true this rule is already in place rather than being a second thing
-to remember. Cost of enforcing jdwlabs-prd without it: every pod crashlooped
-on a failed startup probe within minutes (JDWLABS-208).
+
+Cilium's `host` entity does NOT cover this traffic on this cluster: Cilium
+runs chained on top of Flannel (cni-chaining-mode: generic-veth), so kubelet's
+probe traffic leaves via Flannel's per-node cni0 bridge gateway (the .1
+address of each node's /24 slice of 10.244.0.0/16) rather than through
+whatever interface Cilium's own host-identity detection watches. Verified
+live via Hubble during a canary enforce attempt (JDWLABS-355, 2026-08-21):
+that traffic carries identity `cidr:10.244.0.0/16, reserved:world`, not
+`reserved:host` -- policy-verdict:none, dropped by default-deny. Cost of
+enforcing without a working fix here: every pod crashlooped on a failed
+startup probe within minutes (JDWLABS-208, reproduced live on JDWLABS-355).
+
+Fix: allow ingress from each node's actual cni0 gateway IP by CIDR (/32).
+`Values._cluster.podGatewayCIDRs` (values.yaml) carries the list statically
+rather than computed -- ArgoCD renders this chart via `helm template`, which
+always returns an empty result from `lookup` regardless of live cluster
+state (confirmed live, 2026-08-21: identical render with and without a real
+kubeconfig), so there is no template-time way to read real node podCIDRs
+here. See that value's comment for the regeneration command.
+`fromEntities: [host]` is kept alongside it -- harmless if this cluster ever
+moves off chained Flannel and Cilium's own host identity starts covering this
+traffic natively, since an OR'd rule that never matches costs nothing.
+
+The gateway address is assumed to be the first host address in each node's
+/24 podCIDR (verified live on 2 of 8 nodes via cni0's address) -- true for
+Flannel's default host-gw/vxlan bridge allocation, not swappable without
+revisiting this assumption.
 */}}
+{{- $gatewayCIDRs := .Values._cluster.podGatewayCIDRs }}
+{{- range .Values.namespaces }}
+---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -27,4 +47,8 @@ spec:
   ingress:
     - fromEntities:
         - host
+    {{- if $gatewayCIDRs }}
+    - fromCIDR:
+        {{- toYaml $gatewayCIDRs | nindent 8 }}
+    {{- end }}
 {{- end }}

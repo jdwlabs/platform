@@ -41,6 +41,33 @@ _arc:
     name: platform-arc-systems-gha-rs-controller
     namespace: arc-systems
 
+# Each node's Flannel cni0 bridge gateway (the .1 address of its /24 slice of
+# 10.244.0.0/16) -- kubelet's probe traffic leaves through this address, and
+# Cilium (chained on top of Flannel, cni-chaining-mode: generic-veth) does not
+# recognize it as its own `host` identity, so `fromEntities: [host]` alone
+# does not cover it (see kubelet-probe-policy.yaml). Static rather than
+# computed: ArgoCD renders this chart via `helm template`, which always
+# returns an empty result from `lookup` regardless of live cluster state, so
+# there is no template-time way to read real node podCIDRs here.
+#
+# Regenerate after any node is added, removed, or re-provisioned with a new
+# podCIDR:
+#   kubectl get nodes -o jsonpath='{range .items[*]}{.spec.podCIDR}{"\n"}{end}' \
+#     | awk -F'[./]' '{print $1"."$2"."$3".1/32"}'
+# A stale entry for a removed node is harmless (unreachable IP, never
+# matches); a missing entry for a new node reproduces JDWLABS-355's crashloop
+# on that node's pods once any namespace enforces.
+_cluster:
+  podGatewayCIDRs:
+    - 10.244.0.1/32 # talos-oam-s4g
+    - 10.244.1.1/32 # talos-6iz-oey
+    - 10.244.2.1/32 # talos-fow-vbk
+    - 10.244.3.1/32 # talos-k3y-y3e
+    - 10.244.4.1/32 # talos-2qd-v0u
+    - 10.244.5.1/32 # talos-g1i-e3h
+    - 10.244.6.1/32 # talos-4h8-zy6
+    - 10.244.7.1/32 # talos-lx0-6a4
+
 _quotaTiers:
   small:
     requests.cpu: "1"
