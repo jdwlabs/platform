@@ -96,8 +96,10 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.x"
+          cache: pip
+          cache-dependency-path: tools/requirements.txt
       - name: Install dependencies
-        run: pip install PyYAML
+        run: pip install -r tools/requirements.txt
       - name: Install promtool
         env:
           # Checksum, not just a version tag: a release asset is mutable and
@@ -135,8 +137,10 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.x"
+          cache: pip
+          cache-dependency-path: tools/requirements.txt
       - name: Install dependencies
-        run: pip install PyYAML
+        run: pip install -r tools/requirements.txt
       - name: Install amtool
         env:
           # amtool ships in the alertmanager tarball, not prometheus', so this
@@ -161,8 +165,10 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.x"
+          cache: pip
+          cache-dependency-path: tools/requirements.txt
       - name: Install dependencies
-        run: pip install PyYAML
+        run: pip install -r tools/requirements.txt
       - name: Check vendored monitoring CRDs match the pinned chart revision
         run: python3 tools/sync-monitoring-crds.py
 
@@ -173,8 +179,10 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.x"
+          cache: pip
+          cache-dependency-path: tools/requirements.txt
       - name: Install dependencies
-        run: pip install PyYAML
+        run: pip install -r tools/requirements.txt
       - name: Test the checker against its known false negatives
         run: python3 -m unittest discover -s tools/tests -t tools/tests
       - name: Reject mutable image references
@@ -190,8 +198,10 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.x"
+          cache: pip
+          cache-dependency-path: tools/requirements.txt
       - name: Install dependencies
-        run: pip install PyYAML
+        run: pip install -r tools/requirements.txt
       - name: Test the checker against its known false negatives
         run: python3 -m unittest discover -s tools/tests -t tools/tests
       - name: Reject mutable image tags in remote chart defaults
@@ -208,8 +218,10 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.x"
+          cache: pip
+          cache-dependency-path: tools/requirements.txt
       - name: Install dependencies
-        run: pip install PyYAML
+        run: pip install -r tools/requirements.txt
       - name: Test the checker against its known false negatives
         run: python3 -m unittest discover -s tools/tests -t tools/tests
       - name: Reject a git sync tenant folder that is created but not granted
@@ -222,8 +234,10 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.x"
+          cache: pip
+          cache-dependency-path: tools/requirements.txt
       - name: Install dependencies
-        run: pip install PyYAML
+        run: pip install -r tools/requirements.txt
       - name: Test the checker against its known false negatives
         run: python3 -m unittest discover -s tools/tests -t tools/tests
       - name: Reject duplicate ADR numeric prefixes
