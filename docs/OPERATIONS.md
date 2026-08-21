@@ -1286,7 +1286,13 @@ Before any TrueNAS major upgrade, confirm the gate has lifted:
 ```
 kubectl -n democratic-csi get secret democratic-csi-driver-config \
   -o jsonpath='{.data.driver-config-file\.yaml}' | base64 -d | head -6
-# a `protocol: http` httpConnection block means the gate still applies
+# an `httpConnection` block at all -- regardless of `protocol: http` or
+# `protocol: https` -- means the gate still applies: this driver still
+# speaks REST, just optionally TLS-wrapped. The gate lifts only once the
+# config's connection block changes shape entirely, to a `wss://` JSON-RPC
+# endpoint. `protocol: https` alone (landed after the NAS revoked the key
+# for plain-HTTP auth) does NOT mean the gate lifted -- it is still the
+# REST API, just over TLS.
 ```
 
 The standing REST-deprecation alert on the NAS is the live signal that the
