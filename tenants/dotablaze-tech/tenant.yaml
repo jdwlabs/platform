@@ -12,19 +12,23 @@ namespaces:
   - name: dotablaze-tech-non
     quotaTier: standard
     networkPolicy: default
-    enforce: true
-    # dotablaze-tech-meowbot-non confirmed Cilium-managed 2026-08-21. Kubelet
-    # probe classification bug root-caused and fixed (JDWLABS-355, PR #316);
-    # verified clean on jdwlabs-non first. Outbound only to Discord's
-    # API/gateway (public HTTPS, covered by external-egress) and
-    # cross-namespace Postgres on 5432 (already allowed).
+    # enforce is deferred: this namespace's pods predate the policy engine and
+    # carry no Cilium identity, so a restrictive set resolves against nothing
+    # today and would instead bite whichever pod restarts first — an unrelated
+    # deploy, eviction, drain or OOM kill — under an allow-set no observation
+    # window ever covered, because audit mode is per-endpoint and these
+    # endpoints did not exist. Set it once this namespace's pods are
+    # Cilium-managed and the allow-set below has been checked against their
+    # observed traffic.
     externalEgress: true
   - name: dotablaze-tech-prd
     quotaTier: standard
     networkPolicy: default
-    enforce: true
-    # dotablaze-tech-meowbot-prd confirmed Cilium-managed 2026-08-21. Same
-    # fix and verification as -non.
+    # enforce is deferred: dotablaze-tech-meowbot-prd is not Cilium-managed
+    # (confirmed via cilium-dbg endpoint list — its pod predates or straddles
+    # the 2026-08-13 policy-engine install), so the same trap as -non applies
+    # here. Set it once this pod has restarted under Cilium management and
+    # the allow-set has been checked against its observed traffic.
     externalEgress: true
   - name: dotablaze-tech-runners
     quotaTier: ci
