@@ -12,33 +12,32 @@ namespaces:
   - name: jdwlabs-non
     quotaTier: standard
     networkPolicy: default
-    # enforce is deferred: this namespace's pods predate the policy engine and
-    # carry no Cilium identity, so a restrictive set resolves against nothing
-    # today and would instead bite whichever pod restarts first — an unrelated
-    # deploy, eviction, drain or OOM kill — under an allow-set no observation
-    # window ever covered, because audit mode is per-endpoint and these
-    # endpoints did not exist. Set it once this namespace's pods are
-    # Cilium-managed and the allow-set below has been checked against their
-    # observed traffic.
-    #
-    # Inter-app calls (authui/rolesui/usersui/container -> usersrole,
-    # servicediscovery) go out via their public *.jdwlabs.com hostnames and
-    # hairpin back through the gateway rather than using in-cluster Service
-    # DNS, so egress needs the external allow, not just the ingress-controller
-    # allow that already covers the inbound leg.
+    enforce: true
+    # Fourth attempt overall, 2026-08-21. Two root causes found and fixed
+    # tonight: (1) kubelet probe traffic never got Cilium's `host` identity
+    # under chained Flannel+Cilium networking -- fixed in
+    # kubelet-probe-policy.yaml / PR #316. (2) the shared `database`
+    # namespace's own postgres pods were mostly unmanaged, so cross-namespace
+    # egress to an unlucky backend got dropped -- fixed via a CNPG-safe
+    # promote+recreate sequence, all 6 postgres pods + db-ui now
+    # Cilium-managed. Both fixes verified live via Hubble with zero drops
+    # before this attempt. Inter-app calls (authui/rolesui/usersui/container
+    # -> usersrole, servicediscovery) go out via their public *.jdwlabs.com
+    # hostnames and hairpin back through the gateway rather than using
+    # in-cluster Service DNS, so egress needs the external allow, not just
+    # the ingress-controller allow that already covers the inbound leg.
     externalEgress: true
   - name: jdwlabs-prd
     quotaTier: standard
     networkPolicy: default
-    # enforce is deferred, second time: #286 retried it with the #285
-    # kubelet-probe allow in place and every pod crashlooped again anyway.
-    # Root cause not yet re-diagnosed -- the fromEntities: [host] rule alone
-    # was not sufficient this time, unlike the theory behind #285. Needs live
-    # investigation (cilium policy verdict for an actual failing probe
-    # request) before a third attempt, not another assumption.
-    #
-    # Same hairpin egress dependency as jdwlabs-non (authui/rolesui/usersui/
-    # container -> usersrole.prd.jdwlabs.com, servicediscovery.prd.jdwlabs.com).
+    enforce: true
+    # Third attempt, 2026-08-21. #285/#286 crashlooped on the kubelet-probe
+    # bug (see jdwlabs-non). A same-day retest also caught the database
+    # coverage gap live (dotablaze-tech meowbot crashlooped on an unmanaged
+    # postgres backend) before it ever reached jdwlabs-prd -- both root
+    # causes now fixed and verified, see jdwlabs-non for detail. Same
+    # hairpin egress dependency (authui/rolesui/usersui/container ->
+    # usersrole.prd.jdwlabs.com, servicediscovery.prd.jdwlabs.com).
     externalEgress: true
   - name: jdwlabs-runners
     quotaTier: ci
