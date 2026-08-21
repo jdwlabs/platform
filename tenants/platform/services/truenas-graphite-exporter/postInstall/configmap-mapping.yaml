@@ -166,11 +166,11 @@ data:
       # dimensions carried byte-identical values through the whole capture, so
       # the per-core paths are dropped as duplicates rather than mapped.
       #
-      # No alert is attached. Over one hour of live reporting this sensor swung
-      # 70-105C with no matching load, which is either a genuinely hot package
-      # or an offset-encoded reading; either way there is no threshold that
-      # separates "fine" from "not fine" without knowing the part's Tjmax, and
-      # a rule that fires on a healthy NAS is worse than no rule.
+      # The "swings 70-105C with no matching load" reading that once justified
+      # leaving this unalerted was itself the fault: it was recorded with
+      # cooling already degraded. A healthy read on this host (Ryzen 7 7700X,
+      # 95C Tjmax) is 35-40C under a full pool scrub. See rules-truenas.yaml
+      # for the alerts keyed on this series.
       - match: '^truenas\.([^.]+)\.cputemp\.temperatures\.cpu$'
         match_type: regex
         name: "truenas_cpu_temperature_celsius"

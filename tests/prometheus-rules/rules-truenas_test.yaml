@@ -1,0 +1,153 @@
+# Unit tests for the TrueNAS CPU package temperature and restart alerts.
+#
+# The healthy reference here is 35-40C under a full pool scrub (measured on
+# this host immediately after a power cycle), not the 62C idle baseline the
+# retained metrics window showed — that baseline was itself recorded with
+# cooling already degraded. See rules-truenas.yaml for the full reasoning.
+rule_files:
+  - rules/truenas-rules.yaml
+evaluation_interval: 1m
+tests:
+  # Acceptance case: a healthy host under load never approaches either
+  # threshold, and a normal uptime never looks like a restart.
+  - interval: 1m
+    name: healthy load stays silent
+    input_series:
+      - series: 'truenas_cpu_temperature_celsius{host="truenas",sensor="package"}'
+        values: '38+0x60'
+      - series: 'truenas_uptime_seconds{host="truenas"}'
+        values: '500000+60x60'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: TrueNASCPUCoolingDegraded
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: TrueNASCPUThermallySaturated
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: TrueNASRestarted
+        exp_alerts: []
+
+  # A brief boost to exactly Tjmax is the CPU working as intended (AM5
+  # desktop Ryzen regulates at 95C once it gets there) and must not page
+  # anyone. Held constant at 95C throughout so this is purely a `for:` check:
+  # neither alert has any business firing before its window elapses, even
+  # though 95C is already past both thresholds from the first sample.
+  - interval: 1m
+    name: a Tjmax boost shorter than the for windows does not page
+    input_series:
+      - series: 'truenas_cpu_temperature_celsius{host="truenas",sensor="package"}'
+        values: '95+0x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TrueNASCPUCoolingDegraded
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: TrueNASCPUThermallySaturated
+        exp_alerts: []
+
+  # The same 95C held past both windows: the cooling-degraded critical fires
+  # first at 10m, the Tjmax-saturated warning follows at 15m. Both active at
+  # once is the expected shape for the real incidents this ticket covers —
+  # every recorded excursion held near 95C for minutes, not seconds.
+  - interval: 1m
+    name: sustained Tjmax saturation pages both alerts in order
+    input_series:
+      - series: 'truenas_cpu_temperature_celsius{host="truenas",sensor="package"}'
+        values: '95+0x20'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: TrueNASCPUCoolingDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              host: truenas
+              sensor: package
+            exp_annotations:
+              summary: "TrueNAS truenas CPU at 95C — cooling suspect"
+              description: >-
+                The CPU package on truenas has held at or above 80C
+                for 10m, against a 35-40C reference under full pool load. Heat is
+                not leaving the CPU: check that the fan is actually spinning, and
+                check the fan header and curve before anything else. The host has
+                previously power-cycled twice in 26 minutes in this state, taking
+                every PVC on the truenas-nfs and truenas-iscsi classes with it.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+      - eval_time: 11m
+        alertname: TrueNASCPUThermallySaturated
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: TrueNASCPUThermallySaturated
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              host: truenas
+              sensor: package
+            exp_annotations:
+              summary: "TrueNAS truenas CPU pinned at Tjmax (95C)"
+              description: >-
+                The CPU package on truenas has sat at its thermal
+                limit for 15m, so the part is throttling rather than idling
+                between boosts. Under a pool scrub that points at cooling
+                capacity — heatsink mounting, fan curve, dust, or case airflow —
+                rather than at the workload. Pausing the scrub sheds the load
+                but does not fix it.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+  # 82C is above the cooling-degraded critical but below Tjmax: this is the
+  # signature a failing fan or a dried mount produces on this workload — it
+  # never has to touch 95C to prove cooling has failed.
+  - interval: 1m
+    name: cooling failure below Tjmax still pages the critical only
+    input_series:
+      - series: 'truenas_cpu_temperature_celsius{host="truenas",sensor="package"}'
+        values: '82+0x20'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: TrueNASCPUCoolingDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              host: truenas
+              sensor: package
+            exp_annotations:
+              summary: "TrueNAS truenas CPU at 82C — cooling suspect"
+              description: >-
+                The CPU package on truenas has held at or above 80C
+                for 10m, against a 35-40C reference under full pool load. Heat is
+                not leaving the CPU: check that the fan is actually spinning, and
+                check the fan header and curve before anything else. The host has
+                previously power-cycled twice in 26 minutes in this state, taking
+                every PVC on the truenas-nfs and truenas-iscsi classes with it.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+      - eval_time: 20m
+        alertname: TrueNASCPUThermallySaturated
+        exp_alerts: []
+
+  # truenas_uptime_seconds resetting below 15m is the restart signal,
+  # independent of temperature — this host has also come back on its own
+  # after a multi-hour absence with no thermal signature at all.
+  - interval: 1m
+    name: an uptime reset pages the restart alert
+    input_series:
+      - series: 'truenas_uptime_seconds{host="truenas"}'
+        values: '30+60x20'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: TrueNASRestarted
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: TrueNASRestarted
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              host: truenas
+            exp_annotations:
+              summary: "TrueNAS truenas restarted 3m 30s ago"
+              description: >-
+                The NAS reports an uptime under 15m, so it has restarted. If the
+                restart was not deliberate, the cause is not visible from the
+                cluster — the Graphite push carries no power, PSU or thermal-event
+                data. Read the host's own logs and its UPS service state, and
+                check whether the restart coincided with heavy pool IO.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"

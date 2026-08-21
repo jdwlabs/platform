@@ -21,14 +21,105 @@ spec:
     #     carries none of them on this version; they are only reachable over
     #     the TrueNAS API, which needs a credential this cluster does not yet
     #     hold. See docs/adr/0025 and JDWLABS-367.
-    #   - CPU package temperature. The series exists
-    #     (truenas_cpu_temperature_celsius) but swings 70-105C on an idle NAS,
-    #     so no threshold distinguishes healthy from unhealthy without knowing
-    #     the part's Tjmax.
     #   - Disk busy percent. Pinned at ~100 for the whole duration of a scrub
     #     or resilver, which is routine on a 20TB vdev.
     - name: truenas-host
       rules:
+        # An unexpected restart is the event that actually costs something —
+        # every PVC on the truenas-nfs and truenas-iscsi classes hangs while
+        # the host is down. It is caught here rather than through temperature
+        # because the cause is not established: the host has come back on its
+        # own after a two-hour absence, which no thermal cutout explains, so a
+        # temperature rule would have attributed it wrongly.
+        #
+        # Keyed on uptime rather than on the blackbox probe because the probe
+        # cannot separate a reboot from a cable or switch fault, and because
+        # this survives a short outage that the probe's own `for:` window
+        # would swallow. It fires on deliberate reboots too — an upgrade will
+        # trip it — which is the intended trade for catching every unplanned
+        # one.
+        - alert: TrueNASRestarted
+          expr: |
+            truenas_uptime_seconds < 900
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS {{ $labels.host }} restarted {{ $value | humanizeDuration }} ago"
+            description: >-
+              The NAS reports an uptime under 15m, so it has restarted. If the
+              restart was not deliberate, the cause is not visible from the
+              cluster — the Graphite push carries no power, PSU or thermal-event
+              data. Read the host's own logs and its UPS service state, and
+              check whether the restart coincided with heavy pool IO.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+        # 95C is not a fault on this hardware, it is the part's design limit:
+        # AM5 desktop Ryzen boosts until it reaches Tjmax and then regulates
+        # there, so brief excursions to exactly 95C are the CPU working as
+        # intended and must not page anyone. The X3D parts cap at 89C instead
+        # — if this board ever carries one, both figures below drop by 6C.
+        #
+        # What is worth knowing is *sustained* saturation: a pool scrub is a
+        # light enough load that a correctly sized and correctly mounted
+        # cooler should not pin the package at its limit for a quarter of an
+        # hour. That is a cooling-capacity signal, not a workload one, so the
+        # threshold sits at the limit and the duration does the discriminating.
+        #
+        # The 62C figure that five days of history shows as this host's idle
+        # baseline is not its healthy one. Immediately after a power cycle the
+        # same host reported 34-42C under an identical pool workload, which
+        # means the whole retained window was recorded with cooling already
+        # degraded. Treat 35-40C as the reference and 62C as evidence of the
+        # fault, not as normal.
+        #
+        # An earlier revision excluded this series entirely on the belief that
+        # it "swings 70-105C on an idle NAS" — the measured distribution is far
+        # tighter than that, so the exclusion goes, but the conclusion it
+        # reached (no useful threshold without knowing Tjmax) was right, and a
+        # first pass at 85C here would have paged on routine scrubs.
+        #
+        # The recurrence detector for the fault above. With cooling working the
+        # package sits at 35-40C under a full pool scrub, so 80C sustained is
+        # nowhere near reachable on this workload and can only mean heat is no
+        # longer leaving the block — the same signature that preceded two
+        # power-cycles inside half an hour. Set below Tjmax on purpose: by the
+        # time the part is regulating at its limit the margin is already gone,
+        # and this needs to fire while there is still time to shed load.
+        - alert: TrueNASCPUCoolingDegraded
+          expr: |
+            truenas_cpu_temperature_celsius >= 80
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS {{ $labels.host }} CPU at {{ $value }}C — cooling suspect"
+            description: >-
+              The CPU package on {{ $labels.host }} has held at or above 80C
+              for 10m, against a 35-40C reference under full pool load. Heat is
+              not leaving the CPU: check that the fan is actually spinning, and
+              check the fan header and curve before anything else. The host has
+              previously power-cycled twice in 26 minutes in this state, taking
+              every PVC on the truenas-nfs and truenas-iscsi classes with it.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+        - alert: TrueNASCPUThermallySaturated
+          expr: |
+            truenas_cpu_temperature_celsius >= 95
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS {{ $labels.host }} CPU pinned at Tjmax ({{ $value }}C)"
+            description: >-
+              The CPU package on {{ $labels.host }} has sat at its thermal
+              limit for 15m, so the part is throttling rather than idling
+              between boosts. Under a pool scrub that points at cooling
+              capacity — heatsink mounting, fan curve, dust, or case airflow —
+              rather than at the workload. Pausing the scrub sheds the load
+              but does not fix it.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
         # available, not free: the NAS reports /proc/meminfo-style availability,
         # so reclaimable ARC and page cache are already counted as available.
         # ARC growing to fill RAM is normal ZFS behaviour and must not alert;
