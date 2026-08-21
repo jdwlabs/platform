@@ -20,7 +20,11 @@ namespaces:
   # whether that covers Bedrock's auth path is unverified, so revisit before
   # enabling enforce here.
   - name: jdwillmsen-prd
-    quotaTier: standard
+    # standard's limits.cpu: 6 throttled the Bedrock server at its own 2-core
+    # limit after tick-distance/view-distance were raised for the mob farm —
+    # cgroup stats showed ~34% of periods throttled. large gives headroom for
+    # an 8-core pod limit plus the exporter/cronjobs alongside it.
+    quotaTier: large
     networkPolicy: default
     externalEgress: true
 
