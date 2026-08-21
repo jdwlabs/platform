@@ -27,15 +27,15 @@ namespaces:
   - name: jdwlabs-prd
     quotaTier: standard
     networkPolicy: default
-    enforce: true
-    # Third attempt, 2026-08-21. #285/#286 crashlooped because kubelet probe
-    # traffic was never classified as Cilium's `host` entity (chained
-    # Flannel+Cilium) -- root-caused live on JDWLABS-355 and fixed in
-    # kubelet-probe-policy.yaml / PR #316 (fromCIDR allow per node gateway
-    # IP). Verified clean on jdwlabs-non first: zero drops, zero restarts,
-    # watched live via Hubble. Same hairpin egress dependency as jdwlabs-non
-    # (authui/rolesui/usersui/container -> usersrole.prd.jdwlabs.com,
-    # servicediscovery.prd.jdwlabs.com).
+    # enforce is deferred, second time: #286 retried it with the #285
+    # kubelet-probe allow in place and every pod crashlooped again anyway.
+    # Root cause not yet re-diagnosed -- the fromEntities: [host] rule alone
+    # was not sufficient this time, unlike the theory behind #285. Needs live
+    # investigation (cilium policy verdict for an actual failing probe
+    # request) before a third attempt, not another assumption.
+    #
+    # Same hairpin egress dependency as jdwlabs-non (authui/rolesui/usersui/
+    # container -> usersrole.prd.jdwlabs.com, servicediscovery.prd.jdwlabs.com).
     externalEgress: true
   - name: jdwlabs-runners
     quotaTier: ci
