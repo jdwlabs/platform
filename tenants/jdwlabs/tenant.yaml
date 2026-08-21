@@ -12,17 +12,20 @@ namespaces:
   - name: jdwlabs-non
     quotaTier: standard
     networkPolicy: default
-    enforce: true
-    # Second attempt, 2026-08-21. First attempt (PR #314) crashlooped all 6
-    # pods within seconds -- kubelet probe traffic was getting dropped
-    # because Cilium (chained on Flannel) never classified it as `host`.
-    # Root-caused and fixed in kubelet-probe-policy.yaml / PR #316 (adds a
-    # fromCIDR allow for each node's real gateway IP). All 6 pods confirmed
-    # Cilium-managed. Inter-app calls (authui/rolesui/usersui/container ->
-    # usersrole, servicediscovery) go out via their public *.jdwlabs.com
-    # hostnames and hairpin back through the gateway rather than using
-    # in-cluster Service DNS, so egress needs the external allow, not just
-    # the ingress-controller allow that already covers the inbound leg.
+    # enforce is deferred: this namespace's pods predate the policy engine and
+    # carry no Cilium identity, so a restrictive set resolves against nothing
+    # today and would instead bite whichever pod restarts first — an unrelated
+    # deploy, eviction, drain or OOM kill — under an allow-set no observation
+    # window ever covered, because audit mode is per-endpoint and these
+    # endpoints did not exist. Set it once this namespace's pods are
+    # Cilium-managed and the allow-set below has been checked against their
+    # observed traffic.
+    #
+    # Inter-app calls (authui/rolesui/usersui/container -> usersrole,
+    # servicediscovery) go out via their public *.jdwlabs.com hostnames and
+    # hairpin back through the gateway rather than using in-cluster Service
+    # DNS, so egress needs the external allow, not just the ingress-controller
+    # allow that already covers the inbound leg.
     externalEgress: true
   - name: jdwlabs-prd
     quotaTier: standard
