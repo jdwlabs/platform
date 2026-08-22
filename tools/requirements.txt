@@ -3,4 +3,4 @@
 # prometheus-rules, alertmanager-routing, foundation-crds-freshness). Pinned,
 # not "pip install PyYAML" against whatever resolves that day, and named here
 # once so actions/setup-python has a single file to key its pip cache on.
-PyYAML==6.0.2
+PyYAML==6.0.3
