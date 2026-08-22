@@ -222,7 +222,7 @@ services:
   - name: vault-config-operator
     chart: vault-config-operator
     repo: https://redhat-cop.github.io/vault-config-operator
-    revision: v0.8.52
+    revision: v1.0.1
     namespace: vault-config-operator
     postInstall: false
     syncWave: 2
