@@ -1,11 +1,11 @@
 {
   "title": "dotablaze-tech / Tenant Overview",
   "uid": "dotablaze-tech-tenant-overview",
-  "description": "USE-method resource usage for the dotablaze-tech tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2). A RED dashboard for tenant-owned services is deferred until dotablaze-tech ships app-level request metrics to scope it against. Both datasource variables are pinned and hidden: the tenant Loki datasource carries the X-Scope-OrgID header that is the log tenancy boundary (§5.3), so a variable left to resolve to Grafana's default would answer with the platform tenant's store; metrics have no per-tenant datasource and are scoped by the namespace label instead (§5.2).",
+  "description": "Pod health and USE-method resource usage for the dotablaze-tech tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2). No RED row: dotablaze-tech's app source (meowbot) isn't in a repo this org's Grafana dashboard tooling has verified access to, so its request-metric names/labels are unconfirmed — deliberately not guessed (JDWLABS-419). Add RED here once meowbot's actual Prometheus metric names are confirmed live, following the same pattern as the jdwlabs tenant dashboard's usersrole panels. Both datasource variables are pinned and hidden: the tenant Loki datasource carries the X-Scope-OrgID header that is the log tenancy boundary (§5.3), so a variable left to resolve to Grafana's default would answer with the platform tenant's store; metrics have no per-tenant datasource and are scoped by the namespace label instead (§5.2).",
   "tags": ["dotablaze-tech", "tenant"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "1m",
   "time": { "from": "now-6h", "to": "now" },
   "templating": {
@@ -38,17 +38,73 @@
   },
   "panels": [
     {
+      "id": 13,
+      "type": "row",
+      "title": "Pod health",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Pod restarts (1h)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=~\"$namespace\"}[1h])) by (namespace, pod)",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "OOMKilled containers",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(kube_pod_container_status_last_terminated_reason{namespace=~\"$namespace\", reason=\"OOMKilled\"}) by (namespace, pod, container)",
+          "legendFormat": "{{pod}}/{{container}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Replicas: current vs desired",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(kube_deployment_status_replicas{namespace=~\"$namespace\"}) by (namespace, deployment)",
+          "legendFormat": "current {{deployment}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(kube_deployment_spec_replicas{namespace=~\"$namespace\"}) by (namespace, deployment)",
+          "legendFormat": "desired {{deployment}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
       "id": 1,
       "type": "row",
       "title": "Resource usage",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 }
     },
     {
       "id": 2,
       "type": "timeseries",
       "title": "CPU usage by namespace",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
       "targets": [
         {
           "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", container!=\"\"}[5m])) by (namespace)",
@@ -63,7 +119,7 @@
       "type": "timeseries",
       "title": "Memory usage by namespace",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
       "targets": [
         {
           "expr": "sum(container_memory_working_set_bytes{namespace=~\"$namespace\", container!=\"\"}) by (namespace)",
@@ -78,7 +134,7 @@
       "type": "stat",
       "title": "Pod count",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 9 },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 18 },
       "targets": [
         {
           "expr": "count(kube_pod_info{namespace=~\"$namespace\"})",
@@ -91,7 +147,7 @@
       "type": "gauge",
       "title": "CPU request quota utilization",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 9 },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 18 },
       "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
       "targets": [
         {
@@ -105,7 +161,7 @@
       "type": "gauge",
       "title": "Memory request quota utilization",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 9 },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 18 },
       "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
       "targets": [
         {
@@ -118,14 +174,14 @@
       "id": 7,
       "type": "row",
       "title": "Logs",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 }
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 }
     },
     {
       "id": 8,
       "type": "logs",
       "title": "Namespace logs",
       "datasource": { "type": "loki", "uid": "${loki_datasource}" },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 14 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 23 },
       "targets": [
         {
           "expr": "{namespace=~\"$namespace\"}",

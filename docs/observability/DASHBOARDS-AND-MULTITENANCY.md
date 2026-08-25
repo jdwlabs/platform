@@ -1,10 +1,11 @@
 # Observability: Dashboards-as-Code, Suite Design, and Multi-Tenancy
 
-Status: Proposal with core decisions confirmed (2026-06-17, see §7). This
-document describes a target architecture and a migration path. It does **not**
-change any running provisioning today — the existing ConfigMap-sidecar
-dashboards stay in place until the migration plan below is executed in follow-up
-changes.
+Status: Mechanism shipped, dashboard suite partially built (updated
+2026-08-25, JDWLABS-419). §6's migration plan is done — Grafana Git Sync is
+live, `tenant.yaml` is wired for both real tenants, Loki/Tempo tenancy and
+per-tenant Alertmanager routing are live, and the sidecar/Git-Sync
+one-owner rule holds. §4's dashboard suite is not fully built — see the
+Status column added to its tables for what's real versus still aspirational.
 
 Audience: platform operators and tenant onboarders.
 
@@ -196,29 +197,30 @@ The suite is organised around the three standard methods:
 
 ### Platform folder (the platform tenant)
 
-| Dashboard | Method | Source / mixin | Notes |
-|-----------|--------|----------------|-------|
-| Cluster overview | mixed | kubernetes-mixin (`k8s-resources-cluster`) | Replaces today's hand-rolled k8s-overview. |
-| Node / USE | USE | kubernetes-mixin (`node-rsrc-use`) + node_exporter mixin | Replaces today's node-exporter dashboard. |
-| Namespace overview | mixed | kubernetes-mixin (`k8s-resources-namespace`) | Per-namespace CPU/mem/network; namespace template var feeds tenant scoping. |
-| Workload / pod | mixed | kubernetes-mixin (`k8s-resources-workload`) | Deployment/StatefulSet drill-down. |
-| Gateway / Ingress RED | RED | nginx-gateway-fabric / Gateway API metrics | Rate, 5xx error ratio, p50/p95/p99 latency per route. |
-| Logs explore | — | Loki datasource (built-in Explore-style) | Keep the existing Loki **operational** dashboard (`loki.json`); add a logs-explore view scoped by namespace/tenant label. |
-| Traces explore | — | Tempo datasource | Service graph + trace search; trace-to-logs and trace-to-metrics correlation (added with the Tempo workstream). |
-| SLO / error budget | Golden signals | Custom (or Sloth-generated recording rules) | Per-SLO availability + latency, burn-rate, remaining error budget. |
-| Capacity / cost | USE-adjacent | kube-state-metrics + node_exporter | Requests-vs-capacity, PVC growth (Longhorn), retention headroom. |
-| ArgoCD | RED-ish | existing `dashboard-argocd` | Sync health, app status, reconciliation rate. |
-| Longhorn | USE | existing `dashboard-longhorn` | Volume health, capacity, rebuild status. |
-| Loki (operational) | USE | existing `dashboard-loki` | Loki's own ingestion/query health. |
-| CNPG | mixed | existing `dashboard-cnpg` | Postgres cluster health, replication, backups. |
+| Dashboard | Method | Source / mixin | Status | Notes |
+|-----------|--------|----------------|--------|-------|
+| Cluster overview | mixed | kubernetes-mixin (`k8s-resources-cluster`) | **Partial** — built a lean 4-row golden-signals dashboard (`golden-signals-overview.json`, JDWLABS-419) instead of the full mixin-based replacement; alerts/saturation/API-server RED/inventory, deliberately not a re-run of the existing deep-dive dashboards | Replaces today's hand-rolled k8s-overview. |
+| Node / USE | USE | kubernetes-mixin (`node-rsrc-use`) + node_exporter mixin | Not built | Replaces today's node-exporter dashboard. |
+| Namespace overview | mixed | kubernetes-mixin (`k8s-resources-namespace`) | Not built | Per-namespace CPU/mem/network; namespace template var feeds tenant scoping. |
+| Workload / pod | mixed | kubernetes-mixin (`k8s-resources-workload`) | Not built | Deployment/StatefulSet drill-down. |
+| Gateway / Ingress RED | RED | nginx-gateway-fabric / Gateway API metrics | **Blocked** — nginx-gateway-fabric exposes only control-plane/reconciliation metrics on this cluster today (confirmed live, JDWLABS-419); no data-plane request metrics exist to query. Needs NGF's data-plane metrics enabled first. | Rate, 5xx error ratio, p50/p95/p99 latency per route. |
+| cert-manager | USE + issuer health | cert-manager's own metrics | **Done** (`cert-manager.json`, JDWLABS-419) — certificate expiry table, issuer/controller health, ACME client rate/duration | Not originally in this table; added because it was a direct, high-value, fully-real-data ask. |
+| Logs explore | — | Loki datasource (built-in Explore-style) | Not built | Keep the existing Loki **operational** dashboard (`loki.json`); add a logs-explore view scoped by namespace/tenant label. |
+| Traces explore | — | Tempo datasource | Not built | Service graph + trace search; trace-to-logs and trace-to-metrics correlation (added with the Tempo workstream). |
+| SLO / error budget | Golden signals | Custom (or Sloth-generated recording rules) | Not built — no SLOs are defined yet to scope it against | Per-SLO availability + latency, burn-rate, remaining error budget. |
+| Capacity / cost | USE-adjacent | kube-state-metrics + node_exporter | Not built | Requests-vs-capacity, PVC growth (Longhorn), retention headroom. |
+| ArgoCD | RED-ish | existing `dashboard-argocd` | Done (pre-existing) | Sync health, app status, reconciliation rate. |
+| Longhorn | USE | existing `dashboard-longhorn` | Done (pre-existing) | Volume health, capacity, rebuild status. |
+| Loki (operational) | USE | existing `dashboard-loki` | Done (pre-existing) | Loki's own ingestion/query health. |
+| CNPG | mixed | existing `dashboard-cnpg` | Done (pre-existing) | Postgres cluster health, replication, backups. |
 
 ### Per-tenant folders (jdwlabs, dotablaze-tech)
 
-| Dashboard | Method | Source | Notes |
-|-----------|--------|--------|-------|
-| Tenant services RED | RED | Grafonnet `red.libsonnet` template | One row per app in the tenant's namespaces; rate/error/duration from app metrics + gateway routes filtered to the tenant. |
-| Tenant logs | — | Loki, label/tenant-scoped | Namespace-restricted log view. |
-| Tenant resource usage | USE | kubernetes-mixin namespace, scoped | CPU/mem/quota consumption vs ResourceQuota. |
+| Dashboard | Method | Source | Status | Notes |
+|-----------|--------|--------|--------|-------|
+| Tenant services RED | RED | Grafonnet `red.libsonnet` template | **Partial** — jdwlabs only, hand-authored JSON not Grafonnet (JDWLABS-419). Of jdwlabs' 6 apps, only `usersrole` has real app-level request instrumentation (Spring Boot Actuator/Micrometer, newly wired — apps#195/#196, deployments#184); the other 5 are frontend-shaped with no request semantics. dotablaze-tech has none: its app source (meowbot) isn't in a repo this tooling has verified access to, so its metric names are unconfirmed and deliberately not guessed. | One row per app in the tenant's namespaces; rate/error/duration from app metrics + gateway routes filtered to the tenant. |
+| Tenant logs | — | Loki, label/tenant-scoped | Done (pre-existing) | Namespace-restricted log view. |
+| Tenant resource usage | USE | kubernetes-mixin namespace, scoped | Done (pre-existing, hand-rolled not mixin-based) | CPU/mem/quota consumption vs ResourceQuota. |
 
 The kubernetes-mixin and node_exporter mixin are the authoritative upstreams for
 the cluster/node/namespace/workload dashboards; pin their versions in
