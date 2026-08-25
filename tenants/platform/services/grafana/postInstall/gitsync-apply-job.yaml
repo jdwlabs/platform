@@ -187,7 +187,8 @@ spec:
               # live state and rejected at admission with a 422.
               REQUIRED_REPOSITORY="platform-dashboards:/etc/gitsync/repository.json"
               TENANT_REPOSITORIES="jdwlabs-dashboards:/etc/gitsync/repository-jdwlabs.json
-              dotablaze-tech-dashboards:/etc/gitsync/repository-dotablaze-tech.json"
+              dotablaze-tech-dashboards:/etc/gitsync/repository-dotablaze-tech.json
+              jdwillmsen-dashboards:/etc/gitsync/repository-jdwillmsen.json"
 
               # "$degraded" collects tenant repositories that could not be
               # created or could not become healthy. Both are reported at the

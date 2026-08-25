@@ -177,3 +177,33 @@ data:
         }
       }
     }
+  repository-jdwillmsen.json: |
+    {
+      "apiVersion": "provisioning.grafana.app/v0alpha1",
+      "kind": "Repository",
+      "metadata": {
+        "name": "jdwillmsen-dashboards",
+        "namespace": "default"
+      },
+      "spec": {
+        "title": "Jdwillmsen dashboards",
+        "type": "github",
+        "sync": {
+          "enabled": true,
+          "intervalSeconds": 60,
+          "target": "folder"
+        },
+        "workflows": ["branch"],
+        "webhook": {
+          "disabled": true
+        },
+        "github": {
+          "url": "https://github.com/jdwlabs/platform",
+          "branch": "main",
+          "path": "observability/dashboards/jdwillmsen"
+        },
+        "connection": {
+          "name": "jdwlabs-platform-github"
+        }
+      }
+    }

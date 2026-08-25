@@ -37,6 +37,7 @@ observability:
     folder: jdwillmsen
     team: jdwillmsen
     access: edit
+    gitSyncFolder: jdwillmsen-dashboards
 
 services:
   # Rules only — no chart. Carries the static expectation that the world

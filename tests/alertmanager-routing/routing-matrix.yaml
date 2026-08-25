@@ -130,6 +130,14 @@ cases:
       tenant: jdwlabs
     receivers: ['ai-sre', 'discord']
 
+  # Real rule, not illustrative: platform's jdwillmsen-tenant-alerts group.
+  - name: jdwillmsen critical reaches the agent and the tenant route
+    labels:
+      alertname: JdwillmsenMinecraftVolumeRecoveryFailing
+      severity: critical
+      tenant: jdwillmsen
+    receivers: ['ai-sre', 'discord']
+
   # Below critical/warning the tenant route is the only one that matches, so
   # the tenant alert still reaches a human without the agent mirror.
   - name: jdwlabs info reaches the tenant route only
@@ -144,6 +152,13 @@ cases:
       alertname: DotablazeTechDeploymentUpdated
       severity: info
       tenant: dotablaze-tech
+    receivers: ['discord']
+
+  - name: jdwillmsen info reaches the tenant route only
+    labels:
+      alertname: JdwillmsenDeploymentUpdated
+      severity: info
+      tenant: jdwillmsen
     receivers: ['discord']
 
   # No child route matches, so the parent receiver is used. This is the only
