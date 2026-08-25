@@ -1,0 +1,331 @@
+{
+  "title": "jdwillmsen / Tenant Overview",
+  "uid": "jdwillmsen-tenant-overview",
+  "description": "USE-method resource usage for the jdwillmsen tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2), plus Minecraft-Bedrock- and backup-pipeline-specific panels. Every panel here was checked against this cluster's live Prometheus on 2026-08-25 (mc-monitor's minecraft_status_* and the backup-exporter's backup_* series confirmed producing real values; the quota/USE panels reuse the exact query shape already live on the jdwlabs dashboard). Both datasource variables are pinned and hidden: the tenant Loki datasource carries the X-Scope-OrgID header that is the log tenancy boundary (§5.3); metrics have no per-tenant datasource and are scoped by the namespace label instead (§5.2).",
+  "tags": ["jdwillmsen", "tenant", "minecraft"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "hide": 2,
+        "current": { "selected": false, "text": "Prometheus", "value": "PBFA97CFB590B2093" }
+      },
+      {
+        "name": "loki_datasource",
+        "type": "datasource",
+        "query": "loki",
+        "hide": 2,
+        "current": { "selected": false, "text": "jdwillmsen Loki", "value": "jdwillmsen-loki" }
+      },
+      {
+        "name": "namespace",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(kube_namespace_labels{label_platform_jdwlabs_io_tenant=\"jdwillmsen\"}, namespace)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Resource usage",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "CPU usage by namespace",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", container!=\"\"}[5m])) by (namespace)",
+          "legendFormat": "{{namespace}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Memory usage by namespace",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(container_memory_working_set_bytes{namespace=~\"$namespace\", container!=\"\"}) by (namespace)",
+          "legendFormat": "{{namespace}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Pod count",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 9 },
+      "targets": [
+        { "expr": "count(kube_pod_info{namespace=~\"$namespace\"})", "refId": "A" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "gauge",
+      "title": "CPU request quota utilization",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(kube_resourcequota{namespace=~\"$namespace\", resource=\"requests.cpu\", type=\"used\"}) / sum(kube_resourcequota{namespace=~\"$namespace\", resource=\"requests.cpu\", type=\"hard\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "gauge",
+      "title": "CPU limit quota utilization",
+      "description": "The metric that actually broke the backup CronJob for three days (2026-08-22..25): steady-state limits.cpu sat at 7350-7850m of an 8000m cap, leaving no room for a 1000m backup burst to schedule. Watch this one, not just the requests gauge.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.75 },
+              { "color": "red", "value": 0.9 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(kube_resourcequota{namespace=~\"$namespace\", resource=\"limits.cpu\", type=\"used\"}) / sum(kube_resourcequota{namespace=~\"$namespace\", resource=\"limits.cpu\", type=\"hard\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "gauge",
+      "title": "Memory request quota utilization",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(kube_resourcequota{namespace=~\"$namespace\", resource=\"requests.memory\", type=\"used\"}) / sum(kube_resourcequota{namespace=~\"$namespace\", resource=\"requests.memory\", type=\"hard\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Minecraft server",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Players online",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "minecraft_status_players_online_count{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"}",
+          "legendFormat": "online",
+          "refId": "A"
+        },
+        {
+          "expr": "minecraft_status_players_max_count{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"}",
+          "legendFormat": "capacity",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Server health",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 14 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "minecraft_status_healthy{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "mc-monitor response time",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "expr": "minecraft_status_response_time_seconds{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "AFK bots online",
+      "description": "Deployments matching *afk-bot* with at least one available replica. Two exist today: bot (LightBlaz3) and bot2 (Dotablaze7321).",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 22 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "count(kube_deployment_status_replicas_available{namespace=~\"$namespace\", deployment=~\".*afk-bot.*\"} > 0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Player capacity",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 22 },
+      "targets": [
+        { "expr": "minecraft_status_players_max_count{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "row",
+      "title": "Backup pipeline",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Time since last successful backup",
+      "description": "The freshness contract's own budget (backup_max_age_seconds) is 48h. This alone is a gauge, not an alert — JdwillmsenMinecraftBackupCronJobAbsent/BackupProducerAbsent (platform PrometheusRule) are what actually page on a stopped pipeline.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 27 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dtdurations",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 86400 },
+              { "color": "red", "value": 172800 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "time() - backup_last_success_timestamp_seconds{backup_job=\"jdwillmsen-minecraft-fwb-prd-backup\", artifact=\"world\"}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Last archive size",
+      "description": "Floor for a plausible archive is 100 MB — below that, the pipeline treats it as a failure regardless of exit code.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 27 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 104857600 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "backup_last_artifact_bytes{backup_job=\"jdwillmsen-minecraft-fwb-prd-backup\", artifact=\"world\"}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Last backup quiesced",
+      "description": "1 = the server was held (save hold/query/resume) or scaled to zero when this archive was taken, so it's provably consistent. 0 = the server was meant to be running and couldn't be reached to hold — treat that archive with suspicion.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 27 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "NOT QUIESCED", "color": "red" }, "1": { "text": "QUIESCED", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "backup_last_artifact_quiesced{backup_job=\"jdwillmsen-minecraft-fwb-prd-backup\", artifact=\"world\"}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "row",
+      "title": "Logs",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 }
+    },
+    {
+      "id": 19,
+      "type": "logs",
+      "title": "Namespace logs",
+      "datasource": { "type": "loki", "uid": "${loki_datasource}" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 32 },
+      "targets": [
+        { "expr": "{namespace=~\"$namespace\"}", "refId": "A" }
+      ]
+    }
+  ]
+}
