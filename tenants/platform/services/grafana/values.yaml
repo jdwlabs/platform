@@ -21,12 +21,20 @@ deploymentStrategy:
 # Without requests Grafana is BestEffort and was evicted under node memory
 # pressure alongside Prometheus. Footprint is bounded, so a limit is safe here
 # (unlike Prometheus).
+#
+# limit bumped 512Mi -> 768Mi 2026-08-25: OOMKilled (exit 137) minutes after
+# adding a third tenant's Git Sync repository (jdwillmsen-dashboards),
+# alongside its own new dashboard/folder/RBAC sync. Post-restart steady-state
+# usage was 243Mi, well under even the old limit, so this reads as a one-time
+# sync-burst spike rather than chronic under-sizing -- the bump is a margin
+# against the next tenant onboarding or dashboard-heavy sync doing the same,
+# not a response to sustained pressure.
 resources:
   requests:
     cpu: 100m
     memory: 256Mi
   limits:
-    memory: 512Mi
+    memory: 768Mi
 
 # Runs `chown -R` over the data volume before grafana starts. Trivial and
 # short-lived, but an unbounded init container drags the whole pod's QoS class
