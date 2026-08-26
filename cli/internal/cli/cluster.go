@@ -20,6 +20,7 @@ func newClusterCmd(g *Globals) *cobra.Command {
 	cmd.AddCommand(newClusterNetpolCmd(g))
 	cmd.AddCommand(newClusterAlertsCmd(g))
 	cmd.AddCommand(newClusterDrainCheckCmd(g))
+	cmd.AddCommand(newClusterArgoCDNotificationsCmd(g))
 	return cmd
 }
 

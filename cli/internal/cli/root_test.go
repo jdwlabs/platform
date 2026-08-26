@@ -49,6 +49,7 @@ var dryRunContract = map[string]bool{
 	"platformctl cluster alerts list":             false,
 	"platformctl cluster alerts rules":            false,
 	"platformctl cluster alerts targets":          false,
+	"platformctl cluster argocd-notifications":    false,
 	"platformctl cluster drain-check":             false,
 	"platformctl cluster netpol":                  false,
 	"platformctl cluster netpol coverage":         false,
