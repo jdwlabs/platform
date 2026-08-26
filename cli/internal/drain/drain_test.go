@@ -517,3 +517,17 @@ func TestFormatMemory(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatCPU(t *testing.T) {
+	cases := map[int64]string{
+		0:    "0m",
+		150:  "150m",
+		1500: "1500m",
+		-250: "-250m",
+	}
+	for in, want := range cases {
+		if got := FormatCPU(in); got != want {
+			t.Errorf("FormatCPU(%d) = %s, want %s", in, got, want)
+		}
+	}
+}

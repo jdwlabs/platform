@@ -90,7 +90,7 @@ Read-only. Exits non-zero when any node is blocked.`,
 	cmd.Flags().BoolVar(&opts.Pods, "pods", false,
 		"also print every pod on each reported node with its drain classification")
 	cmd.Flags().BoolVar(&opts.Usage, "usage", false,
-		"read metrics-server and report observed memory beside declared requests")
+		"read metrics-server and report observed memory and CPU beside declared requests")
 	return cmd
 }
 
@@ -123,7 +123,7 @@ func runDrainCheck(cmd *cobra.Command, g *Globals, opts *drainCheckOptions) erro
 			// Usage never decides a verdict, so an absent metrics-server
 			// downgrades the report rather than failing it — but it says so,
 			// because a silently empty column reads as "nothing is oversized".
-			usageNote = "observed memory unavailable: " + err.Error()
+			usageNote = "observed memory and CPU unavailable: " + err.Error()
 		} else {
 			drain.AttachUsage(&cluster, usage)
 		}
@@ -184,7 +184,7 @@ func writeDrainReport(out io.Writer, result drain.Result, fields []string, opts 
 	if opts.Pods {
 		podFields := []string{"node", "pod", "class", "request", "pdb", "allowed"}
 		if opts.Usage {
-			podFields = []string{"node", "pod", "class", "request", "used", "pdb", "allowed"}
+			podFields = []string{"node", "pod", "class", "request", "used", "usedCpu", "pdb", "allowed"}
 		}
 		if err := display.ToonTable(out, "pods", podFields, drainPodRows(result.Nodes, opts.Usage)); err != nil {
 			return err
@@ -227,7 +227,7 @@ func drainHelp(result drain.Result, opts *drainCheckOptions) []string {
 		help = append(help, "Run `platformctl cluster drain-check --pods` to see what each node carries")
 	}
 	if !opts.Usage {
-		help = append(help, "Run `platformctl cluster drain-check --usage` to compare declared requests against observed memory")
+		help = append(help, "Run `platformctl cluster drain-check --usage` to compare declared requests against observed memory and CPU")
 	}
 	return append(help, "Nothing was cordoned, evicted or applied — this command only reads")
 }
@@ -367,13 +367,14 @@ func drainPodRows(nodes []drain.NodeResult, withUsage bool) [][]string {
 				pdb = p.PDB
 				allowed = strconv.Itoa(int(p.DisruptionsAllowed))
 			}
-			used := "-"
+			used, usedCPU := "-", "-"
 			if p.UsageKnown {
 				used = drain.FormatMemory(p.UsedMemory)
+				usedCPU = drain.FormatCPU(p.UsedCPU)
 			}
 			row := []string{n.Node.Name, p.Ref(), string(p.Class), drain.FormatMemory(p.Memory)}
 			if withUsage {
-				row = append(row, used)
+				row = append(row, used, usedCPU)
 			}
 			rows = append(rows, append(row, pdb, allowed))
 		}
@@ -481,6 +482,7 @@ func emitDrainPods(em *Emitter, result drain.Result) {
 			}
 			if p.UsageKnown {
 				detail["used"] = drain.FormatMemory(p.UsedMemory)
+				detail["usedCpu"] = drain.FormatCPU(p.UsedCPU)
 			}
 			em.Emit(Event{Phase: "drain-check", Name: "pod", Status: "info",
 				Message: fmt.Sprintf("%s on %s class=%s", p.Ref(), n.Node.Name, p.Class),
