@@ -164,6 +164,7 @@ applicationSet:
       memory: 256Mi
 
 notifications:
+  enabled: false
   metrics:
     enabled: true
     serviceMonitor:
