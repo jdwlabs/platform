@@ -1,6 +1,6 @@
 nginxGateway:
   kind: deployment
-  replicas: 2
+  replicas: 1
   # Control-plane pods ran BestEffort at ~51Mi observed per replica. Request
   # ~2x observed for scheduler visibility; limit leaves headroom for config
   # reload bursts across many routes.
