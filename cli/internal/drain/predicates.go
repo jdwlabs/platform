@@ -271,3 +271,18 @@ func FormatMemory(b int64) string {
 	}
 	return fmt.Sprintf("%s%.1fGi", sign, float64(b)/float64(1024*mi))
 }
+
+// FormatCPU renders millicores the way this cluster's manifests already
+// declare CPU (requests/limits are written as "250m"), so an observed figure
+// can be compared against a spec without converting units in your head.
+//
+// Negatives are signed rather than blanked, for the same reason FormatMemory
+// signs them: an over-committed node is exactly the state this figure exists
+// to surface, and "-" already means "unmeasured" elsewhere in this report.
+func FormatCPU(m int64) string {
+	sign := ""
+	if m < 0 {
+		sign, m = "-", -m
+	}
+	return fmt.Sprintf("%s%dm", sign, m)
+}

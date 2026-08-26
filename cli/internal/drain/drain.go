@@ -108,9 +108,13 @@ type Pod struct {
 
 	Memory int64 // bytes
 	CPU    int64 // millicores
-	// UsedMemory is observed memory, populated only when metrics-server was
-	// read. UsageKnown separates "measured zero" from "never measured".
+	// UsedMemory and UsedCPU are observed usage, populated only when
+	// metrics-server was read. UsageKnown separates "measured zero" from
+	// "never measured", and covers both figures together — metrics-server
+	// reports them per-container in the same read, so one is never known
+	// without the other.
 	UsedMemory int64
+	UsedCPU    int64
 	UsageKnown bool
 
 	Class PodClass

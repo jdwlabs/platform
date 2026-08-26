@@ -99,14 +99,14 @@ func drainPod(name, node string, memMi int64, hard bool) *corev1.Pod {
 // tracker, because the fake derives a GVR from an object's kind and would file
 // a PodMetrics under "podmetrics" — while metrics-server really serves it at
 // metrics.k8s.io/v1beta1 "pods", which is what the loader reads.
-func seedPodMetrics(t *testing.T, dc *dynamicfake.FakeDynamicClient, ns, name, memory string) {
+func seedPodMetrics(t *testing.T, dc *dynamicfake.FakeDynamicClient, ns, name, memory, cpu string) {
 	t.Helper()
 	obj := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "metrics.k8s.io/v1beta1",
 		"kind":       "PodMetrics",
 		"metadata":   map[string]interface{}{"name": name, "namespace": ns},
 		"containers": []interface{}{
-			map[string]interface{}{"name": "pg", "usage": map[string]interface{}{"memory": memory}},
+			map[string]interface{}{"name": "pg", "usage": map[string]interface{}{"memory": memory, "cpu": cpu}},
 		},
 	}}
 	if _, err := dc.Resource(drain.PodMetricsGVR).Namespace(ns).
@@ -149,7 +149,7 @@ func runDrainWithMetrics(t *testing.T, metricsUp bool, args ...string) (string, 
 			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}: "ApplicationList",
 		},
 	)
-	seedPodMetrics(t, dc, "database", "pg-2", "300Mi")
+	seedPodMetrics(t, dc, "database", "pg-2", "300Mi", "150m")
 	if !metricsUp {
 		dc.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
 			return true, nil, apierrors.NewServiceUnavailable("no metrics")
@@ -291,7 +291,7 @@ func TestDrainCheck_MissingMetricsServerDowngradesRatherThanFails(t *testing.T) 
 	if err != nil {
 		t.Fatalf("unexpected error: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "warning: ") || !strings.Contains(out, "observed memory unavailable") {
+	if !strings.Contains(out, "warning: ") || !strings.Contains(out, "observed memory and CPU unavailable") {
 		t.Errorf("missing the warning about absent usage data:\n%s", out)
 	}
 	if !strings.Contains(out, "nodes[1]") {
@@ -310,11 +310,25 @@ func TestDrainCheck_ReadOnlyPromiseIsStated(t *testing.T) {
 // of what it uses makes every node look emptier than it is.
 func TestDrainCheck_UsageReportsObservedMemoryBesideTheDeclaredRequest(t *testing.T) {
 	out, _ := runDrain(t, "cluster", "drain-check", "--node", "small", "--pods", "--usage")
-	if !strings.Contains(out, "pods[1]{node,pod,class,request,used,pdb,allowed}:") {
-		t.Errorf("pods table should gain a used column:\n%s", out)
+	if !strings.Contains(out, "pods[1]{node,pod,class,request,used,usedCpu,pdb,allowed}:") {
+		t.Errorf("pods table should gain used and usedCpu columns:\n%s", out)
 	}
-	if !strings.Contains(out, "small,database/pg-2,movable,192Mi,300Mi,") {
-		t.Errorf("row should show 192Mi declared against 300Mi observed:\n%s", out)
+	if !strings.Contains(out, "small,database/pg-2,movable,192Mi,300Mi,150m,") {
+		t.Errorf("row should show 192Mi declared against 300Mi/150m observed:\n%s", out)
+	}
+}
+
+// The correctness bug motivating this column is the same for CPU as it is for
+// memory: a workload throttled at 150m while declaring nothing does not show
+// up as oversized unless the observed figure is surfaced somewhere.
+func TestDrainCheck_JSONPodEventCarriesObservedCPU(t *testing.T) {
+	// "small" reports a blocked verdict in this fixture, so a non-nil error is
+	// expected here — the JSON events are still emitted before that error is
+	// returned, which is what this test is checking.
+	out, _ := runDrain(t, "--json", "cluster", "drain-check", "--node", "small", "--pods", "--usage")
+	pod := jsonEventNamed(t, out, "pod")
+	if !strings.Contains(pod, `"usedCpu":"150m"`) {
+		t.Errorf("pod event should carry observed CPU:\n%s", pod)
 	}
 }
 

@@ -17,7 +17,7 @@ var PodMetricsGVR = schema.GroupVersionResource{
 	Group: "metrics.k8s.io", Version: "v1beta1", Resource: "pods",
 }
 
-// Usage is observed memory against what a pod declared.
+// Usage is observed memory and CPU against what a pod declared.
 //
 // A feasibility check is only as good as the requests it reads: the scheduler
 // places on declared requests, so a workload that declares a fraction of what
@@ -26,9 +26,10 @@ var PodMetricsGVR = schema.GroupVersionResource{
 // silently-wrong answer into a visible one.
 type Usage struct {
 	Memory int64 // bytes
+	CPU    int64 // millicores
 }
 
-// LoadUsage reads observed pod memory from metrics-server, keyed by
+// LoadUsage reads observed pod memory and CPU from metrics-server, keyed by
 // namespace/name. A cluster without metrics-server is not an error here — the
 // feasibility verdict does not depend on usage — so the caller is told the
 // reason and continues without it.
@@ -44,7 +45,7 @@ func LoadUsage(ctx context.Context, dc dynamic.Interface) (map[string]Usage, err
 		if err != nil || !found {
 			continue
 		}
-		total, complete := containerMemory(containers)
+		mem, cpu, complete := containerUsage(containers)
 		// A pod missing one container's figure would report a total lower than
 		// its real usage, which reads as a workload living within its request —
 		// the exact conclusion this column exists to challenge. So a pod that
@@ -52,35 +53,45 @@ func LoadUsage(ctx context.Context, dc dynamic.Interface) (map[string]Usage, err
 		if !complete {
 			continue
 		}
-		out[item.GetNamespace()+"/"+item.GetName()] = Usage{Memory: total}
+		out[item.GetNamespace()+"/"+item.GetName()] = Usage{Memory: mem, CPU: cpu}
 	}
 	return out, nil
 }
 
-// containerMemory sums observed memory across a pod's containers, reporting
-// whether every one of them could be read.
-func containerMemory(containers []any) (int64, bool) {
-	var total int64
+// containerUsage sums observed memory and CPU across a pod's containers,
+// reporting whether every one of them could be read in full. Metrics-server
+// reports both figures together per container, so a container missing either
+// one leaves the whole pod unmeasured rather than reporting a partial total.
+func containerUsage(containers []any) (mem, cpu int64, complete bool) {
 	for _, c := range containers {
 		m, ok := c.(map[string]any)
 		if !ok {
-			return 0, false
+			return 0, 0, false
 		}
 		usage, ok := m["usage"].(map[string]any)
 		if !ok {
-			return 0, false
+			return 0, 0, false
 		}
-		raw, ok := usage["memory"].(string)
+		rawMem, ok := usage["memory"].(string)
 		if !ok {
-			return 0, false
+			return 0, 0, false
 		}
-		q, err := resource.ParseQuantity(raw)
+		qMem, err := resource.ParseQuantity(rawMem)
 		if err != nil {
-			return 0, false
+			return 0, 0, false
 		}
-		total += q.Value()
+		rawCPU, ok := usage["cpu"].(string)
+		if !ok {
+			return 0, 0, false
+		}
+		qCPU, err := resource.ParseQuantity(rawCPU)
+		if err != nil {
+			return 0, 0, false
+		}
+		mem += qMem.Value()
+		cpu += qCPU.MilliValue()
 	}
-	return total, true
+	return mem, cpu, true
 }
 
 func unstructuredSlice(obj map[string]any, key string) ([]any, bool, error) {
@@ -105,6 +116,7 @@ func AttachUsage(c *Cluster, usage map[string]Usage) {
 			continue
 		}
 		c.Pods[i].UsedMemory = u.Memory
+		c.Pods[i].UsedCPU = u.CPU
 		c.Pods[i].UsageKnown = true
 	}
 }
