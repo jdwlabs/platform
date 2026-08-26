@@ -10,6 +10,18 @@ config:
       prober: tcp
       timeout: 5s
 
+# Live usage sits ~26Mi (a synthetic-probe daemon issuing a handful of TCP
+# connects per scrape interval, not a request-serving service). Request is
+# ~1.5x that; limit leaves headroom for scrape bursts without letting a stuck
+# probe consume the node. CPU is negligible (~1m observed) and floored to a
+# usable value rather than scaled.
+resources:
+  requests:
+    cpu: 10m
+    memory: 40Mi
+  limits:
+    memory: 80Mi
+
 serviceMonitor:
   enabled: true
   defaults:
