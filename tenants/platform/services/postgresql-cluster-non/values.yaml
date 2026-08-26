@@ -6,6 +6,18 @@
 externalClusters: []
 
 cluster:
+  # Explicit rather than the chart's default of 3. This is a single-user homelab
+  # non-prod environment with no availability SLA — the two extra replicas buy HA
+  # replication and drain-safe failover that nothing here depends on, at the cost of
+  # a second and third instance's worth of memory (see resources below) and a place
+  # in the three-way `required` anti-affinity math docs/memory-efficiency/06 and
+  # 07 work through for the HA workloads. Tradeoff: if failover behavior ever needs
+  # exercising before promoting a change to prod, that now means temporarily raising
+  # this back up rather than it being already-on here — decided this way because prod
+  # (postgresql-cluster-prd/values.yaml) is left at 3 and is the environment that
+  # actually needs HA proven before it matters.
+  instances: 1
+
   monitoring:
     enabled: true
     podMonitor:
