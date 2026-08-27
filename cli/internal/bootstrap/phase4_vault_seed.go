@@ -94,6 +94,17 @@ var staticSeedSpecs = map[string]seedSpec{
 	"truenas-csi": {Path: "truenas-csi", Fields: []seedField{
 		{"api_key", "PLATFORMCTL_TRUENAS_CSI_API_KEY", true, false},
 	}},
+	// The official truenas-csi driver's own API key — deliberately not the
+	// "truenas-csi" path above, which democratic-csi's key already occupies
+	// and --truenas-use-csi-api-key reads by name; one key shared across two
+	// CSI control planes would double a blast radius that already takes every
+	// class of provisioning down at once when invalidated (docs/adr/0029).
+	// Optional so a bootstrap neither prompts for it nor overwrites it while
+	// the parallel install is still a proof of concept; seed it explicitly:
+	//   platformctl bootstrap seed truenas-csi-driver --from-file <path>
+	"truenas-csi-driver": {Path: "truenas-csi-driver", Fields: []seedField{
+		{"api_key", "PLATFORMCTL_TRUENAS_CSI_DRIVER_API_KEY", true, true},
+	}},
 	// Phase 5 captures this block on a fresh cluster; the spec exists so it can
 	// also be re-supplied later without hand-writing KV, which is what rotating
 	// the Drive OAuth credential needs. Optional, so a bootstrap that is not

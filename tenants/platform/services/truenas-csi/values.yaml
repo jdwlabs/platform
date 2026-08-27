@@ -1,0 +1,5 @@
+# The chart under helm-charts/truenas-csi is dedicated to this cluster, so its
+# own values.yaml carries the full configuration (NAS address, image pins,
+# Talos accommodations) and this overlay stays empty. Overrides land here only
+# when a value must differ from the chart default without a chart change.
+{}
