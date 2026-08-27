@@ -13,6 +13,14 @@ spec:
   failedJobsHistoryLimit: 5
   jobTemplate:
     spec:
+      # failedJobsHistoryLimit only prunes an old failed Job when a *new*
+      # failure pushes the count over the limit, so one failure followed by
+      # nothing but successes (the common case here) lingers forever and
+      # keeps kube_job_failed pinned at 1. TTL-clean any finished Job after a
+      # day regardless of subsequent successes -- well beyond Alertmanager's
+      # 4h repeat_interval, so a still-firing alert is never retracted before
+      # it has been notified.
+      ttlSecondsAfterFinished: 86400
       # No pod-level retries: a run that only succeeds after the job controller
       # spins up a second pod means the outage outlasted one attempt entirely,
       # and that is worth surfacing rather than quietly absorbing. A single
