@@ -97,10 +97,13 @@ serviceMonitor:
 prometheusRule:
   enabled: true
   rules:
-    # No job matcher: this is the only ServiceMonitor in the repo that emits
-    # probe_success, so the metric name alone is unambiguous cluster-wide.
+    # Scoped to -mgmt, same reasoning as HardwareHostProbeMissing below: this
+    # metric now also carries -ingress targets (see IngressPathProbeFailed),
+    # a separate alert class with its own labels/annotations/runbook. An
+    # unscoped expr here would double-fire on ingress-path failures with
+    # garbage annotations (empty $labels.host, the wrong runbook).
     - alert: HardwareHostUnreachable
-      expr: probe_success == 0
+      expr: probe_success{target=~".*-mgmt"} == 0
       for: 5m
       labels:
         severity: critical
