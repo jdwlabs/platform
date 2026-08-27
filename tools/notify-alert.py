@@ -33,6 +33,7 @@ budget exits non-zero and prints what came back.
 """
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -113,16 +114,26 @@ def post(
     alert: dict,
     endpoint: str,
     token: str | None = None,
+    basic_auth: tuple[str, str] | None = None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     retries: int = DEFAULT_RETRIES,
     opener=urllib.request.urlopen,
     sleep=time.sleep,
 ) -> None:
-    """POST the alert, retrying transport failures and 5xx."""
+    """POST the alert, retrying transport failures and 5xx.
+
+    `basic_auth` takes precedence over `token`: Alertmanager's public route is
+    gated with HTTP Basic, so that is what a real deployment sets. `token`
+    (Bearer) stays supported for a gateway fronted differently.
+    """
     url = endpoint.rstrip("/") + "/api/v2/alerts"
     body = json.dumps([alert]).encode()
     headers = {"Content-Type": "application/json"}
-    if token:
+    if basic_auth:
+        user, password = basic_auth
+        creds = base64.b64encode(f"{user}:{password}".encode()).decode()
+        headers["Authorization"] = f"Basic {creds}"
+    elif token:
         headers["Authorization"] = f"Bearer {token}"
 
     last: str = "no attempt was made"
@@ -195,14 +206,16 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps([alert], indent=2))
         return 0
 
+    user = os.environ.get("ALERTMANAGER_USER")
+    password = os.environ.get("ALERTMANAGER_PASSWORD")
+    basic_auth = (user, password) if user and password else None
+
     try:
         post(
             alert,
             endpoint=args.endpoint,
-            # Alertmanager is unauthenticated on its public route today. Reading
-            # a token when one is present means adding auth later is a secret to
-            # set rather than a change to every caller.
             token=os.environ.get("ALERTMANAGER_TOKEN") or None,
+            basic_auth=basic_auth,
             timeout=args.timeout,
             retries=args.retries,
         )

@@ -141,6 +141,8 @@ jobs:
         env:
           OUTCOME: ${{ steps.report.outputs.outcome }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ALERTMANAGER_USER: ${{ secrets.ALERTMANAGER_USER }}
+          ALERTMANAGER_PASSWORD: ${{ secrets.ALERTMANAGER_PASSWORD }}
         run: |
           set -uo pipefail
           if [ "${OUTCOME:-}" = "clean" ]; then
