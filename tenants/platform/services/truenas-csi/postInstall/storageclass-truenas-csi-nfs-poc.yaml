@@ -1,0 +1,27 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-csi-nfs-poc
+  annotations:
+    # Proof-of-concept class for the official truenas-csi driver, running in
+    # parallel with democratic-csi's truenas-nfs. The -poc suffix is the
+    # signal that no production workload should bind here until the
+    # validation in docs/truenas-csi-migration-poc.md has passed; never the
+    # cluster default (Longhorn is).
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: csi.truenas.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  protocol: nfs
+  # storage/k8s/truenas-csi/nfs on the NAS — disjoint from democratic-csi's
+  # storage/k8s/vols so the two control planes never touch each other's
+  # datasets. datasetPath is relative to the pool.
+  pool: storage
+  datasetPath: k8s/truenas-csi/nfs
+  # Parity with truenas-nfs: same allowed network, mapall to root/root
+  # (rootSquash defaults to true, which is the mapall behavior).
+  nfs.networks: 192.168.1.0/24
+  nfs.mapAllUser: root
+  nfs.mapAllGroup: root

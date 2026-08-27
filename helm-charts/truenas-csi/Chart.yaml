@@ -1,0 +1,11 @@
+apiVersion: v2
+name: truenas-csi
+description: GitOps-managed wrapper around the upstream truenas/truenas-csi raw deployment manifest (the official iXsystems CSI driver, WebSocket API), templated so image pinning, the Talos iSCSI hostPath redirect, and ExternalSecret-sourced credentials work the way every other platform service does.
+type: application
+version: 0.1.0
+appVersion: "1.2.0"
+sources:
+  - https://github.com/truenas/truenas-csi
+maintainers:
+  - name: jdwlabs
+    email: jdwillmsen@gmail.com

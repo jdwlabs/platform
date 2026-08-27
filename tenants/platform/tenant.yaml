@@ -69,6 +69,9 @@ namespaces:
   - name: democratic-csi
     quotaTier: platform
     networkPolicy: platform
+  - name: truenas-csi
+    quotaTier: platform
+    networkPolicy: platform
   - name: ai-sre
     quotaTier: platform
     networkPolicy: platform
@@ -199,6 +202,22 @@ services:
     repo: https://democratic-csi.github.io/charts/
     revision: 0.15.1
     namespace: democratic-csi
+    postInstall: true
+    syncWave: 1
+
+  # Official iXsystems driver (WebSocket API), installed in parallel with the
+  # two democratic-csi releases above — disjoint namespace, credential and
+  # dataset parents, so the two CSI control planes never touch each other's
+  # NAS objects. Serves only the -poc StorageClasses until the validation in
+  # docs/truenas-csi-migration-poc.md passes; the democratic-csi releases stay
+  # authoritative for truenas-nfs/truenas-iscsi throughout. See
+  # docs/adr/0029-truenas-csi-evaluated-as-democratic-csi-replacement.md.
+  - name: truenas-csi
+    chart: ""
+    chartPath: helm-charts/truenas-csi
+    repo: https://github.com/jdwlabs/platform.git
+    revision: main
+    namespace: truenas-csi
     postInstall: true
     syncWave: 1
 

@@ -1,0 +1,21 @@
+# Upstream also ships a placeholder Secret next to this ConfigMap; that Secret
+# is deliberately not templated here — the API key reaches the pods through
+# the ExternalSecret-rendered Secret named in .Values.apiKeySecret, so no
+# credential placeholder ever exists in Git or fights ESO over the object.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: truenas-csi-config
+  namespace: {{ .Release.Namespace }}
+data:
+  truenasURL: {{ .Values.config.truenasURL | quote }}
+  truenasInsecure: {{ .Values.config.truenasInsecure | quote }}
+  defaultPool: {{ .Values.config.defaultPool | quote }}
+  nfsServer: {{ .Values.config.nfsServer | quote }}
+  iscsiPortal: {{ .Values.config.iscsiPortal | quote }}
+  {{- with .Values.config.nvmeofPortal }}
+  nvmeofPortal: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.iscsiIQNBase }}
+  iscsiIQNBase: {{ . | quote }}
+  {{- end }}

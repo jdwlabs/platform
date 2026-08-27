@@ -1,0 +1,155 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: truenas-csi-node
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    matchLabels:
+      app: truenas-csi-node
+  template:
+    metadata:
+      labels:
+        app: truenas-csi-node
+    spec:
+      serviceAccountName: truenas-csi-node-sa
+      # hostNetwork means these pods get no CiliumEndpoint and no NetworkPolicy
+      # ever resolves against them (docs/adr/0028); reviewed and accepted for a
+      # storage node plugin, same posture as the democratic-csi node pods.
+      hostNetwork: true
+      hostPID: true
+      hostIPC: true
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: Exists
+      {{- with .Values.node.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: csi-node
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          lifecycle:
+            postStart:
+              exec:
+                # Upstream's shim, verbatim: replaces the container's bundled
+                # iscsiadm with a wrapper that re-execs the host's copy in the
+                # host mount namespace. The host binary is looked up on PATH,
+                # not at an absolute path, because distributions disagree on
+                # where iscsiadm lives (/usr/local/sbin on Talos via the
+                # iscsi-tools extension). The modprobes are non-fatal because
+                # NVMe-oF is optional, so the hook's verdict is gated on the
+                # shim instead.
+                command: ["/bin/sh", "-c", "mkdir -p /run/lock/iscsi && mv /usr/sbin/iscsiadm /usr/sbin/iscsiadm.orig 2>/dev/null; printf '#!/bin/sh\\nexport PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\\nexec nsenter --mount=/host/proc/1/ns/mnt -- iscsiadm \"$@\"\\n' > /usr/sbin/iscsiadm && chmod +x /usr/sbin/iscsiadm; nsenter --mount=/host/proc/1/ns/mnt -- modprobe nvme_tcp 2>/dev/null || true; nsenter --mount=/host/proc/1/ns/mnt -- modprobe nvme_fabrics 2>/dev/null || true; test -x /usr/sbin/iscsiadm"]
+          securityContext:
+            privileged: true
+          args:
+            - "--endpoint=$(CSI_ENDPOINT)"
+            - "--node-id=$(NODE_ID)"
+            - "--mode=node"
+            - "--v={{ .Values.logVerbosity }}"
+          env:
+            {{- include "truenas-csi.driverEnv" . | nindent 12 }}
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /csi
+            - name: kubelet-dir
+              mountPath: /var/lib/kubelet
+              mountPropagation: Bidirectional
+            - name: device-dir
+              mountPath: /dev
+            - name: modules-dir
+              mountPath: /lib/modules
+              readOnly: true
+            - name: iscsi-dir
+              mountPath: /etc/iscsi
+              mountPropagation: Bidirectional
+            - name: iscsi-lib
+              mountPath: /var/lib/iscsi
+              mountPropagation: Bidirectional
+            - name: connector-dir
+              mountPath: /var/lib/truenas-csi
+            - name: host-root
+              mountPath: /host
+              mountPropagation: Bidirectional
+          resources:
+            {{- toYaml .Values.node.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9808
+            initialDelaySeconds: 10
+            timeoutSeconds: 3
+            periodSeconds: 10
+            failureThreshold: 5
+
+        - name: csi-node-driver-registrar
+          image: {{ .Values.sidecars.nodeDriverRegistrar.image }}
+          args:
+            - "--csi-address=$(ADDRESS)"
+            - "--kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)"
+            - "--v=5"
+          env:
+            - name: ADDRESS
+              value: /csi/csi.sock
+            - name: DRIVER_REG_SOCK_PATH
+              value: /var/lib/kubelet/plugins/{{ .Values.csiDriverName }}/csi.sock
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+
+        - name: liveness-probe
+          image: {{ .Values.sidecars.livenessProbe.image }}
+          args:
+            - "--csi-address=/csi/csi.sock"
+            - "--health-port=9808"
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /csi
+
+      volumes:
+        - name: registration-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry/
+            type: DirectoryOrCreate
+        - name: plugin-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins/{{ .Values.csiDriverName }}/
+            type: DirectoryOrCreate
+        - name: kubelet-dir
+          hostPath:
+            path: /var/lib/kubelet
+            type: Directory
+        - name: device-dir
+          hostPath:
+            path: /dev
+        - name: modules-dir
+          hostPath:
+            path: /lib/modules
+            type: Directory
+        # Upstream: /etc/iscsi, type Directory — which Talos's kubelet mount
+        # namespace fails the type check on. See node.iscsiDirHostPath in
+        # values.yaml for why this is redirected and why that is safe under
+        # the nsenter shim.
+        - name: iscsi-dir
+          hostPath:
+            path: {{ .Values.node.iscsiDirHostPath }}
+            type: {{ .Values.node.iscsiDirHostPathType }}
+        - name: iscsi-lib
+          hostPath:
+            path: /var/lib/iscsi
+            type: DirectoryOrCreate
+        # Per-volume connector files record the protocol and target of each
+        # staged volume. NodeUnstageVolume gets no publish context, so this
+        # state has to outlive the container.
+        - name: connector-dir
+          hostPath:
+            path: /var/lib/truenas-csi
+            type: DirectoryOrCreate
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory

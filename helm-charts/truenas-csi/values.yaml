@@ -1,0 +1,128 @@
+# Defaults track upstream deploy/truenas-csi-driver.yaml at the Chart.yaml
+# appVersion, with three deliberate departures, each explained at its key:
+# the API-key Secret is consumed, never created (ExternalSecret owns it);
+# the iSCSI config hostPath is redirected off /etc/iscsi for Talos; and the
+# snapshotter sidecar is off until the cluster grows a snapshot-controller.
+#
+# This driver runs alongside democratic-csi, not instead of it — disjoint
+# CSIDriver name, namespace, credential and dataset parents — per
+# docs/adr/0029-truenas-csi-evaluated-as-democratic-csi-replacement.md.
+
+csiDriverName: csi.truenas.io
+
+# Upstream deploys :latest. Pinned to the release tag instead, with the
+# multi-arch OCI *index* digest for that tag (docker-content-digest as ghcr.io
+# serves it), not a per-arch child manifest — the tag stays for readability,
+# the digest is what resolves. One key pins both the controller and node
+# containers: a version skew between the two halves of one CSI driver is a
+# debugging trap, not a safety margin.
+image:
+  repository: ghcr.io/truenas/truenas-csi
+  tag: "v1.2.0@sha256:ebb180986823a31110be926d8f14a6cc669540a6c58947220a16de802d852f38"
+  pullPolicy: IfNotPresent
+
+# Sidecar versions are upstream's own pairings for this driver release; digests
+# are the multi-arch index digests registry.k8s.io serves for those tags.
+sidecars:
+  provisioner:
+    image: registry.k8s.io/sig-storage/csi-provisioner:v6.1.1@sha256:d992c36d4ddd6dfa37c81b487e5a673920e1360e2977eb779051df8da1c5787d
+  attacher:
+    image: registry.k8s.io/sig-storage/csi-attacher:v4.11.0@sha256:b74b05b39501565022883fc128002b4cb857a7bb6c858606bcb3fdedba0b0b80
+  resizer:
+    image: registry.k8s.io/sig-storage/csi-resizer:v2.1.0@sha256:589e525cddef6d768e68da1f0bc9ffd0a24bf3add3dd010648eb7189976fde79
+  snapshotter:
+    # Off: no snapshot-controller or snapshot.storage.k8s.io CRDs exist
+    # anywhere in this cluster (a cluster-wide gap, not a driver one — the
+    # democratic-csi releases carry the same dead sidecar). Rather than ship a
+    # third sidecar with nothing to talk to, this one stays off until the
+    # cluster grows the controller; flipping it on is one values change.
+    enabled: false
+    image: registry.k8s.io/sig-storage/csi-snapshotter:v8.5.0@sha256:da081c27e8a6d91f36042c1942362d0515ced8d06e18c11b8f893e58c4d6d797
+  livenessProbe:
+    image: registry.k8s.io/sig-storage/livenessprobe:v2.18.0@sha256:c4cc074199c045dd73ab85f28897e2a32f4d6f38ffdba4f3b13b8007ccbd3570
+  nodeDriverRegistrar:
+    image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.16.0@sha256:ab482308a4921e28a6df09a16ab99a457e9af9641ff44fb1be1a690d07ce8b70
+
+# Rendered into the truenas-csi-config ConfigMap the driver reads its
+# connection settings from. Pool and dataset parents are deliberately NOT
+# here: this driver takes them per-StorageClass (pool/datasetPath
+# parameters), which is where the disjoint-from-democratic-csi dataset
+# layout is enforced — see the PoC StorageClasses under
+# tenants/platform/services/truenas-csi/postInstall/.
+config:
+  # WebSocket, wss://<host>/api/current — the API TrueNAS keeps past 25.10.
+  truenasURL: wss://192.168.1.205
+  # The appliance ships a self-signed iXsystems certificate; the transport is
+  # still TLS, which is what TrueNAS's insecure-transport key revocation
+  # actually checks for.
+  truenasInsecure: "true"
+  # Fallback pool only; every StorageClass here sets pool explicitly.
+  defaultPool: storage
+  nfsServer: 192.168.1.205
+  # Must be an IPv4 literal — a documented driver limitation.
+  iscsiPortal: 192.168.1.205:3260
+  # Optional upstream keys, omitted from the ConfigMap when empty (the pod
+  # env refs mark them optional): NVMe-oF is unused on this cluster.
+  nvmeofPortal: ""
+  iscsiIQNBase: ""
+
+# Consumed, never created. The named Secret is rendered by the ExternalSecret
+# in tenants/platform/services/truenas-csi/postInstall/ from Vault path
+# kv/truenas-csi-driver — a deliberately different path from kv/truenas-csi,
+# which democratic-csi's own API key already occupies and platformctl's
+# --truenas-use-csi-api-key flag reads by name. Sharing one key across two
+# CSI control planes would double the blast radius ADR-0025 documented.
+apiKeySecret:
+  name: truenas-csi-driver-api-key
+  key: api-key
+
+# Driver log verbosity (--v). Upstream default.
+logVerbosity: 4
+
+controller:
+  replicas: 1
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 200m
+  # Upstream's probe path (livenessprobe sidecar -> driver Probe() RPC) is the
+  # same shape that produced 189 restarts in 19 days on democratic-csi when
+  # the NAS blipped, so it is toggleable from day one. Left on for the PoC to
+  # observe whether this driver's Probe() tolerates a transient NAS outage;
+  # turn it off here if restart churn appears.
+  livenessProbe:
+    enabled: true
+
+node:
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 200m
+  # Upstream hardcodes hostPath /etc/iscsi type Directory, which Talos's
+  # kubelet mount namespace does not resolve ("hostPath type check failed:
+  # /etc/iscsi is not a directory" — the exact failure the democratic-csi-iscsi
+  # release hit and worked around at the chart level). Under the manifest's
+  # built-in nsenter iscsiadm shim the host's own initiator config is what is
+  # actually used, so this mount only has to resolve on a writable path; it is
+  # kept disjoint from democratic-csi's /var/etc/iscsi redirect so the two
+  # drivers never share a scratch path either.
+  iscsiDirHostPath: /var/etc/truenas-csi/iscsi
+  iscsiDirHostPathType: DirectoryOrCreate
+  # The node DaemonSet has no business on control-plane nodes. Explicit
+  # label-based anti-affinity (not just the CP NoSchedule taint, which the
+  # upstream tolerate-everything DaemonSet would sail past) so a stray pod
+  # cannot land during a taint-timing race on a CP rejoin — the same guard
+  # both democratic-csi releases carry.
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
