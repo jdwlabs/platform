@@ -26,6 +26,17 @@ lives:
   snapshot-controller or `snapshot.storage.k8s.io` CRDs yet.
 - **Controller liveness probe toggleable** — same probe shape that caused
   restart churn on democratic-csi during transient NAS outages.
+- **Hardened to the repo floor** (upstream sets no securityContext and no
+  sidecar resources): every container gets requests plus a memory limit — and
+  no CPU limit, per `docs/adr/0010-workload-hardening-floors.md`, dropping
+  upstream's 200m limits — and every non-privileged container runs with
+  seccomp `RuntimeDefault`, `allowPrivilegeEscalation: false` and all
+  capabilities dropped; sidecars additionally get a read-only root
+  filesystem. What stays open is the irreducible CSI node-plugin shape
+  (privileged driver, host namespaces, hostPath mounts) plus the driver
+  containers' root user and writable root filesystem; the matching Trivy
+  code-scanning alerts are dismissed per-alert with this reasoning recorded,
+  never suppressed in `.trivyignore`.
 
 Pool and dataset parents are per-StorageClass (`pool`/`datasetPath`
 parameters), not chart config; the PoC classes live under
