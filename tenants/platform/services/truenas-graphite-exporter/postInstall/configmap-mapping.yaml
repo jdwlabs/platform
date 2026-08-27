@@ -118,6 +118,12 @@ data:
         labels:
           host: "${1}"
 
+      # ZFS's own free-memory-outside-ARC accounting (arc_free_memory() minus
+      # a system reserve, module/os/linux/zfs/arc_os.c) — negative means ARC
+      # itself has concluded it needs to give memory back. This is the memory
+      # capacity signal (TrueNASMemoryAvailableLow in rules-truenas.yaml), not
+      # truenas_memory_available_bytes above, which does not know ARC is
+      # reclaimable at all.
       - match: '^truenas\.([^.]+)\.truenas_arcstats\.avail\.avail$'
         match_type: regex
         name: "truenas_arc_available_memory_bytes"
@@ -185,9 +191,14 @@ data:
         labels:
           host: "${1}"
 
-      # "available" in the /proc/meminfo sense — reclaimable page cache and ARC
-      # included — so this is the number a capacity alert should read, not
-      # total minus ARC.
+      # "available" in the /proc/meminfo sense (this is MemAvailable, verified
+      # against truenas/middleware's own get_memory_info(), which reads
+      # /proc/meminfo directly) — but that calculation does NOT count ZFS ARC
+      # as reclaimable (openzfs/zfs#10255, still open upstream: ARC is
+      # SPL/kmem memory, not page cache or SReclaimable slab). A capacity
+      # alert should NOT read this ratio alone: ARC growing to fill RAM drives
+      # it down on entirely healthy caching behaviour. See rules-truenas.yaml
+      # (TrueNASMemoryAvailableLow) for the ARC-aware signal used instead.
       - match: '^truenas\.([^.]+)\.truenas_meminfo\.available\.available$'
         match_type: regex
         name: "truenas_memory_available_bytes"
