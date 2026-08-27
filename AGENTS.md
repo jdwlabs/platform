@@ -35,6 +35,14 @@ jdwlabs `platform` is the GitOps source of truth for the jdwlabs Kubernetes clus
 - Validate Kubernetes manifests: `kubeconform` (used in CI)
 - Build/test the binary: `cd cli && go build ./... && go test ./...`
 
+### Branch protection / required checks
+
+Branch rulesets (required status checks, review rules) are managed as code
+in [`.github/rulesets/`](.github/rulesets/) and applied to GitHub manually
+via `apply.sh` after merge — see that script's header comment before
+renaming, merging, or removing any required CI job context; doing it in the
+wrong order can make a PR permanently unmergeable or block every open PR.
+
 ### Bootstrap Process
 
 Run `platformctl bootstrap` from the repo root. See [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md) for the phase summary and manual-touch points.
