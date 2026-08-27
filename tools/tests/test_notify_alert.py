@@ -125,6 +125,27 @@ class PostTests(unittest.TestCase):
         na.post({}, endpoint="https://am.example", token="t0ken", opener=opener)
         self.assertEqual(seen["auth"], "Bearer t0ken")
 
+    def test_sends_a_basic_auth_header_when_credentials_are_given(self):
+        seen = {}
+
+        def opener(request, timeout=None):
+            seen["auth"] = request.headers.get("Authorization")
+            return FakeResponse(200)
+
+        na.post({}, endpoint="https://am.example", basic_auth=("admin", "hunter2"), opener=opener)
+        self.assertEqual(seen["auth"], "Basic YWRtaW46aHVudGVyMg==")
+
+    def test_basic_auth_takes_precedence_over_a_token(self):
+        seen = {}
+
+        def opener(request, timeout=None):
+            seen["auth"] = request.headers.get("Authorization")
+            return FakeResponse(200)
+
+        na.post({}, endpoint="https://am.example", token="t0ken",
+                 basic_auth=("admin", "hunter2"), opener=opener)
+        self.assertEqual(seen["auth"], "Basic YWRtaW46aHVudGVyMg==")
+
     def test_a_4xx_is_not_retried(self):
         calls = []
 
@@ -200,6 +221,19 @@ class MainTests(unittest.TestCase):
                 unittest.mock.patch.dict(na.os.environ, {"ALERTMANAGER_TOKEN": "abc"}):
             na.main(self.ARGS)
         self.assertEqual(posted.call_args.kwargs["token"], "abc")
+
+    def test_basic_auth_credentials_are_read_from_the_environment(self):
+        env = {"ALERTMANAGER_USER": "admin", "ALERTMANAGER_PASSWORD": "hunter2"}
+        with unittest.mock.patch.object(na, "post") as posted, \
+                unittest.mock.patch.dict(na.os.environ, env):
+            na.main(self.ARGS)
+        self.assertEqual(posted.call_args.kwargs["basic_auth"], ("admin", "hunter2"))
+
+    def test_basic_auth_is_not_set_when_only_one_credential_is_present(self):
+        with unittest.mock.patch.object(na, "post") as posted, \
+                unittest.mock.patch.dict(na.os.environ, {"ALERTMANAGER_USER": "admin"}):
+            na.main(self.ARGS)
+        self.assertIsNone(posted.call_args.kwargs["basic_auth"])
 
 
 if __name__ == "__main__":
