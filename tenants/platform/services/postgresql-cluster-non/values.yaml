@@ -22,6 +22,19 @@ cluster:
     enabled: true
     podMonitor:
       enabled: true
+    prometheusRule:
+      enabled: true
+      # CNPGClusterHACritical/CNPGClusterHAWarning alert on standby count relative
+      # to `instances`, and this cluster is deliberately pinned to instances: 1
+      # above for resource savings (see that field's comment) — with one instance
+      # there is no standby by design, so both alerts would fire permanently and
+      # add nothing an operator can act on. Excluded here only, per-release, so
+      # postgresql-cluster-prd (still at 3 instances) keeps full HA alerting, and
+      # any future non-prod cluster that isn't deliberately pinned this way is
+      # unaffected too.
+      excludeRules:
+        - CNPGClusterHACritical
+        - CNPGClusterHAWarning
 
   affinity:
     # topologyKey: kubernetes.io/hostname because this homelab has no zone labels
