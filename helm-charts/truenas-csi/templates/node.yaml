@@ -19,6 +19,17 @@ spec:
       hostNetwork: true
       hostPID: true
       hostIPC: true
+      # Applies the default seccomp profile to the registrar and livenessprobe
+      # sidecars; the runtime overrides it to unconfined for the privileged
+      # csi-node container, so this constrains exactly the containers that can
+      # take it. The host namespaces, privileged driver, and hostPath mounts
+      # above and below are the irreducible shape of a CSI node plugin (stage
+      # host mounts the kubelet can see, run the host's iscsiadm, load kernel
+      # modules) — the same posture democratic-csi's node pods run with; the
+      # scan findings for them are dismissed with this reasoning recorded.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       priorityClassName: system-node-critical
       tolerations:
         - operator: Exists
@@ -42,6 +53,11 @@ spec:
                 # NVMe-oF is optional, so the hook's verdict is gated on the
                 # shim instead.
                 command: ["/bin/sh", "-c", "mkdir -p /run/lock/iscsi && mv /usr/sbin/iscsiadm /usr/sbin/iscsiadm.orig 2>/dev/null; printf '#!/bin/sh\\nexport PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\\nexec nsenter --mount=/host/proc/1/ns/mnt -- iscsiadm \"$@\"\\n' > /usr/sbin/iscsiadm && chmod +x /usr/sbin/iscsiadm; nsenter --mount=/host/proc/1/ns/mnt -- modprobe nvme_tcp 2>/dev/null || true; nsenter --mount=/host/proc/1/ns/mnt -- modprobe nvme_fabrics 2>/dev/null || true; test -x /usr/sbin/iscsiadm"]
+          # privileged is required for mount/unmount and device access; the
+          # API also forbids allowPrivilegeEscalation: false alongside it, and
+          # dropped capabilities are meaningless under it. The root filesystem
+          # must stay writable because the postStart shim above rewrites
+          # /usr/sbin/iscsiadm inside the container.
           securityContext:
             privileged: true
           args:
@@ -86,6 +102,13 @@ spec:
 
         - name: csi-node-driver-registrar
           image: {{ .Values.sidecars.nodeDriverRegistrar.image }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: true
+          resources:
+            {{- toYaml .Values.sidecars.resources | nindent 12 }}
           args:
             - "--csi-address=$(ADDRESS)"
             - "--kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)"
@@ -103,6 +126,13 @@ spec:
 
         - name: liveness-probe
           image: {{ .Values.sidecars.livenessProbe.image }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: true
+          resources:
+            {{- toYaml .Values.sidecars.resources | nindent 12 }}
           args:
             - "--csi-address=/csi/csi.sock"
             - "--health-port=9808"

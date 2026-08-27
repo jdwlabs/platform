@@ -42,6 +42,21 @@ sidecars:
     image: registry.k8s.io/sig-storage/livenessprobe:v2.18.0@sha256:c4cc074199c045dd73ab85f28897e2a32f4d6f38ffdba4f3b13b8007ccbd3570
   nodeDriverRegistrar:
     image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.16.0@sha256:ab482308a4921e28a6df09a16ab99a457e9af9641ff44fb1be1a690d07ce8b70
+  # Upstream ships the sidecars with no resources at all, which would make
+  # both pods BestEffort — the failure mode the repo's hardening floor exists
+  # to prevent (docs/adr/0010-workload-hardening-floors.md). One shared block:
+  # these are all small static Go binaries, observed idling 20-30Mi on the
+  # democratic-csi releases. Requests + memory limit, no CPU limit, per that
+  # record. The templates also give every non-privileged container the
+  # restricted securityContext (no privilege escalation, all capabilities
+  # dropped, read-only root filesystem) upstream omits — standard for
+  # sig-storage sidecars, which write only into their mounted volumes.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
 
 # Rendered into the truenas-csi-config ConfigMap the driver reads its
 # connection settings from. Pool and dataset parents are deliberately NOT
@@ -81,13 +96,16 @@ logVerbosity: 4
 
 controller:
   replicas: 1
+  # Upstream also sets a 200m CPU limit; dropped here because repo policy is
+  # requests plus a memory limit and deliberately no CPU limit — a CFS quota
+  # throttles even on an idle node, while a memory limit is a real stop
+  # (docs/adr/0010-workload-hardening-floors.md). Same for the node pod below.
   resources:
     requests:
       memory: 128Mi
       cpu: 100m
     limits:
       memory: 256Mi
-      cpu: 200m
   # Upstream's probe path (livenessprobe sidecar -> driver Probe() RPC) is the
   # same shape that produced 189 restarts in 19 days on democratic-csi when
   # the NAS blipped, so it is toggleable from day one. Left on for the PoC to
@@ -103,7 +121,6 @@ node:
       cpu: 100m
     limits:
       memory: 256Mi
-      cpu: 200m
   # Upstream hardcodes hostPath /etc/iscsi type Directory, which Talos's
   # kubelet mount namespace does not resolve ("hostPath type check failed:
   # /etc/iscsi is not a directory" — the exact failure the democratic-csi-iscsi
