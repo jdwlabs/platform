@@ -69,12 +69,34 @@ serviceMonitor:
     # http_2xx (chart default, merged in via config.modules) is used rather
     # than a new module: a plain GET is enough to prove the full path works.
     #
-    # The target is the public hostname served by platform-gateway-nginx, not
-    # the app's ClusterIP -- a ClusterIP probe would bypass the gateway
-    # entirely and could pass while ingress itself is broken. Hitting the
-    # public hostname and hairpinning back through the gateway is the same
-    # path jdwlabs' own inter-app calls already rely on (see
-    # tenants/jdwlabs/tenant.yaml), so it is a proven route, not a novel one.
+    # The target is platform-gateway-nginx's own Service
+    # (platform-gateway-nginx.nginx-gateway.svc.cluster.local, the same
+    # Service the DaemonSet's 5 replicas back) -- NOT the public hostname,
+    # and NOT the app's ClusterIP. The app's ClusterIP was always wrong: it
+    # would bypass the gateway entirely and could pass while ingress itself
+    # is broken. The public hostname turned out to be wrong too: this
+    # cluster's own public IP is behind a router that cannot hairpin a LAN
+    # client -- including this exporter's own pod, which lives on the same
+    # LAN -- back to that IP through its port-forward rule. That limitation
+    # produced probe_success==0 with a 100% healthy backend and was
+    # mistaken for a live incident once already; see the runbook row this
+    # rule's runbook_url points at. Hitting the gateway's Service keeps the
+    # exact chain the endpoint-desync incident needs covered (gateway pod ->
+    # Cilium enforcement -> backend pod) while never leaving the cluster
+    # network, so the hairpin can't recur here. `hostname` (blackbox
+    # exporter's own probe param, not a module setting) sets both the Host
+    # header -- needed so the gateway's HTTPRoute picks the same backend the
+    # public hostname would have -- and the TLS ServerName, so the
+    # wildcard-jdwlabs-tls cert still validates against an address that
+    # itself carries no SAN for it.
+    #
+    # A single node's NodePort (e.g. https://<node-ip>:30543/) was
+    # considered and rejected: unlike the pve/truenas mgmt targets above,
+    # this repo tracks no stable per-node address for Talos nodes (they are
+    # DHCP-assigned and randomly named, e.g. talos-lx0-6a4), so pinning one
+    # would both hardcode a value this repo has no source of truth for and
+    # narrow the probe to one of the five replicas instead of exercising all
+    # of them the way the incident's own live verification did.
     #
     # container.{prd,non} are the two backends the original incident actually
     # dropped traffic to, and both sit in `enforce: true` namespaces
@@ -82,13 +104,15 @@ serviceMonitor:
     # with an "-ingress" suffix (as opposed to "-mgmt" above) so the alerts
     # below can select this group by regex without a job label.
     - name: container-prd-ingress
-      url: "https://container.prd.jdwlabs.com/"
+      url: "https://platform-gateway-nginx.nginx-gateway.svc.cluster.local/"
+      hostname: container.prd.jdwlabs.com
       module: http_2xx
       additionalMetricsRelabels:
         app: container
         env: prd
     - name: container-non-ingress
-      url: "https://container.non.jdwlabs.com/"
+      url: "https://platform-gateway-nginx.nginx-gateway.svc.cluster.local/"
+      hostname: container.non.jdwlabs.com
       module: http_2xx
       additionalMetricsRelabels:
         app: container
@@ -134,6 +158,20 @@ prometheusRule:
     # (pod-direct, off-node) passing while real ingress ETIMEDOUTs, so this
     # is the only signal that would have caught that failure live.
     #
+    # The probe now targets platform-gateway-nginx's own in-cluster Service
+    # rather than the public hostname (see the target comment above), which
+    # rules out the one other confirmed cause of an identical symptom: this
+    # cluster's router cannot hairpin a LAN client back to the cluster's own
+    # public IP, so a probe run from a LAN pod against the public hostname
+    # reads probe_success==0 with an otherwise 100% healthy backend. That
+    # was mistaken for a live desync once already. A probe against the
+    # public hostname run manually from a LAN device while triaging this
+    # alert can still hit that limitation -- if it does, it is not
+    # corroboration of an incident, it is the hairpin. Rule out Cilium
+    # desync by checking pod-to-pod connectivity to the backend and NodePort
+    # reachability from every node FIRST; only conclude desync once those
+    # are healthy and this Service-targeted probe is still failing.
+    #
     # for: 5m mirrors HardwareHostUnreachable's own reasoning: the failure
     # this exists to catch is a hard, total desync (every request to the
     # backend fails), not a partial degradation, so a short window already
@@ -146,7 +184,7 @@ prometheusRule:
         severity: critical
       annotations:
         summary: "Ingress-path probe to {{ $labels.target }} failing"
-        description: "An HTTP probe through platform-gateway-nginx to {{ $labels.target }} ({{ $labels.app }}/{{ $labels.env }}) has failed for 5m. ETIMEDOUT with passing backend probes points to a Cilium endpoint desync — see runbook."
+        description: "An HTTP probe through platform-gateway-nginx to {{ $labels.target }} ({{ $labels.app }}/{{ $labels.env }}) failed for 5m. Runs in-cluster now, so a LAN-router hairpin can't cause it — check pod-to-pod/NodePort connectivity before assuming Cilium desync. See runbook."
         runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
     # The same dead-man's-switch gap HardwareHostProbeMissing closes for the
