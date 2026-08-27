@@ -21,6 +21,15 @@
 # bigger investigation. Counting the real prompt on every call and sizing
 # the output budget to what's actually left is the only way to keep the
 # guarantee true as prompts grow, not just patch today's observed size.
+#
+# That dynamic sizing still had one gap: the guardrail always authorized at
+# least MIN_OUTPUT_TOKENS, even when the prompt alone left less room than
+# that -- confirmed live 2026-08-26, the drift-scan CronJob got a 512-output
+# request through this guardrail whose prompt was already 32257 tokens
+# against sre-investigator-local's 32768 window, one token over even at the
+# floor (ContextWindowExceededError again, just at the opposite end of the
+# budget). The floor is now a refusal threshold instead of a value it will
+# force through -- see the refusal branch below.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -31,6 +40,7 @@ data:
     from typing import Literal, Optional
 
     import litellm
+    from fastapi import HTTPException
     from litellm.integrations.custom_logger import CustomLogger
     from litellm.proxy.proxy_server import UserAPIKeyAuth, DualCache
 
@@ -72,10 +82,12 @@ data:
     # of an estimation gap this code cannot directly observe, widened well
     # past it and re-verified against the same real job.
     SAFETY_MARGIN_TOKENS = 6000
-    # Never returns less than this -- a near-exhausted context gets a short
-    # response instead of an outright max_tokens<=0 error, and this floor is
-    # the signal something upstream (prompt size, this model's fit for the
-    # task) needs attention rather than the guardrail silently degrading.
+    # The smallest output budget this guardrail will authorize. Below this,
+    # refuse the call outright instead of forcing it through anyway (see the
+    # refusal branch below) -- a near-exhausted context is the signal that
+    # something upstream (prompt size, this model's fit for the task) needs
+    # attention, not something to paper over with a token budget too small
+    # to be useful.
     MIN_OUTPUT_TOKENS = 512
     # Absolute cap regardless of how much context is free -- RCA prose does
     # not need more than this, and it bounds a single response's cost/latency
@@ -127,7 +139,52 @@ data:
                 return data
 
             available = context_window - prompt_tokens - SAFETY_MARGIN_TOKENS
-            ceiling = max(MIN_OUTPUT_TOKENS, min(available, MAX_OUTPUT_TOKENS_ABSOLUTE))
+
+            if available < MIN_OUTPUT_TOKENS:
+                # Forcing the MIN_OUTPUT_TOKENS floor here (the old behavior)
+                # authorizes prompt_tokens + MIN_OUTPUT_TOKENS even when that
+                # sum is already over context_window -- confirmed live
+                # 2026-08-26: sre-investigator-local rejected a request with
+                # max_tokens clamped to exactly 512 because the backend's own
+                # count (which this estimate can undercount, see
+                # SAFETY_MARGIN_TOKENS above) put the prompt alone at 32257
+                # against a 32768 window, one token short of even the floor.
+                # A fixed SAFETY_MARGIN_TOKENS can't rule this out for every
+                # future prompt size (Holmes' conversation grows call to
+                # call), so refuse outright instead of forwarding a request
+                # this guardrail already knows will overflow -- the caller
+                # gets the same non-200-is-inconclusive outcome as any other
+                # backend rejection, but from an accurate, attributable cause
+                # instead of an opaque ContextWindowExceededError.
+                import logging
+
+                logging.getLogger("litellm").warning(
+                    "max_tokens_ceiling_guardrail: refusing model=%s, "
+                    "prompt_tokens=%s leaves no safe room under "
+                    "context_window=%s (safety_margin=%s, min_output=%s)",
+                    model,
+                    prompt_tokens,
+                    context_window,
+                    SAFETY_MARGIN_TOKENS,
+                    MIN_OUTPUT_TOKENS,
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "max_tokens_ceiling_guardrail: prompt_tokens="
+                        f"{prompt_tokens} leaves no safe room under "
+                        f"context_window={context_window} for model={model} "
+                        f"(even the {MIN_OUTPUT_TOKENS}-token output floor); "
+                        "refusing rather than forwarding a request already "
+                        "known to overflow"
+                    ),
+                )
+
+            # available >= MIN_OUTPUT_TOKENS is now guaranteed, so this can
+            # never clamp below the floor -- unlike the old max(MIN_OUTPUT_
+            # TOKENS, ...) form, it also never clamps *up* past what's
+            # actually available.
+            ceiling = min(available, MAX_OUTPUT_TOKENS_ABSOLUTE)
 
             if requested > ceiling:
                 import logging
