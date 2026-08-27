@@ -120,20 +120,44 @@ spec:
               but does not fix it.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
 
-        # available, not free: the NAS reports /proc/meminfo-style availability,
-        # so reclaimable ARC and page cache are already counted as available.
-        # ARC growing to fill RAM is normal ZFS behaviour and must not alert;
-        # this fires only when memory is genuinely unreclaimable, which on a NAS
-        # means services are about to be OOM-killed and NFS/iSCSI with them.
+        # truenas_memory_available_bytes is a straight read of this host's
+        # /proc/meminfo MemAvailable (traced through TrueNAS's own
+        # middlewared.utils.memory.get_memory_info(), which opens
+        # /proc/meminfo and returns the MemAvailable line verbatim). That
+        # calculation does NOT count ZFS ARC as reclaimable: ARC is allocated
+        # through the SPL/kmem layer, not the page cache or SReclaimable slab
+        # accounting MemAvailable is built from. This is a known, still-open
+        # upstream gap (openzfs/zfs#10255, "ARC not accounted as MemAvailable
+        # in /proc/meminfo"), not something specific to this NAS's version.
+        #
+        # Consequence: on a sequential-read workload ARC grows to fill RAM
+        # exactly as designed, and truenas_memory_available_bytes craters
+        # right alongside it even though every byte of that ARC is reclaimable
+        # on demand. Alerting on that ratio pages on ordinary ZFS caching, not
+        # on a problem — the same "confident but backwards" mistake the CPU
+        # temperature exclusion comment made elsewhere in this file. It is not
+        # used below for that reason; it stays mapped for dashboards only.
+        #
+        # truenas_arc_available_memory_bytes is a different thing: it is
+        # arcstats' own "avail" field, which is ZFS's *own* accounting of
+        # memory outside the ARC, computed on Linux as
+        # arc_free_memory() - arc_sys_free (module/os/linux/zfs/arc_os.c).
+        # The upstream comment on that function is exact: "Positive if there
+        # is sufficient free memory, negative indicates the amount of memory
+        # that needs to be freed up." ARC watches this value itself to decide
+        # whether to shrink, so a brief dip below zero is ARC self-correcting,
+        # not an incident — the `for:` window is what separates that from
+        # memory the whole system cannot free no matter how much ARC gives
+        # back, which is the case worth paging on.
         - alert: TrueNASMemoryAvailableLow
           expr: |
-            truenas_memory_available_bytes / truenas_memory_total_bytes < 0.10
+            truenas_arc_available_memory_bytes < 0
           for: 15m
           labels:
             severity: warning
           annotations:
-            summary: "TrueNAS {{ $labels.host }} has under 10% memory available"
-            description: "{{ $labels.host }} reports {{ $value | humanizePercentage }} of RAM available. This already accounts for reclaimable ARC, so it is real pressure rather than ZFS caching. Expect NFS and iSCSI latency before anything is killed."
+            summary: "TrueNAS {{ $labels.host }} has no memory headroom outside ARC"
+            description: "{{ $labels.host }}'s ARC-independent memory headroom has been negative for 15m — ZFS's own signal that it cannot free enough memory, not just that ARC is large. Expect NFS and iSCSI latency before anything is killed."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
 
         # nfsd counts RPCs it refused. Sustained non-zero means clients are

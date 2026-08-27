@@ -1142,6 +1142,15 @@ time() - graphite_last_processed_timestamp_seconds{job="truenas-graphite-exporte
 
 count by (__name__) ({__name__=~"truenas_.+"})     # expect 28 metric names, 75 series
 truenas_memory_available_bytes / truenas_memory_total_bytes
+# /proc/meminfo MemAvailable over total. Useful for a dashboard, but this does
+# NOT account for ZFS ARC as reclaimable (openzfs/zfs#10255) — it drops as ARC
+# grows even though that memory is reclaimable on demand. Do not alert on it
+# alone; see truenas_arc_available_memory_bytes below and
+# TrueNASMemoryAvailableLow in rules-truenas.yaml.
+truenas_arc_available_memory_bytes
+# ZFS's own free-memory-outside-ARC accounting. Negative means ARC itself has
+# concluded it needs to shrink; sustained negative is the actual pressure
+# signal, independent of how large ARC has grown.
 count by (serial) (truenas_disk_busy_percent)      # expect one series per physical disk
 ```
 

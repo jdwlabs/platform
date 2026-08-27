@@ -124,6 +124,61 @@ tests:
         alertname: TrueNASCPUThermallySaturated
         exp_alerts: []
 
+  # ARC growing to fill RAM must not page: truenas_memory_available_bytes
+  # (MemAvailable) craters on this precisely because MemAvailable does not
+  # count ARC as reclaimable, but truenas_arc_available_memory_bytes — ZFS's
+  # own free-outside-ARC accounting — stays comfortably positive throughout,
+  # which is the case for the alert to stay silent.
+  - interval: 1m
+    name: ARC filling RAM alone does not page
+    input_series:
+      - series: 'truenas_memory_available_bytes{host="truenas"}'
+        values: '2000000000+0x20'
+      - series: 'truenas_memory_total_bytes{host="truenas"}'
+        values: '32720100000+0x20'
+      - series: 'truenas_arc_available_memory_bytes{host="truenas"}'
+        values: '4000000000+0x20'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: TrueNASMemoryAvailableLow
+        exp_alerts: []
+
+  # A brief dip below zero is ARC self-correcting (arc_available_memory can
+  # be transiently negative while ARC finds its target size) and must not
+  # page before the `for:` window elapses.
+  - interval: 1m
+    name: a brief ARC-available dip does not page
+    input_series:
+      - series: 'truenas_arc_available_memory_bytes{host="truenas"}'
+        values: '-1000000+0x10 2000000+0x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TrueNASMemoryAvailableLow
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: TrueNASMemoryAvailableLow
+        exp_alerts: []
+
+  # Sustained negative ARC-available headroom is the real signal: ZFS itself
+  # cannot free enough memory outside the ARC to stay positive, independent
+  # of how large ARC has grown.
+  - interval: 1m
+    name: sustained negative ARC headroom pages
+    input_series:
+      - series: 'truenas_arc_available_memory_bytes{host="truenas"}'
+        values: '-500000000+0x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: TrueNASMemoryAvailableLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              host: truenas
+            exp_annotations:
+              summary: "TrueNAS truenas has no memory headroom outside ARC"
+              description: "truenas's ARC-independent memory headroom has been negative for 15m — ZFS's own signal that it cannot free enough memory, not just that ARC is large. Expect NFS and iSCSI latency before anything is killed."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
   # truenas_uptime_seconds resetting below 15m is the restart signal,
   # independent of temperature — this host has also come back on its own
   # after a multi-hour absence with no thermal signature at all.
