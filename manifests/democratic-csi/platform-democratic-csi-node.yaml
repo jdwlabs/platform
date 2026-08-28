@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: platform-democratic-csi-node
+  namespace: democratic-csi
+  labels:
+    app.kubernetes.io/name: democratic-csi
+    app.kubernetes.io/instance: platform-democratic-csi
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: democratic-csi
+      app.kubernetes.io/instance: platform-democratic-csi-node
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: democratic-csi
+        app.kubernetes.io/instance: platform-democratic-csi-node
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+      tolerations:
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoExecute"
+      - key: "node.cilium.io/agent-not-ready"
+        operator: "Exists"
+        effect: "NoSchedule"
+      containers:
+      - name: csi-node-driver
+        image: ghcr.io/democratic-csi/driver:v1.2.3
+        securityContext:
+          privileged: true
+          capabilities:
+            add: ["SYS_ADMIN"]
+        volumeMounts:
+        - name: device-dir
+          mountPath: /dev
+        - name: pods-mount-dir
+          mountPath: /var/lib/kubelet/pods
+        - name: csi-socket-dir
+          mountPath: /var/lib/csi/sockets/pluginproxy
+        - name: mountpoint-dir
+          mountPath: /var/lib/kubelet
+        - name: flexvolume-dir
+          mountPath: /usr/libexec/kubernetes/kubelet-plugins/volume/exec
+        env:
+        - name: KUBE_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+      volumes:
+      - name: device-dir
+        hostPath:
+          path: /dev
+      - name: pods-mount-dir
+        hostPath:
+          path: /var/lib/kubelet/pods
+          type: Directory
+      - name: csi-socket-dir
+        hostPath:
+          path: /var/lib/csi/sockets/pluginproxy
+          type: DirectoryOrCreate
+      - name: mountpoint-dir
+        hostPath:
+          path: /var/lib/kubelet
+          type: Directory
+      - name: flexvolume-dir
+        hostPath:
+          path: /usr/libexec/kubernetes/kubelet-plugins/volume/exec
+          type: Directory
