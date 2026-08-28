@@ -1,0 +1,4 @@
+controller:
+  image:
+    repository: argoproj/argocd-application-controller
+    tag: v3.6.0
