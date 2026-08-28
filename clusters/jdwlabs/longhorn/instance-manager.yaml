@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: instance-manager
+  namespace: longhorn-system
+spec:
+  selector:
+    matchLabels:
+      app: instance-manager
+  template:
+    metadata:
+      labels:
+        app: instance-manager
+    spec:
+      containers:
+      - name: instance-manager
+        image: longhornio/longhorn-instance-manager:v1.6.0
+        command:
+        - /bin/bash
+        - -c
+        - |
+          mkdir -p /tls-files/
+          cp /certs/tls.crt /tls-files/
+          cp /certs/tls.key /tls-files/
+          exec /usr/local/bin/longhorn-instance-manager start
+        ports:
+        - containerPort: 8500
+          name: api
+        - containerPort: 8501
+          name: http
+        - containerPort: 8502
+          name: grpc
+        - containerPort: 8503
+          name: grpc-tls
+        volumeMounts:
+        - name: tls-files
+          mountPath: /tls-files
+        - name: certs
+          mountPath: /certs
+          readOnly: true
+        - name: dev-disk
+          mountPath: /dev
+        - name: longhorn
+          mountPath: /var/lib/longhorn
+        - name: proc
+          mountPath: /proc
+        - name: sys
+          mountPath: /sys
+        - name: var-run
+          mountPath: /var/run
+        - name: var-log
+          mountPath: /var/log
+        - name: lib-modules
+          mountPath: /lib/modules
+          readOnly: true
+      volumes:
+      - name: tls-files
+        emptyDir: {}
+      - name: certs
+        secret:
+          secretName: longhorn-tls
+          optional: false
+      - name: dev-disk
+        hostPath:
+          path: /dev
+          type: Directory
+      - name: longhorn
+        hostPath:
+          path: /var/lib/longhorn
+          type: Directory
+      - name: proc
+        hostPath:
+          path: /proc
+          type: Directory
+      - name: sys
+        hostPath:
+          path: /sys
+          type: Directory
+      - name: var-run
+        hostPath:
+          path: /var/run
+          type: Directory
+      - name: var-log
+        hostPath:
+          path: /var/log
+          type: Directory
+      - name: lib-modules
+        hostPath:
+          path: /lib/modules
+          type: Directory
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/master
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      nodeSelector:
+        kubernetes.io/os: linux
