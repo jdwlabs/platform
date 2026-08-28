@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cilium
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      k8s-app: cilium
+  template:
+    metadata:
+      labels:
+        k8s-app: cilium
+    spec:
+      tolerations:
+      - key: node.kubernetes.io/unreachable
+        operator: Exists
+        effect: NoExecute
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+      containers:
+      - name: cilium-agent
+        image: quay.io/cilium/cilium:v1.15.0
+        args:
+        - --config-dir=/tmp/cilium/config
+        - --kube-context=default
+        - --log-level=info
+        - --node-name=$(NODE_NAME)
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        ports:
+        - containerPort: 9090
+          name: metrics
+          protocol: TCP
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: bpf-maps
+          mountPath: /sys/fs/bpf
+        - name: cilium-run
+          mountPath: /var/run/cilium
+        - name: host
+          mountPath: /host
+          readOnly: true
+      volumes:
+      - name: bpf-maps
+        hostPath:
+          path: /sys/fs/bpf
+      - name: cilium-run
+        hostPath:
+          path: /var/run/cilium
+      - name: host
+        hostPath:
+          path: /
