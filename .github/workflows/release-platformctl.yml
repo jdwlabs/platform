@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release:
-    uses: jdwlabs/.github/.github/workflows/release-go.yml@main
+    uses: jdwlabs/.github/.github/workflows/release-go.yml@b827924589b7e129a81762131b9d451121718bdc  # main as of 2026-08-26 (jdwlabs/.github has no tagged releases)
     permissions:
       contents: write
     with:
