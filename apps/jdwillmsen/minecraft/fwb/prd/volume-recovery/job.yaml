@@ -1,0 +1,20 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: jdwillmsen-minecraft-fwb-prd-volume-recovery-29797570
+spec:
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app: jdwillmsen-minecraft-fwb-prd-volume-recovery
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: volume-recovery
+        image: bitnami/kubectl:latest
+        command: [
+          "/bin/sh",
+          "-c",
+          "kubectl get pods -n jdwillmsen-minecraft-fwb-prd && echo 'Healthy'"
+        ]
