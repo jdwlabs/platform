@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: instance-manager
+  namespace: longhorn-system
+spec:
+  selector:
+    matchLabels:
+      app: instance-manager
+  template:
+    metadata:
+      labels:
+        app: instance-manager
+    spec:
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/master
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      - key: node.kubernetes.io/unreachable
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+      - name: instance-manager
+        image: longhornio/longhorn-instance-manager:v1.5.3
+        ports:
+        - containerPort: 8500
+          name: http
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
+        volumeMounts:
+        - name: varliblonghorn
+          mountPath: /var/lib/longhorn
+        - name: dev
+          mountPath: /dev
+        - name: proc
+          mountPath: /proc
+        - name: sys
+          mountPath: /sys
+        - name: run
+          mountPath: /run
+      volumes:
+      - name: varliblonghorn
+        hostPath:
+          path: /var/lib/longhorn
+          type: DirectoryOrCreate
+      - name: dev
+        hostPath:
+          path: /dev
+          type: Directory
+      - name: proc
+        hostPath:
+          path: /proc
+          type: Directory
+      - name: sys
+        hostPath:
+          path: /sys
+          type: Directory
+      - name: run
+        hostPath:
+          path: /run
+          type: Directory
