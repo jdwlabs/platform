@@ -241,18 +241,3 @@ exceptions:
       been digest-pinned. Recorded here rather than fixed as part of
       introducing the check; digest-pinning this reference is follow-up
       work.
-
-  - path: tenants/platform/services/truenas-prometheus-exporter/postInstall/deployment.yaml
-    ref: docker.io/jdwlabs/truenas-prometheus-exporter:truenas-exporter-v0.1.0
-    reason: >-
-      pending-first-release: registries switched from ghcr.io (defaulted to
-      a private package, 403 on anonymous pull, no imagePullSecret
-      configured for it) to docker.io, matching every other first-party
-      image this org publishes. This tag has not built on the new registry
-      yet — a digest cannot be minted before that build exists to have one.
-      Pin the real manifest-list digest here and remove this entry in the
-      follow-up commit that first tags a release on docker.io; until then
-      ArgoCD syncing this manifest will ImagePullBackOff, which is the
-      deliberately visible failure mode of shipping a spec ahead of the
-      artifact it names rather than a fabricated digest that looks pinned
-      and is not.
