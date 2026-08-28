@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: truenas-prometheus-exporter
+  namespace: monitoring
+spec:
+  # Single replica on purpose, unrelated to truenas-graphite-exporter's own
+  # single-replica reasoning (that one is about split Graphite samples). This
+  # process makes exactly one auth.login_with_api_key call for its entire
+  # lifetime and never retries it (see cli/cmd/truenas-prometheus-exporter/
+  # main.go) — a second replica would spend a second, independent attempt
+  # against the same key for no scrape-coverage benefit, since either pod
+  # alone already answers every scrape.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: truenas-prometheus-exporter
+  template:
+    metadata:
+      labels:
+        app: truenas-prometheus-exporter
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: exporter
+          # See tools/image-pin-allowlist.yaml for why this reference is
+          # deliberately unpinned rather than carrying a fabricated digest —
+          # this image does not exist until
+          # .github/workflows/release-truenas-exporter.yml first runs.
+          image: ghcr.io/jdwlabs/truenas-prometheus-exporter:truenas-exporter-v0.1.0
+          env:
+            # Port 443, not democratic-csi's driver-config port: the
+            # middleware listens for TLS there regardless of what any CSI
+            # driver config uses, exactly as cli/internal/truenas/config.go's
+            # middlewarePort comment already establishes for platformctl's
+            # own connection.
+            - name: TRUENAS_PROMETHEUS_ADDR
+              value: "192.168.1.205:443"
+            - name: TRUENAS_PROMETHEUS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: truenas-prometheus-exporter
+                  key: api_key
+            # The appliance presents its stock self-signed certificate
+            # (CN=localhost); see cli/internal/truenas/transport.go's
+            # describeDialError and AGENTS.md's TrueNAS volumes section for
+            # why platformctl's own tooling makes the same choice.
+            - name: TRUENAS_PROMETHEUS_INSECURE_SKIP_TLS_VERIFY
+              value: "true"
+          ports:
+            - name: metrics
+              containerPort: 9124
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 96Mi
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

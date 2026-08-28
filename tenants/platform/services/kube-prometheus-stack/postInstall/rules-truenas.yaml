@@ -17,12 +17,14 @@ spec:
     #
     # What is deliberately NOT alerted on, so the omissions are not mistaken
     # for oversights:
-    #   - Pool health, pool/dataset capacity and SMART. The Graphite push
-    #     carries none of them on this version; they are only reachable over
-    #     the TrueNAS API, which needs a credential this cluster does not yet
-    #     hold. See docs/adr/0025 and JDWLABS-367.
     #   - Disk busy percent. Pinned at ~100 for the whole duration of a scrub
     #     or resilver, which is routine on a 20TB vdev.
+    #
+    # Pool health, pool/dataset capacity and SMART are covered below, in the
+    # truenas-storage-api group — not by this Graphite pipeline, which still
+    # cannot carry them, but by a separate API-polling exporter
+    # (truenas-prometheus-exporter) added once a read-only, user-linked
+    # credential existed to poll with. See docs/adr/0025's addendum.
     - name: truenas-host
       rules:
         # An unexpected restart is the event that actually costs something —
@@ -228,4 +230,148 @@ spec:
           annotations:
             summary: "TrueNAS graphite exporter is not scrapeable"
             description: "The graphite-exporter receiving TrueNAS metrics has been unscrapeable for 10m. Pushed samples are being dropped on the floor; expect TrueNASMetricsStale to follow."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+    # Pool state, dataset capacity, disk temperature and SMART, all read over
+    # the TrueNAS JSON-RPC API by truenas-prometheus-exporter
+    # (cli/cmd/truenas-prometheus-exporter), not over the Graphite push above.
+    # The two-state truenas_zfs_pool_state{state="online"|"degraded"} shape
+    # and the truenas_disk_temperature_celsius name are unchanged from the
+    # rules docs/adr/0025 deleted — see that file's git history — because the
+    # exporter was written to match what these rules already assumed, not the
+    # other way around. Everything here is unverified against a live NAS
+    # response beyond what docs/adr/0025's own evidence table captured: see
+    # that ADR's dated addendum for exactly which fields were, and were not,
+    # confirmed live before this group was written.
+    - name: truenas-storage-api
+      rules:
+        # Mirrors truenas-host's restart/thermal comments: DEGRADED means
+        # redundancy is gone but the pool still serves data, which is the
+        # window in which a second failure becomes fatal.
+        - alert: TrueNASPoolDegraded
+          expr: max by (pool) (truenas_zfs_pool_state{state="degraded"}) == 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS pool {{ $labels.pool }} is DEGRADED"
+            description: "ZFS pool {{ $labels.pool }} has lost redundancy. Data is still served but a further disk failure risks the pool. Check pool status and replace the failed vdev member."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # Any state that is neither online nor degraded — faulted, unavail,
+        # suspended, removed, offline. The `unless` clause keeps this
+        # mutually exclusive with TrueNASPoolDegraded above, the same
+        # structure the deleted version of this rule used.
+        - alert: TrueNASPoolNotOnline
+          expr: |
+            max by (pool) (truenas_zfs_pool_state{state="online"}) == 0
+            unless max by (pool) (truenas_zfs_pool_state{state="degraded"}) == 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS pool {{ $labels.pool }} is not ONLINE"
+            description: "ZFS pool {{ $labels.pool }} is faulted, suspended or otherwise not online. Every democratic-csi volume and the Loki chunk store on this pool are affected."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # 85% matches the threshold PVCUsageHigh and LonghornVolumeUsageHigh
+        # already use, so one number means the same thing across every
+        # storage backend here. used/available are pool.dataset.query's own
+        # bytes (docs/adr/0025's live-verified unit), not a rescaled GiB
+        # figure — the mistake that made the deleted version of this rule
+        # structurally silent.
+        - alert: TrueNASPoolCapacityHigh
+          expr: |
+            truenas_zfs_dataset_used_bytes
+              / (truenas_zfs_dataset_used_bytes + truenas_zfs_dataset_available_bytes) > 0.85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS pool {{ $labels.pool }} above 85% full"
+            description: "Pool {{ $labels.pool }} (dataset {{ $labels.dataset }}) is {{ $value | humanizePercentage }} full."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # A copy-on-write filesystem cannot free space by overwriting, so a
+        # full pool fails writes *and* the deletes that would fix it.
+        - alert: TrueNASPoolCapacityCritical
+          expr: |
+            truenas_zfs_dataset_used_bytes
+              / (truenas_zfs_dataset_used_bytes + truenas_zfs_dataset_available_bytes) > 0.95
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS pool {{ $labels.pool }} above 95% full"
+            description: "Pool {{ $labels.pool }} (dataset {{ $labels.dataset }}) is {{ $value | humanizePercentage }} full and at real risk of failing writes. Free space or expand the pool now."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # Thresholds match the deleted version of this rule; disk.temperatures
+        # (docs/adr/0025) reads SMART directly, cached NAS-side for 5m. Labeled
+        # by device name (`disk`), not `serial` — disk.temperatures does not
+        # return a serial, so the deleted rule's label was never reachable
+        # either.
+        - alert: TrueNASDiskTemperatureHigh
+          expr: max by (disk) (truenas_disk_temperature_celsius) > 50
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS disk {{ $labels.disk }} at {{ $value }}C"
+            description: "Disk {{ $labels.disk }} has read above 50C for 15m. Check airflow around that bay before it becomes the critical threshold."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        - alert: TrueNASDiskTemperatureCritical
+          expr: max by (disk) (truenas_disk_temperature_celsius) > 60
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS disk {{ $labels.disk }} at {{ $value }}C"
+            description: "Disk {{ $labels.disk }} has read above 60C for 10m — real risk of an early failure. Check the fan and airflow for that bay now."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # smart.test.results.query's exact response shape was never live-
+        # verified against this NAS (no network path to it from where this
+        # exporter was written — see the ADR addendum), so this reads only
+        # the two SMART self-test outcomes the exporter is confident enough
+        # to classify as pass/fail at all; an unrecognised status emits no
+        # metric for that disk rather than a guessed value on either side.
+        - alert: TrueNASDiskSmartTestFailed
+          expr: truenas_disk_smart_test_passed == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS disk {{ $labels.disk }} failed its SMART self-test"
+            description: "The most recent SMART self-test on {{ $labels.disk }} reported failure. Treat this disk as failing and plan a replacement; do not wait for a pool DEGRADED alert, which only fires once redundancy is actually lost."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # The dead-man's switch for this exporter, mirroring
+        # TrueNASGraphiteExporterDown's role for the push pipeline.
+        - alert: TrueNASPrometheusExporterDown
+          expr: up{job="truenas-prometheus-exporter"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS API-polling exporter is not scrapeable"
+            description: "truenas-prometheus-exporter has been unscrapeable for 10m. Pool state, capacity, temperature and SMART alerting are blind until it recovers."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+        # truenas_exporter_dial_ok is set once, at process start, and never
+        # retried (main.go) — a rejected or failed dial stays 0 for the rest
+        # of that pod's life, so this needs no `for:` window to debounce a
+        # transient blip; there isn't one. Distinguishes "the exporter is
+        # up but its one connection attempt failed" from
+        # TrueNASPrometheusExporterDown's "the exporter is not answering
+        # scrapes at all" — the fix is different (redeploy vs. investigate
+        # the pod), and only this alert should mention rotating the key.
+        - alert: TrueNASPrometheusExporterAuthFailed
+          expr: truenas_exporter_dial_ok == 0
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS API-polling exporter never authenticated"
+            description: "truenas-prometheus-exporter's one, process-lifetime dial to the TrueNAS middleware failed or was rejected. It will not retry on its own — check the pod's logs for the reason, fix it (rotate kv/truenas-prometheus, not kv/truenas-csi), and redeploy."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"

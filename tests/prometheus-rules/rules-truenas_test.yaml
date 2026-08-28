@@ -206,3 +206,185 @@ tests:
                 data. Read the host's own logs and its UPS service state, and
                 check whether the restart coincided with heavy pool IO.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+  # --- truenas-storage-api group: truenas-prometheus-exporter's metrics ---
+  #
+  # The two-state truenas_zfs_pool_state shape below reproduces the exact
+  # rows a healthy and a degraded pool report from pool.query, per this
+  # exporter's collector.go — one series per named state, not a full status
+  # enum.
+  - interval: 1m
+    name: pool state — online stays silent, degraded pages, not-online is exclusive
+    input_series:
+      - series: 'truenas_zfs_pool_state{pool="storage",state="online"}'
+        values: '1+0x20'
+      - series: 'truenas_zfs_pool_state{pool="storage",state="degraded"}'
+        values: '0+0x20'
+      - series: 'truenas_zfs_pool_state{pool="scratch",state="online"}'
+        values: '0+0x20'
+      - series: 'truenas_zfs_pool_state{pool="scratch",state="degraded"}'
+        values: '1+0x20'
+      - series: 'truenas_zfs_pool_state{pool="faulty",state="online"}'
+        values: '0+0x20'
+      - series: 'truenas_zfs_pool_state{pool="faulty",state="degraded"}'
+        values: '0+0x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: TrueNASPoolDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              pool: scratch
+            exp_annotations:
+              summary: "TrueNAS pool scratch is DEGRADED"
+              description: "ZFS pool scratch has lost redundancy. Data is still served but a further disk failure risks the pool. Check pool status and replace the failed vdev member."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 6m
+        alertname: TrueNASPoolNotOnline
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              pool: faulty
+            exp_annotations:
+              summary: "TrueNAS pool faulty is not ONLINE"
+              description: "ZFS pool faulty is faulted, suspended or otherwise not online. Every democratic-csi volume and the Loki chunk store on this pool are affected."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # Bytes, not GiB — the unit docs/adr/0025 confirmed pool.dataset.query
+  # actually reports, and the mistake that made the deleted version of this
+  # rule structurally silent.
+  - interval: 1m
+    name: dataset capacity ratio pages at 85% and 95%
+    input_series:
+      - series: 'truenas_zfs_dataset_used_bytes{pool="storage",dataset="storage"}'
+        values: '80+0x20'
+      - series: 'truenas_zfs_dataset_available_bytes{pool="storage",dataset="storage"}'
+        values: '20+0x20'
+      - series: 'truenas_zfs_dataset_used_bytes{pool="scratch",dataset="scratch"}'
+        values: '96+0x20'
+      - series: 'truenas_zfs_dataset_available_bytes{pool="scratch",dataset="scratch"}'
+        values: '4+0x20'
+    alert_rule_test:
+      # storage sits at a flat 80/(80+20) = 80%, under the 85% threshold, so
+      # it never alerts — only scratch (96%) does.
+      - eval_time: 11m
+        alertname: TrueNASPoolCapacityHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              pool: scratch
+              dataset: scratch
+            exp_annotations:
+              summary: "TrueNAS pool scratch above 85% full"
+              description: "Pool scratch (dataset scratch) is 96% full."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 6m
+        alertname: TrueNASPoolCapacityCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              pool: scratch
+              dataset: scratch
+            exp_annotations:
+              summary: "TrueNAS pool scratch above 95% full"
+              description: "Pool scratch (dataset scratch) is 96% full and at real risk of failing writes. Free space or expand the pool now."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # Labeled by device name (`disk`), not `serial` — disk.temperatures
+  # (docs/adr/0025) does not return a serial, unlike the deleted rule's
+  # assumption. Thresholds unchanged from that deleted rule.
+  - interval: 1m
+    name: disk temperature pages at 50C and 60C
+    input_series:
+      - series: 'truenas_disk_temperature_celsius{disk="sda"}'
+        values: '38+0x20'
+      - series: 'truenas_disk_temperature_celsius{disk="sdb"}'
+        values: '55+0x20'
+      - series: 'truenas_disk_temperature_celsius{disk="sdc"}'
+        values: '65+0x20'
+    alert_rule_test:
+      # sdc (65C) is also above the 50C High threshold in addition to
+      # Critical below — both alerts are keyed on independent thresholds
+      # over the same series, not mutually exclusive the way the two pool
+      # state alerts are.
+      - eval_time: 16m
+        alertname: TrueNASDiskTemperatureHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              disk: sdb
+            exp_annotations:
+              summary: "TrueNAS disk sdb at 55C"
+              description: "Disk sdb has read above 50C for 15m. Check airflow around that bay before it becomes the critical threshold."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+          - exp_labels:
+              severity: warning
+              disk: sdc
+            exp_annotations:
+              summary: "TrueNAS disk sdc at 65C"
+              description: "Disk sdc has read above 50C for 15m. Check airflow around that bay before it becomes the critical threshold."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 11m
+        alertname: TrueNASDiskTemperatureCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              disk: sdc
+            exp_annotations:
+              summary: "TrueNAS disk sdc at 65C"
+              description: "Disk sdc has read above 60C for 10m — real risk of an early failure. Check the fan and airflow for that bay now."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # A disk with no test history, or a status the exporter does not classify
+  # (RUNNING), emits no truenas_disk_smart_test_passed series at all — see
+  # collector.go's smartPassStatuses/smartFailStatuses. Only an explicit 0
+  # pages.
+  - interval: 1m
+    name: SMART test failure pages, a disk with no series does not
+    input_series:
+      - series: 'truenas_disk_smart_test_passed{disk="sda"}'
+        values: '1+0x10'
+      - series: 'truenas_disk_smart_test_passed{disk="sdb"}'
+        values: '0+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: TrueNASDiskSmartTestFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              disk: sdb
+            exp_annotations:
+              summary: "TrueNAS disk sdb failed its SMART self-test"
+              description: "The most recent SMART self-test on sdb reported failure. Treat this disk as failing and plan a replacement; do not wait for a pool DEGRADED alert, which only fires once redundancy is actually lost."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # dial_ok is set once at process start and never retried (main.go), so
+  # this alert has no `for:` window — a single sample of 0 is already the
+  # whole story, not a blip to debounce.
+  - interval: 1m
+    name: exporter down and auth-failed are independent signals
+    input_series:
+      - series: 'up{job="truenas-prometheus-exporter"}'
+        values: '0+0x15'
+      - series: 'truenas_exporter_dial_ok'
+        values: '0+0x2'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: TrueNASPrometheusExporterDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: truenas-prometheus-exporter
+            exp_annotations:
+              summary: "TrueNAS API-polling exporter is not scrapeable"
+              description: "truenas-prometheus-exporter has been unscrapeable for 10m. Pool state, capacity, temperature and SMART alerting are blind until it recovers."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+      - eval_time: 1m
+        alertname: TrueNASPrometheusExporterAuthFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "TrueNAS API-polling exporter never authenticated"
+              description: "truenas-prometheus-exporter's one, process-lifetime dial to the TrueNAS middleware failed or was rejected. It will not retry on its own — check the pod's logs for the reason, fix it (rotate kv/truenas-prometheus, not kv/truenas-csi), and redeploy."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"

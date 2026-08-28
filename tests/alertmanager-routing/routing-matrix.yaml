@@ -71,6 +71,22 @@ cases:
       severity: critical
     receivers: ['ai-sre', 'discord']
 
+  # truenas-storage-api's alerts carry no tenant label, same as the Graphite
+  # pipeline's own TrueNASMetricsStale above — proving they land on the same
+  # generic severity-based routes rather than assuming it because the
+  # alertname starts with TrueNAS.
+  - name: the API-polling exporter's critical pool alert fans out both ways
+    labels:
+      alertname: TrueNASPoolNotOnline
+      severity: critical
+    receivers: ['ai-sre', 'discord']
+
+  - name: the API-polling exporter's warning-level alert reaches the agent only
+    labels:
+      alertname: TrueNASPoolDegraded
+      severity: warning
+    receivers: ['ai-sre']
+
   # The relay's dead-man's switches are critical precisely so the alert saying
   # the relay is dark does not go only to the dark relay.
   - name: relay dead-mans-switch reaches humans, not only the relay

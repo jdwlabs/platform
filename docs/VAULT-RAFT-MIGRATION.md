@@ -43,6 +43,7 @@ cluster:
 | `argocd-dex` | admin-password-hash, headlamp-client-secret, github-client-id, github-client-secret |
 | `grafana-gitsync` | app-id, installation-id, private-key |
 | `truenas-csi` | api_key |
+| `truenas-prometheus` | api_key |
 | `litellm` | master_key, anthropic/openrouter/nvidia api keys (optional-merge) |
 | `holmes` | litellm_key, discord_webhook_url, jira url/email/token, github_token, talosconfig |
 | per tenant | `<tenant>-github-app`, `<tenant>-ai-keys`, `<tenant>-discord-bot-token` |

@@ -323,6 +323,19 @@ services:
     postInstall: false
     syncWave: 2
 
+  # Pool state, dataset capacity and SMART, none of which the Graphite push
+  # above can carry (docs/adr/0025). rawManifests for the same reason as
+  # truenas-graphite-exporter: no upstream chart models a single-tenant
+  # poller against an in-house image.
+  - name: truenas-prometheus-exporter
+    chart: ""
+    repo: ""
+    revision: ""
+    namespace: monitoring
+    rawManifests: true
+    postInstall: false
+    syncWave: 2
+
   # Distributed tracing backend. Single-binary Tempo chart now lives in the
   # grafana-community repo (grafana/helm-charts copy is deprecated).
   - name: tempo
