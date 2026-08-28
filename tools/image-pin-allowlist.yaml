@@ -241,19 +241,3 @@ exceptions:
       been digest-pinned. Recorded here rather than fixed as part of
       introducing the check; digest-pinning this reference is follow-up
       work.
-
-  - path: tenants/platform/services/truenas-prometheus-exporter/postInstall/deployment.yaml
-    ref: ghcr.io/jdwlabs/truenas-prometheus-exporter:truenas-exporter-v0.1.0
-    reason: >-
-      pending-first-release: this image is built by
-      .github/workflows/release-truenas-exporter.yml from
-      cli/cmd/truenas-prometheus-exporter, which only runs once this repo's
-      main branch carries the workflow and a truenas-exporter-v0.1.0 tag is
-      pushed — a digest cannot be minted before that build exists to have
-      one, and this check never fetches a registry to verify one either way
-      (see this file's header). Pin the real manifest-list digest here and
-      remove this entry in the follow-up commit that first tags a release;
-      until then ArgoCD syncing this manifest will ImagePullBackOff, which is
-      the deliberately visible failure mode of shipping a spec ahead of the
-      artifact it names rather than a fabricated digest that looks pinned
-      and is not.

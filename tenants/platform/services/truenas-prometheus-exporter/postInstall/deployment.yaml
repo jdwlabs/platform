@@ -28,11 +28,10 @@ spec:
           type: RuntimeDefault
       containers:
         - name: exporter
-          # See tools/image-pin-allowlist.yaml for why this reference is
-          # deliberately unpinned rather than carrying a fabricated digest —
-          # this image does not exist until
-          # .github/workflows/release-truenas-exporter.yml first runs.
-          image: ghcr.io/jdwlabs/truenas-prometheus-exporter:truenas-exporter-v0.1.0
+          # Digest is the real manifest-list index published by
+          # .github/workflows/release-truenas-exporter.yml's first run
+          # against the truenas-exporter-v0.1.0 tag, not a placeholder.
+          image: ghcr.io/jdwlabs/truenas-prometheus-exporter:truenas-exporter-v0.1.0@sha256:7529024ffb0ba0d2cf88b91f7275cc31d547208e7d9c5892dc73e4cad1d11b78
           env:
             # Port 443, not democratic-csi's driver-config port: the
             # middleware listens for TLS there regardless of what any CSI
