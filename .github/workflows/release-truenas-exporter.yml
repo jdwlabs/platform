@@ -45,7 +45,7 @@ jobs:
       # held to (see the truenas-csi chart hardening commit history) rather
       # than publishing first and finding out later.
       - name: Trivy scan
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ghcr.io/jdwlabs/truenas-prometheus-exporter:${{ steps.tag.outputs.version }}
           severity: CRITICAL,HIGH
