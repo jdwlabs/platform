@@ -65,14 +65,35 @@ jobs:
 
   kubeconform:
     runs-on: ubuntu-latest
+    # Bump via the latest yannh/kubeconform release. The checksum comes from
+    # that release's own CHECKSUMS asset, not a self-derived hash — re-derive
+    # both together whenever the version below moves.
+    env:
+      KUBECONFORM_VERSION: v0.8.0
     steps:
       - uses: actions/checkout@v7.0.1
+
+      - name: Cache kubeconform
+        id: tool-cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: /usr/local/bin/kubeconform
+          key: kubeconform-${{ runner.os }}-${{ env.KUBECONFORM_VERSION }}
+
       - name: Install kubeconform
+        if: steps.tool-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ runner.temp }}
         run: |
-          curl -sSLo kubeconform.tar.gz \
-            https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz
-          tar -xzf kubeconform.tar.gz
-          sudo mv kubeconform /usr/local/bin/
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" -o kubeconform.tar.gz
+          echo "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf kubeconform.tar.gz kubeconform
+          sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
+
+      # Runs on a cache hit too, so a restored cache is proven executable
+      # before the validation step depends on it.
+      - name: Verify kubeconform version
+        run: kubeconform -v
+
       - name: Validate Kubernetes manifests
         run: |
           find tenants -name '*.yaml' \
