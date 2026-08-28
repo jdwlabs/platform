@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: engine-image-ei-493e04e7
+  namespace: longhorn-system
+spec:
+  selector:
+    matchLabels:
+      app: engine-image-ei-493e04e7
+  template:
+    metadata:
+      labels:
+        app: engine-image-ei-493e04e7
+    spec:
+      tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/master"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoExecute"
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoExecute"
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+      - name: engine-image
+        image: longhornio/longhorn-engine:v1.6.0
+        imagePullPolicy: Always
+        command:
+        - /bin/sh
+        - -c
+        - |
+          while true; do
+            sleep 3600
+          done
+        resources:
+          requests:
+            cpu: 50m
+            memory: 100Mi
+          limits:
+            cpu: 200m
+            memory: 500Mi
+      terminationGracePeriodSeconds: 30
