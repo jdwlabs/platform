@@ -65,14 +65,36 @@ jobs:
 
   kubeconform:
     runs-on: ubuntu-latest
+    env:
+      # Checksum, not just a version tag: a release asset is mutable and this
+      # job runs a downloaded binary over the whole repo. Both values move
+      # together — take the digest from the release's own CHECKSUMS asset.
+      KUBECONFORM_VERSION: "v0.8.0"
+      KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
     steps:
       - uses: actions/checkout@v7.0.1
+      # The version is in the key and there are no restore-keys on purpose: a
+      # prefix restore would serve a binary from a superseded pin, so bumping
+      # the constants above must miss.
+      - name: Cache kubeconform
+        id: kubeconform-cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: /usr/local/bin/kubeconform
+          key: kubeconform-${{ runner.os }}-${{ env.KUBECONFORM_VERSION }}
       - name: Install kubeconform
+        if: steps.kubeconform-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ runner.temp }}
         run: |
-          curl -sSLo kubeconform.tar.gz \
-            https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz
-          tar -xzf kubeconform.tar.gz
-          sudo mv kubeconform /usr/local/bin/
+          curl -fsSLo kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf kubeconform.tar.gz kubeconform
+          sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
+      # Runs on a cache hit too, so a restored cache is proven executable
+      # before validation depends on it.
+      - name: Verify kubeconform version
+        run: kubeconform -v
       - name: Validate Kubernetes manifests
         run: |
           find tenants -name '*.yaml' \
@@ -278,6 +300,11 @@ jobs:
 
   helm-lint:
     runs-on: ubuntu-latest
+    env:
+      # Same pin as the kubeconform job above; keep the two in lockstep so
+      # charts and raw manifests are validated by the same release.
+      KUBECONFORM_VERSION: "v0.8.0"
+      KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: azure/setup-helm@v5.0.1
@@ -289,12 +316,23 @@ jobs:
             echo "Linting $chart"
             helm lint "$chart"
           done
+      - name: Cache kubeconform
+        id: kubeconform-cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: /usr/local/bin/kubeconform
+          key: kubeconform-${{ runner.os }}-${{ env.KUBECONFORM_VERSION }}
       - name: Install kubeconform
+        if: steps.kubeconform-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ runner.temp }}
         run: |
-          curl -sSLo kubeconform.tar.gz \
-            https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz
-          tar -xzf kubeconform.tar.gz
-          sudo mv kubeconform /usr/local/bin/
+          curl -fsSLo kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf kubeconform.tar.gz kubeconform
+          sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
+      - name: Verify kubeconform version
+        run: kubeconform -v
       - name: Render + validate each chart
         run: |
           for chart in helm-charts/*/; do
