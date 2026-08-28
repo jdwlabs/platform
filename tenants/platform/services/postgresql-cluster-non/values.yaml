@@ -28,10 +28,15 @@ cluster:
       # to `instances`, and this cluster is deliberately pinned to instances: 1
       # above for resource savings (see that field's comment) — with one instance
       # there is no standby by design, so both alerts would fire permanently and
-      # add nothing an operator can act on. Excluded here only, per-release, so
-      # postgresql-cluster-prd (still at 3 instances) keeps full HA alerting, and
-      # any future non-prod cluster that isn't deliberately pinned this way is
-      # unaffected too.
+      # add nothing an operator can act on. Excluding them here is necessary but
+      # not sufficient: the chart's HA expressions are namespace-scoped (unlike
+      # its other rules, which are pod-scoped per cluster), so any sibling
+      # release in the `database` namespace renders an HA pair that matches this
+      # cluster's series too. postgresql-cluster-prd therefore excludes the
+      # chart pair as well and carries cluster-scoped replacements in
+      # tenants/platform/services/kube-prometheus-stack/postInstall/rules-cnpg.yaml
+      # — prd (still at 3 instances) keeps full HA alerting; this cluster is
+      # matched by no HA rule anywhere.
       excludeRules:
         - CNPGClusterHACritical
         - CNPGClusterHAWarning

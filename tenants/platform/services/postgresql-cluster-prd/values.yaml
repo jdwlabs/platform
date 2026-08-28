@@ -10,6 +10,23 @@ cluster:
     enabled: true
     podMonitor:
       enabled: true
+    prometheusRule:
+      enabled: true
+      # The chart's CNPGClusterHACritical/CNPGClusterHAWarning expressions are the
+      # only ones in its rule set not scoped by the chart's own per-cluster pod
+      # selector — they match every CNPG cluster in the release namespace. Both
+      # clusters in the shared `database` namespace therefore render an HA rule
+      # pair that also fires on the sibling's series: this release's copy is what
+      # kept alerting on postgresql-cluster-non (deliberately pinned to
+      # instances: 1) even after that release excluded its own copy. Excluded
+      # here and replaced by cluster-scoped equivalents in
+      # tenants/platform/services/kube-prometheus-stack/postInstall/rules-cnpg.yaml,
+      # so real HA degradation on this cluster still alerts with the same
+      # names, thresholds, and labels. Every other chart rule stays enabled —
+      # they are already pod-scoped and unaffected.
+      excludeRules:
+        - CNPGClusterHACritical
+        - CNPGClusterHAWarning
 
   affinity:
     # topologyKey: kubernetes.io/hostname because this homelab has no zone labels

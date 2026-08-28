@@ -34,3 +34,47 @@ spec:
             summary: "Long-running transaction on {{ $labels.pod }}"
             description: "A transaction has been running for over 5 minutes on {{ $labels.pod }}."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#3-postgresql-operations"
+    # Cluster-scoped replacements for the cloudnative-pg/cluster chart's HA alert
+    # pair. The chart's own CNPGClusterHA* expressions filter by namespace only —
+    # unlike the rest of its rule set, which also filters by a per-cluster pod
+    # selector — so with two clusters sharing the `database` namespace, each
+    # release's copy also fires on the other cluster's series. Both releases
+    # exclude the chart pair via cluster.monitoring.prometheusRule.excludeRules;
+    # these rules restore HA alerting for postgresql-cluster-prd alone, keeping
+    # the chart's names, expressions, thresholds, and labels, plus the same pod
+    # selector shape the chart's other rules use. postgresql-cluster-non gets no
+    # replacement on purpose: it is pinned to instances: 1 (no standby by
+    # design), so an HA alert there is permanent noise, not signal — see the
+    # comment in tenants/platform/services/postgresql-cluster-non/values.yaml.
+    - name: cnpg-ha-postgresql-cluster-prd
+      rules:
+        - alert: CNPGClusterHACritical
+          expr: |
+            max by (job) (cnpg_pg_replication_streaming_replicas{namespace="database", pod=~"platform-postgresql-cluster-prd-([1-9][0-9]*)$"} - cnpg_pg_replication_is_wal_receiver_up{namespace="database", pod=~"platform-postgresql-cluster-prd-([1-9][0-9]*)$"}) < 1
+          for: 5m
+          labels:
+            severity: critical
+            namespace: database
+            cnpg_cluster: platform-postgresql-cluster-prd
+          annotations:
+            summary: "CNPG Cluster has no standby replicas!"
+            description: >-
+              CloudNativePG Cluster "{{ $labels.job }}" has no ready standby
+              replicas. The cluster is at severe risk of data loss and downtime
+              if the primary instance fails.
+            runbook_url: "https://github.com/cloudnative-pg/charts/blob/main/charts/cluster/docs/runbooks/CNPGClusterHACritical.md"
+        - alert: CNPGClusterHAWarning
+          expr: |
+            max by (job) (cnpg_pg_replication_streaming_replicas{namespace="database", pod=~"platform-postgresql-cluster-prd-([1-9][0-9]*)$"} - cnpg_pg_replication_is_wal_receiver_up{namespace="database", pod=~"platform-postgresql-cluster-prd-([1-9][0-9]*)$"}) < 2
+          for: 5m
+          labels:
+            severity: warning
+            namespace: database
+            cnpg_cluster: platform-postgresql-cluster-prd
+          annotations:
+            summary: "CNPG Cluster less than 2 standby replicas."
+            description: >-
+              CloudNativePG Cluster "{{ $labels.job }}" has only {{ $value }}
+              ready standby replicas, putting the cluster at risk if another
+              instance fails.
+            runbook_url: "https://github.com/cloudnative-pg/charts/blob/main/charts/cluster/docs/runbooks/CNPGClusterHAWarning.md"
