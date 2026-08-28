@@ -193,3 +193,83 @@ correct — plausible YAML, no proof, silent in production.
   `…truenas_cpu_usage\.cpu\.cpu` swallowed `cpu0`–`cpu15` and collapsed
   seventeen series into one. Every pattern in the mapping now carries explicit
   `^` and `$`.
+
+## Addendum 2026-08-28: the API half, credentialed and shipped
+
+The blocker above is cleared. A dedicated local TrueNAS user
+(`prometheus-readonly`) was created with the built-in **Readonly Admin**
+role — least-privilege, and never the `truenas-csi` key, whose blast radius
+this ADR already documented. Its key authenticated successfully on its one
+test read, seeded to Vault `kv/truenas-prometheus` (field `api_key`,
+`platformctl bootstrap seed truenas-prometheus`), and this ADR's own
+warning was honored doing it: exactly one dial, no retry.
+
+### The two third-party exporters were re-read, not re-assumed
+
+Both had moved since the table above was written, so both were re-checked
+live (`gh api repos/<owner>/<repo>`, commit history, and the actual source)
+rather than trusting a several-week-old verdict:
+
+- **`scottrus/truenas-scale-exporter`** is meaningfully more mature now —
+  17+ merged PRs since, a real bugfix (a scrub-status misread), a Dependabot
+  cadence, and a `boot.get_state`-based boot-pool collector added in 0.2.0.
+  It still has 0 stars and 0 forks after that work, and its own issue #11
+  ("Dataset-level metrics: quota exhaustion is invisible behind a healthy
+  pool") is still open — confirmed by reading the issue directly, not the
+  repo's summary. That gap is exactly this ticket's pool/dataset capacity
+  requirement, so adopting it would still mean writing and maintaining that
+  metric family, on someone else's unaudited codebase, for a credential this
+  cluster's provisioning already depends on staying scoped correctly.
+- **`bodhispace-xyz/truenas-exporter-rs`** also has recent commits, but they
+  are CI and release-tooling churn (`release-please` target-branch fixes,
+  build speedups) — reading `src/truenas/connection.rs` directly shows
+  `websocket_url()` still formats `{protocol}://{host}/websocket`, the same
+  legacy, pre-JSON-RPC-2.0 endpoint flagged below. It has not moved to
+  `/api/current`.
+
+Neither changes the original conclusion. Handing either project a live NAS
+credential is still adopting an unaudited dependency to solve a problem this
+repo already has the audited half of a solution for.
+
+### Decision: truenas-prometheus-exporter, built on platformctl's own transport
+
+`cli/internal/truenas/transport.go`'s `WSClient`/`Dial` is the one piece of
+code in this repo that has actually authenticated against this NAS over
+`/api/current` — reusing it for a second consumer costs one new package
+(`cli/internal/truenasexporter`) and one new `cmd/`, not a second WebSocket/
+JSON-RPC/auth implementation to get right and re-audit. The exporter dials
+once, authenticates once, and never retries for the life of the process —
+see `cmd/truenas-prometheus-exporter/main.go`'s comment for why a
+crash-and-restart-on-failure exporter would turn every `CrashLoopBackOff`
+cycle into exactly the kind of repeated `auth.login_with_api_key` attempt
+that invalidated the `truenas-csi` key above. A failed or rejected dial is
+terminal for that pod's ability to scrape (`truenas_exporter_dial_ok 0`,
+`TrueNASPrometheusExporterAuthFailed`); a human fixing the credential and
+redeploying is the only path to a second attempt.
+
+Coverage against this ADR's own evidence table:
+
+| Data | Method | Verified how |
+|---|---|---|
+| Pool state | `pool.query` | Unit-tested against this ADR's live `status=ONLINE` capture |
+| Pool/dataset capacity | `pool.dataset.query` (pool-root dataset) | Unit-tested against this ADR's live `used=83935377792`/`available=38523525645952` capture |
+| Disk temperature | `disk.temperatures` | Unit-tested against this ADR's live `{sdb: 36.0, sdd: 37.0, sdc: 38.0, sda: 36.0, nvme0n1: 37.85}` capture, including that a null reading is skipped, not zeroed |
+| SMART self-test pass/fail | `smart.test.results.query` | **Not live-verified** — no network path from where this exporter was written to the NAS (confirmed by a direct TCP connect attempt failing). Implemented against TrueNAS's documented method signature, classifying only `SUCCESS`/`FAILED`-family statuses and leaving anything else (including a disk with no test history) unemitted rather than guessed |
+| SMART reallocated-sector count | — | **Not implemented.** No TrueNAS API method for this was identified with enough confidence to ship unverified field-parsing code; a wrong field name would silently return zero forever, which is worse than the metric's absence. Left for a follow-up that can read the live response shape |
+
+The Go build, its unit test suite (`go test ./internal/truenasexporter/...`),
+a real `docker build` of `cmd/truenas-prometheus-exporter/Dockerfile`, and a
+container run of the built image against an unreachable address all passed
+locally — proving the one-dial-no-retry degrade path actually holds at the
+container level, not only in source. What could not be verified locally: the
+image is not yet published (no Docker registry push happened from this
+session — see `tools/image-pin-allowlist.yaml`'s `pending-first-release`
+entry for the reference this repo ships ahead of the artifact, and why a
+fabricated digest was rejected instead), and the exact live shape of
+`smart.test.results.query` and pool/dataset field names beyond what this
+ADR's own table already captured. `platformctl tenants verify-secrets` and
+`platformctl bootstrap seed` were both run for real against live Vault
+(`kv/truenas-prometheus` created), and `promtool`/`amtool` both confirm the
+new rules compile, unit-test correctly, and route through the same
+severity-based `ai-sre`/`discord` path every other untenanted TrueNAS alert
+uses.

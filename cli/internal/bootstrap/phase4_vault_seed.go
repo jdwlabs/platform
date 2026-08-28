@@ -94,6 +94,16 @@ var staticSeedSpecs = map[string]seedSpec{
 	"truenas-csi": {Path: "truenas-csi", Fields: []seedField{
 		{"api_key", "PLATFORMCTL_TRUENAS_CSI_API_KEY", true, false},
 	}},
+	// A separate, least-privilege key for the metrics poller: the built-in
+	// "Readonly Admin" role on a dedicated local user, not the "truenas-csi"
+	// key above (Full Admin, and an authentication attempt against it is a
+	// mutation with a cluster-wide provisioning blast radius per
+	// docs/adr/0025-truenas-metrics-what-the-graphite-push-can-and-cannot-carry.md).
+	// A scraping exporter calling pool/dataset/disk read methods every scrape
+	// interval must not be the thing that can take provisioning down.
+	"truenas-prometheus": {Path: "truenas-prometheus", Fields: []seedField{
+		{"api_key", "PLATFORMCTL_TRUENAS_PROMETHEUS_API_KEY", true, false},
+	}},
 	// The official truenas-csi driver's own API key — deliberately not the
 	// "truenas-csi" path above, which democratic-csi's key already occupies
 	// and --truenas-use-csi-api-key reads by name; one key shared across two

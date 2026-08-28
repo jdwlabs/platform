@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: truenas-prometheus-exporter
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: truenas-prometheus-exporter
+  namespaceSelector:
+    matchNames:
+      - monitoring
+  endpoints:
+    - port: metrics
+      # disk.temperatures is cached NAS-side for 5m (docs/adr/0025), so a
+      # faster interval would mostly re-read the same SMART sample; pool and
+      # dataset state change on a similar or slower cadence.
+      interval: 5m
+      scrapeTimeout: 30s
