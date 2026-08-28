@@ -1,0 +1,18 @@
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: grafana-gitsync-github-app
+  namespace: monitoring
+spec:
+  refreshInterval: "30s"
+  secretStoreRef:
+    name: github-app-store
+    kind: SecretStore
+  target:
+    name: grafana-gitsync-github-app
+    creationPolicy: Owner
+  data:
+    - secretKey: token
+      remoteRef:
+        key: github-app-token
+        property: token
