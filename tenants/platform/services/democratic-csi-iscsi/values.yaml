@@ -124,3 +124,14 @@ node:
           - matchExpressions:
               - key: node-role.kubernetes.io/control-plane
                 operator: DoesNotExist
+  # Storage node plugin still has to run its unmount/cleanup path on a node
+  # the control plane has marked unhealthy (node.kubernetes.io/unreachable,
+  # node.cilium.io/agent-not-ready, etc.) -- without this, any NoSchedule
+  # taint the DaemonSet controller doesn't auto-tolerate makes
+  # kube-state-metrics report the existing pod as misscheduled. Tolerate
+  # every taint here, same posture as the truenas-csi node DaemonSet
+  # (helm-charts/truenas-csi/templates/node.yaml), and keep the
+  # nodeAffinity above -- not tolerations -- as the only thing keeping this
+  # off control-plane nodes.
+  tolerations:
+    - operator: Exists
