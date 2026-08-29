@@ -54,3 +54,13 @@ value in values.yaml omits both the key and any startup dependency on it.
     fieldRef:
       fieldPath: spec.nodeName
 {{- end }}
+
+{{/*
+Sidecar --leader-election flag. Upstream hard-codes it on, but a sidecar that
+loses its lease exits so another replica can take over; at one replica there
+is no other replica, so every API-server blip longer than the renew deadline
+just crash-loops the sidecar. Elect only when there is someone to elect.
+*/}}
+{{- define "truenas-csi.leaderElectionArg" -}}
+- "--leader-election={{ gt (int .Values.controller.replicas) 1 }}"
+{{- end }}
