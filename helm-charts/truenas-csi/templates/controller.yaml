@@ -5,6 +5,11 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   replicas: {{ .Values.controller.replicas }}
+  # Recreate, not RollingUpdate: with leader election off at a single replica
+  # (see the sidecar args) nothing else stops an old and a new controller pod
+  # from provisioning concurrently during a rollout.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: truenas-csi-controller
@@ -71,7 +76,7 @@ spec:
             # topology, so there is nothing for the provisioner to constrain
             # PVs by.
             - "--extra-create-metadata"
-            - "--leader-election=true"
+            {{- include "truenas-csi.leaderElectionArg" . | nindent 12 }}
             - "--default-fstype=ext4"
             - "--timeout=60s"
           env:
@@ -93,7 +98,7 @@ spec:
           args:
             - "--csi-address=$(ADDRESS)"
             - "--v=5"
-            - "--leader-election=true"
+            {{- include "truenas-csi.leaderElectionArg" . | nindent 12 }}
             - "--timeout=60s"
           env:
             - name: ADDRESS
@@ -115,7 +120,7 @@ spec:
           args:
             - "--csi-address=$(ADDRESS)"
             - "--v=5"
-            - "--leader-election=true"
+            {{- include "truenas-csi.leaderElectionArg" . | nindent 12 }}
             - "--timeout=60s"
           env:
             - name: ADDRESS
@@ -137,7 +142,7 @@ spec:
           args:
             - "--csi-address=$(ADDRESS)"
             - "--v=5"
-            - "--leader-election=true"
+            {{- include "truenas-csi.leaderElectionArg" . | nindent 12 }}
             - "--timeout=60s"
           env:
             - name: ADDRESS

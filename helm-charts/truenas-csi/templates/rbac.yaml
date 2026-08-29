@@ -1,4 +1,6 @@
-# Verbatim from upstream deploy/truenas-csi-driver.yaml at the appVersion tag.
+# Upstream deploy/truenas-csi-driver.yaml at the appVersion tag, plus the
+# volumeattributesclasses rule the pinned external-resizer ships in its own
+# RBAC but the driver manifest omits.
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
@@ -18,6 +20,9 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["csinodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattributesclasses"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["events"]
