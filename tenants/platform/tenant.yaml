@@ -265,7 +265,7 @@ services:
   - name: grafana
     chart: grafana
     repo: https://grafana-community.github.io/helm-charts
-    revision: 12.11.2
+    revision: 13.0.1
     namespace: monitoring
     postInstall: true
     syncWave: 2
