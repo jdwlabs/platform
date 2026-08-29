@@ -1,0 +1,170 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: volumesnapshotclasses.snapshot.storage.k8s.io
+spec:
+  group: snapshot.storage.k8s.io
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                driver:
+                  type: string
+                deletionPolicy:
+                  type: string
+                parameters:
+                  type: object
+                  additionalProperties:
+                    type: string
+  scope: Cluster
+  names:
+    plural: volumesnapshotclasses
+    singular: volumesnapshotclass
+    kind: VolumeSnapshotClass
+    shortNames:
+      - volumesnapclass
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: volumesnapshots.snapshot.storage.k8s.io
+spec:
+  group: snapshot.storage.k8s.io
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                source:
+                  type: object
+                  properties:
+                    persistentVolumeClaimRef:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                    volumeSnapshotContentRef:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                volumeSnapshotClassName:
+                  type: string
+                snapshotContentName:
+                  type: string
+            status:
+              type: object
+              properties:
+                boundVolumeSnapshotContentRef:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                creationTime:
+                  type: string
+                readyToUse:
+                  type: boolean
+                restoreSize:
+                  type: string
+                error:
+                  type: object
+                  properties:
+                    message:
+                      type: string
+                    time:
+                      type: string
+  scope: Namespaced
+  names:
+    plural: volumesnapshots
+    singular: volumesnapshot
+    kind: VolumeSnapshot
+    shortNames:
+      - volumesnap
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: volumesnapshotcontents.snapshot.storage.k8s.io
+spec:
+  group: snapshot.storage.k8s.io
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                deletionPolicy:
+                  type: string
+                driver:
+                  type: string
+                source:
+                  type: object
+                  properties:
+                    volumeHandle:
+                      type: string
+                    volumeSnapshotRef:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                secretRef:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                volumeSnapshotRef:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+            status:
+              type: object
+              properties:
+                creationTime:
+                  type: string
+                error:
+                  type: object
+                  properties:
+                    message:
+                      type: string
+                    time:
+                      type: string
+                readyToUse:
+                  type: boolean
+                restoreSize:
+                  type: string
+                snapshotHandle:
+                  type: string
+  scope: Cluster
+  names:
+    plural: volumesnapshotcontents
+    singular: volumesnapshotcontent
+    kind: VolumeSnapshotContent
+    shortNames:
+      - volumesnapcont
