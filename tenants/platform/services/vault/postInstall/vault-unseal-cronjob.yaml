@@ -65,9 +65,12 @@ spec:
               image: hashicorp/vault:2.0.3@sha256:a296a888b118615dc01d5f1a6846e6d4a7277946caaed5b447008fff5fe06b54
               command: ["/bin/sh", "-ec"]
               # `vault status` exit codes: 0 unsealed, 2 sealed, 1 unreachable.
-              # Only 0 means there is nothing to do; an unreachable member falls
-              # through to the unseal attempt and fails the container, so it
-              # surfaces as a failed job instead of being silently skipped.
+              # Only 2 is actionable. An unreachable member (pod Pending during
+              # a node drain, DNS not yet published) cannot be unsealed by
+              # anyone; failing the container here only turned every drain into
+              # a KubeJobFailed page that outlived the drain by the Job TTL.
+              # A member that is down or stays sealed is already covered by
+              # VaultDegraded and VaultSealed, so skipping is not silent.
               # The key is passed as an argument. Reading it from stdin via
               # `unseal -` was tried first and does not work against this Vault:
               # every attempt is rejected with "'key' must be a valid hex or
@@ -79,8 +82,13 @@ spec:
               # environment, so anything able to read /proc can read it either way.
               args:
                 - |
-                  if vault status >/dev/null 2>&1; then exit 0; fi
-                  vault operator unseal "$VAULT_UNSEAL_KEY_1"
+                  rc=0
+                  vault status >/dev/null 2>&1 || rc=$?
+                  case "$rc" in
+                    0) exit 0 ;;
+                    2) exec vault operator unseal "$VAULT_UNSEAL_KEY_1" ;;
+                    *) echo "vault status exit $rc: member unreachable, nothing to unseal" >&2; exit 0 ;;
+                  esac
               env:
                 - name: VAULT_ADDR
                   value: "http://platform-vault-0.platform-vault-internal.vault.svc:8200"
@@ -113,8 +121,13 @@ spec:
               command: ["/bin/sh", "-ec"]
               args:
                 - |
-                  if vault status >/dev/null 2>&1; then exit 0; fi
-                  vault operator unseal "$VAULT_UNSEAL_KEY_1"
+                  rc=0
+                  vault status >/dev/null 2>&1 || rc=$?
+                  case "$rc" in
+                    0) exit 0 ;;
+                    2) exec vault operator unseal "$VAULT_UNSEAL_KEY_1" ;;
+                    *) echo "vault status exit $rc: member unreachable, nothing to unseal" >&2; exit 0 ;;
+                  esac
               env:
                 - name: VAULT_ADDR
                   value: "http://platform-vault-1.platform-vault-internal.vault.svc:8200"
@@ -144,8 +157,13 @@ spec:
               command: ["/bin/sh", "-ec"]
               args:
                 - |
-                  if vault status >/dev/null 2>&1; then exit 0; fi
-                  vault operator unseal "$VAULT_UNSEAL_KEY_1"
+                  rc=0
+                  vault status >/dev/null 2>&1 || rc=$?
+                  case "$rc" in
+                    0) exit 0 ;;
+                    2) exec vault operator unseal "$VAULT_UNSEAL_KEY_1" ;;
+                    *) echo "vault status exit $rc: member unreachable, nothing to unseal" >&2; exit 0 ;;
+                  esac
               env:
                 - name: VAULT_ADDR
                   value: "http://platform-vault-2.platform-vault-internal.vault.svc:8200"
