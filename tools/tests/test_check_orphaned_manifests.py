@@ -89,6 +89,15 @@ class CheckerHarness(unittest.TestCase):
             "platform/vault/statefulset.yaml",
         ]))
 
+    def test_nested_bootstrap_crds_fails(self):
+        # platform-crds (00-crds.yaml) sources bootstrap/crds with no
+        # directory: block, so ArgoCD's default recurse: false applies:
+        # direct children only, same failure class as the cert-manager
+        # orphan this checker exists to catch.
+        self.write("bootstrap/crds/foundation-crds.yaml")
+        self.write("bootstrap/crds/sub/nested.yaml")
+        self.assertEqual(self.orphans(), ["bootstrap/crds/sub/nested.yaml"])
+
     def test_unlisted_release_fails(self):
         self.write("tenants/platform/services/longhorn/values.yaml")
         self.assertEqual(self.orphans(), ["tenants/platform/services/longhorn/values.yaml"])
@@ -134,6 +143,86 @@ class CheckerHarness(unittest.TestCase):
         self.write("tenants/platform/services/arc-systems/values.yaml")
         with self.assertRaises(SystemExit):
             self.orphans("allow:\n  - path: tenants/platform/services/arc-systems\n")
+
+    def write_relay_manifest(self, allowlist: str, denylist: str = "") -> None:
+        env = [f'            - {{name: GITHUB_PATH_ALLOWLIST, value: "{allowlist}"}}']
+        if denylist:
+            env.append(f'            - {{name: GITHUB_PATH_DENYLIST, value: "{denylist}"}}')
+        body = "\n".join([
+            "apiVersion: apps/v1",
+            "kind: Deployment",
+            "metadata: {name: ai-sre-relay}",
+            "spec:",
+            "  template:",
+            "    spec:",
+            "      containers:",
+            "        - name: relay",
+            "          env:",
+            *env,
+            "---",
+            "apiVersion: v1",
+            "kind: Service",
+            "metadata: {name: ai-sre-relay}",
+            "",
+        ])
+        self.write(checker.RELAY_MANIFEST.as_posix(), body)
+
+    def relay_overlap(self, allowlist_yaml: str):
+        allow = self.root / "tools/orphaned-manifest-allowlist.yaml"
+        self.write(allow.relative_to(self.root).as_posix(), allowlist_yaml)
+        return checker.find_relay_allowlist_overlap(self.root, allow)
+
+    def test_relay_allowlist_overlap_detects_reachable_orphan(self):
+        self.write_relay_manifest("tenants/*/services/*/values.yaml,tenants/*/services/*/postInstall/*.yaml")
+        got = self.relay_overlap(textwrap.dedent(
+            """
+            allow:
+              - path: tenants/platform/services/arc-systems
+                reason: dormant, commented out in tenant.yaml
+            """
+        ))
+        self.assertEqual(got, [("tenants/platform/services/arc-systems", "tenants/*/services/*/values.yaml")])
+
+    def test_relay_denylist_clears_the_overlap(self):
+        self.write_relay_manifest(
+            "tenants/*/services/*/values.yaml,tenants/*/services/*/postInstall/*.yaml",
+            denylist="tenants/platform/services/arc-systems/*.yaml,tenants/platform/services/arc-systems/postInstall/*.yaml",
+        )
+        got = self.relay_overlap(textwrap.dedent(
+            """
+            allow:
+              - path: tenants/platform/services/arc-systems
+                reason: dormant, commented out in tenant.yaml
+            """
+        ))
+        self.assertEqual(got, [])
+
+    def test_relay_allowlist_overlap_ignores_unreachable_orphan(self):
+        # Same shape as the real cert-manager/postInstall/rbac orphan: nested
+        # one level below what the flat postInstall/*.yaml glob reaches, so
+        # no relay glob can select a file under it regardless of the denylist.
+        self.write_relay_manifest("tenants/*/services/*/values.yaml,tenants/*/services/*/postInstall/*.yaml")
+        got = self.relay_overlap(textwrap.dedent(
+            """
+            allow:
+              - path: tenants/platform/services/cert-manager/postInstall/rbac
+                reason: nested below postInstall/, never applied
+            """
+        ))
+        self.assertEqual(got, [])
+
+    def test_relay_allowlist_overlap_without_relay_manifest_is_clean(self):
+        # No manifest on disk (e.g. this checker run against a tree that
+        # predates the relay) must not be mistaken for "globs reach nothing";
+        # it is simply nothing to check.
+        got = self.relay_overlap(textwrap.dedent(
+            """
+            allow:
+              - path: tenants/platform/services/arc-systems
+                reason: dormant, commented out in tenant.yaml
+            """
+        ))
+        self.assertEqual(got, [])
 
     def test_main_reports_exit_code(self):
         saved = checker.REPO_ROOT, checker.ALLOWLIST

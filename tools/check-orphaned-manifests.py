@@ -10,7 +10,10 @@ existing gate checks a file's content, not whether anything reads it.
 
 The watched set is derived from the wiring itself rather than restated:
 
-- bootstrap/**              root-app.yaml, recurse: true
+- bootstrap/**              root-app.yaml, recurse: true, except crds/**
+- bootstrap/crds/*.yaml     platform-crds (00-crds.yaml): path bootstrap/crds,
+                            no directory: block, so ArgoCD's default
+                            recurse: false applies -- one level deep only
 - helm-charts/**            chart sources rendered by the tenant envelope or a
                             service's chartPath
 - tenants/<t>/tenant.yaml   governance ApplicationSet git-files generator
@@ -30,12 +33,26 @@ are parked for re-enable) are listed with a reason in
 tools/orphaned-manifest-allowlist.yaml; an entry there is a debt marker,
 not a fix.
 
+A second, independent check runs alongside the orphan scan: the ai-sre-relay
+deployment carries its own GITHUB_PATH_ALLOWLIST, a set of path.Match globs
+that are necessarily coarser than "actually reconciled" (a wildcard glob
+like tenants/*/services/*/values.yaml also matches a dormant release's
+values.yaml). find_relay_allowlist_overlap() fails the build if any glob in
+that env var can reach a path this file's own allowlist has recorded as
+unreconciled -- the exact JDWLABS-460 symptom one layer down: a proposal
+that passes every gate and changes nothing. See GITHUB_PATH_DENYLIST in
+tenants/platform/services/ai-sre-relay/postInstall/ai-sre-relay.yaml, which
+is where a real conflict gets resolved.
+
 Usage:
     python3 tools/check-orphaned-manifests.py
 
-Exit codes: 0 = every YAML is either watched or known non-manifest;
-1 = at least one orphan was found.
+Exit codes: 0 = every YAML is either watched or known non-manifest, and the
+relay's path allowlist cannot reach a known orphan;
+1 = at least one orphan was found, or the relay allowlist overlap check
+failed.
 """
+import fnmatch
 import sys
 from pathlib import Path
 
@@ -43,9 +60,13 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ALLOWLIST = Path(__file__).resolve().parent / "orphaned-manifest-allowlist.yaml"
+RELAY_MANIFEST = Path("tenants/platform/services/ai-sre-relay/postInstall/ai-sre-relay.yaml")
 
 # Reconciled wholesale: every file under these is read by an Application.
-WATCHED_TREES = ("bootstrap", "helm-charts")
+# bootstrap/ is deliberately absent -- its crds/ subtree is read one level
+# deep, not recursively, so it needs bootstrap_verdict() below rather than a
+# blanket pass.
+WATCHED_TREES = ("helm-charts",)
 
 # Hold YAML that is tooling, tests, or documentation, never a manifest.
 NON_MANIFEST_TREES = ("bin", "cli", "docs", "observability", "scripts", "tests", "tools")
@@ -71,6 +92,23 @@ def service_rules(tenant: dict) -> dict:
         else:
             rules[str(svc["name"])] = (True, bool(svc.get("postInstall")))
     return rules
+
+
+def bootstrap_verdict(rel: Path) -> str | None:
+    """Return None when rel (relative, under bootstrap/) is watched, else the
+    reason it is not.
+
+    root-app.yaml recurses bootstrap/ but excludes crds/**: that subtree is
+    owned solely by the platform-crds Application (00-crds.yaml), whose
+    source has no `directory:` block and so reads bootstrap/crds at ArgoCD's
+    default recurse: false -- direct children only, not nested directories.
+    """
+    parts = rel.parts
+    if len(parts) >= 2 and parts[1] == "crds":
+        if len(parts) == 3:
+            return None
+        return "bootstrap/crds is read one level deep (recurse: false); nested directories are not"
+    return None
 
 
 def tenant_verdict(rel: Path, rules_by_tenant: dict) -> str | None:
@@ -132,6 +170,68 @@ def allowed(rel_posix: str, prefixes: list[str]) -> bool:
     return any(rel_posix == p.rstrip("/") or rel_posix.startswith(p) for p in prefixes)
 
 
+def parse_relay_path_globs(root: Path, env_name: str) -> list[str]:
+    """Read one comma-separated path.Match glob list straight out of the
+    relay's own deployment manifest (GITHUB_PATH_ALLOWLIST or
+    GITHUB_PATH_DENYLIST), so this check reads the same source of truth the
+    relay reads at runtime instead of a copy that can silently drift."""
+    manifest = root / RELAY_MANIFEST
+    if not manifest.is_file():
+        return []
+    globs: list[str] = []
+    for doc in yaml.safe_load_all(manifest.read_text(encoding="utf-8")):
+        if not isinstance(doc, dict):
+            continue
+        containers = ((doc.get("spec") or {}).get("template") or {}).get("spec", {}).get("containers") or []
+        for container in containers:
+            for entry in container.get("env") or []:
+                if isinstance(entry, dict) and entry.get("name") == env_name:
+                    value = str(entry.get("value") or "")
+                    # Matches main.go's splitList: values are comma-separated
+                    # and the relay trims each entry, so a folded YAML block
+                    # scalar's incidental leading space must be tolerated the
+                    # same way here or this check reads the wrong globs.
+                    globs.extend(g.strip() for g in value.split(",") if g.strip())
+    return globs
+
+
+def _glob_reaches_prefix(prefix_parts: tuple[str, ...], glob: str) -> bool:
+    """True if some file directly or transitively under directory
+    prefix_parts could satisfy glob, under path.Match / Go path.Match
+    semantics: '*' matches within a single '/'-delimited segment, and a
+    glob's segment count is fixed. The glob must therefore have strictly
+    more segments than the prefix (the prefix is a directory, not a file),
+    and its leading segments must each match the prefix's corresponding
+    segment."""
+    glob_parts = glob.split("/")
+    if len(glob_parts) <= len(prefix_parts):
+        return False
+    return all(fnmatch.fnmatchcase(p, g) for p, g in zip(prefix_parts, glob_parts))
+
+
+def find_relay_allowlist_overlap(root: Path, allowlist: Path = ALLOWLIST) -> list[tuple[str, str]]:
+    """Cross-check the relay's GITHUB_PATH_ALLOWLIST against this checker's
+    own record of what is not actually reconciled. Returns (orphan_path,
+    glob) pairs for every allowlist entry a GITHUB_PATH_ALLOWLIST glob can
+    still reach after GITHUB_PATH_DENYLIST exceptions are subtracted -- an
+    empty result means every debt-marked orphan is either unreachable by the
+    relay's globs or has a matching denylist entry."""
+    prefixes = [p.rstrip("/") for p in load_allowlist(allowlist)]
+    allow_globs = parse_relay_path_globs(root, "GITHUB_PATH_ALLOWLIST")
+    deny_globs = parse_relay_path_globs(root, "GITHUB_PATH_DENYLIST")
+
+    hits = []
+    for prefix in prefixes:
+        parts = tuple(prefix.split("/"))
+        reaching = [g for g in allow_globs if _glob_reaches_prefix(parts, g)]
+        if not reaching:
+            continue
+        denied = any(_glob_reaches_prefix(parts, g) for g in deny_globs)
+        if not denied:
+            hits.append((prefix, reaching[0]))
+    return hits
+
+
 def find_orphans(root: Path, allowlist: Path = ALLOWLIST) -> list[tuple[str, str]]:
     prefixes = load_allowlist(allowlist)
     rules_by_tenant = {}
@@ -141,9 +241,13 @@ def find_orphans(root: Path, allowlist: Path = ALLOWLIST) -> list[tuple[str, str
     orphans = []
     for rel in iter_yaml(root):
         top = rel.parts[0]
-        if top in WATCHED_TREES or top in NON_MANIFEST_TREES:
+        if top in NON_MANIFEST_TREES:
             continue
-        if top == "tenants":
+        if top == "bootstrap":
+            reason = bootstrap_verdict(rel)
+        elif top in WATCHED_TREES:
+            continue
+        elif top == "tenants":
             reason = tenant_verdict(rel, rules_by_tenant)
         else:
             reason = f"top-level {top}/ is not a path any Application or ApplicationSet reads"
@@ -154,19 +258,46 @@ def find_orphans(root: Path, allowlist: Path = ALLOWLIST) -> list[tuple[str, str
 
 def main() -> int:
     orphans = find_orphans(REPO_ROOT)
-    if not orphans:
-        print("orphaned-manifests: every YAML is watched by ArgoCD or lives in a known non-manifest tree")
+    overlap = find_relay_allowlist_overlap(REPO_ROOT)
+    ok = True
+
+    if orphans:
+        ok = False
+        print("ORPHANED MANIFEST — YAML that no ArgoCD Application or ApplicationSet reads:")
+        for path, reason in orphans:
+            print(f"  {path}: {reason}")
+        print(
+            "\nReconciled paths are bootstrap/** (except crds/, read one level deep),"
+            " helm-charts/**, tenants/<t>/tenant.yaml,"
+            " tenants/<t>/services/<release>/values.yaml and"
+            " tenants/<t>/services/<release>/postInstall/*.yaml for a release listed in"
+            " that tenant.yaml. Move the file there, list the release, or delete it;"
+            " a dormant release can be parked in tools/orphaned-manifest-allowlist.yaml with a reason."
+        )
+
+    if overlap:
+        ok = False
+        if orphans:
+            print()
+        print(
+            "RELAY PATH ALLOWLIST OVERLAP — GITHUB_PATH_ALLOWLIST in"
+            f" {RELAY_MANIFEST} can still reach a path"
+            " tools/orphaned-manifest-allowlist.yaml records as unreconciled:"
+        )
+        for path, glob in overlap:
+            print(f"  {path}: matches glob {glob!r}")
+        print(
+            "\nA patch to one of these would pass the relay's repo, path, and"
+            " existing-file gates and open a plausible PR that changes nothing —"
+            " the JDWLABS-460 symptom, one layer down. Add a matching"
+            " GITHUB_PATH_DENYLIST glob in that manifest, or narrow"
+            " GITHUB_PATH_ALLOWLIST so it cannot reach the path."
+        )
+
+    if ok:
+        print("orphaned-manifests: every YAML is watched by ArgoCD or lives in a known non-manifest tree,"
+              " and the relay's path allowlist cannot reach a known orphan")
         return 0
-    print("ORPHANED MANIFEST — YAML that no ArgoCD Application or ApplicationSet reads:")
-    for path, reason in orphans:
-        print(f"  {path}: {reason}")
-    print(
-        "\nReconciled paths are bootstrap/**, helm-charts/**, tenants/<t>/tenant.yaml,"
-        " tenants/<t>/services/<release>/values.yaml and"
-        " tenants/<t>/services/<release>/postInstall/*.yaml for a release listed in"
-        " that tenant.yaml. Move the file there, list the release, or delete it;"
-        " a dormant release can be parked in tools/orphaned-manifest-allowlist.yaml with a reason."
-    )
     return 1
 
 
