@@ -55,14 +55,40 @@ spec:
             # back into a model choice. Unset disables the arm.
             - {name: GITHUB_REPO_ALLOWLIST, value: "jdwlabs/platform"}
             # Files inside that repo a patch may touch, as path.Match globs
-            # (one segment per star). Mirrors what ArgoCD actually reads:
-            # the governance appset's tenant.yaml, and each listed release's
-            # values.yaml and flat postInstall/ directory. The relay also
-            # requires the file to already exist on main, so a plausible
-            # path that nothing reconciles is refused before any write.
-            # Keep this in step with tools/check-orphaned-manifests.py.
-            # Unset disables the arm, same as the repo allowlist.
-            - {name: GITHUB_PATH_ALLOWLIST, value: "tenants/*/tenant.yaml,tenants/*/services/*/values.yaml,tenants/*/services/*/postInstall/*.yaml"}
+            # (one segment per star). Mirrors what ArgoCD actually reads for
+            # a release: values.yaml and flat postInstall/. Deliberately
+            # excludes tenants/*/tenant.yaml even though that file is also
+            # reconciled: it is the tenant's whole service list, rendered by
+            # governance-appset with prune and self-heal, and no remediation
+            # use case needs a full-file rewrite of it — a hallucinated or
+            # truncated one deletes every workload in the tenant. See the
+            # matching guard in patch.go's prompt. The relay also requires
+            # the file to already exist on main, so a plausible path that
+            # nothing reconciles is refused before any write. Keep this in
+            # step with tools/check-orphaned-manifests.py — a CI assertion
+            # there (find_relay_allowlist_overlap) fails the build if these
+            # globs can reach anything tools/orphaned-manifest-allowlist.yaml
+            # lists as unreconciled. Unset disables the arm, same as the repo
+            # allowlist.
+            - {name: GITHUB_PATH_ALLOWLIST, value: "tenants/*/services/*/values.yaml,tenants/*/services/*/postInstall/*.yaml"}
+            # Known exceptions to the allowlist above: paths an allow glob
+            # matches but that are not actually reconciled, mirroring
+            # tools/orphaned-manifest-allowlist.yaml's dormant-release
+            # entries (arc-systems / arc-runner-set-jdwlabs /
+            # arc-runner-set-dotablaze-tech — service entries commented out
+            # in their tenant.yaml, so the envelope renders no Application
+            # for them, but the files are parked in place rather than
+            # deleted). checked before, and wins over, the allowlist above.
+            # Empty is safe -- it just means no exceptions are known -- but
+            # the CI assertion referenced above will fail the moment one is.
+            - name: GITHUB_PATH_DENYLIST
+              value: >-
+                tenants/platform/services/arc-systems/*.yaml,
+                tenants/platform/services/arc-systems/postInstall/*.yaml,
+                tenants/jdwlabs/services/arc-runner-set-jdwlabs/*.yaml,
+                tenants/jdwlabs/services/arc-runner-set-jdwlabs/postInstall/*.yaml,
+                tenants/dotablaze-tech/services/arc-runner-set-dotablaze-tech/*.yaml,
+                tenants/dotablaze-tech/services/arc-runner-set-dotablaze-tech/postInstall/*.yaml
             # Go's GC is cgroup-unaware without this: it only reacts to heap
             # growth, not the container's cgroup limit, so live heap can
             # roughly double before a collection runs. Hardcoded rather than
