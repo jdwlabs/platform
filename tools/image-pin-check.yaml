@@ -1,0 +1,18 @@
+# Per-repo configuration for tools/check-image-pins.py. The script itself is
+# the org-canonical copy (jdwlabs/.github) and is compared byte-for-byte
+# against it in CI; everything specific to this repo's layout lives here.
+allowlist: tools/image-pin-allowlist.yaml
+sources:
+  # Every YAML file under tenants/ (chart overlays and raw postInstall
+  # manifests) and helm-charts/ (in-house and vendored charts whose own
+  # values.yaml is the deployed configuration; several platform services
+  # deploy from here via `chartPath` and override little or nothing).
+  # Files under a chart's templates/ directory are scanned for literal
+  # references rather than parsed as YAML.
+  - kind: tree
+    globs:
+      - tenants/**/*.yaml
+      - tenants/**/*.yml
+      - helm-charts/**/*.yaml
+      - helm-charts/**/*.yml
+      - helm-charts/**/templates/**/*.tpl

@@ -333,11 +333,9 @@ def mutable_refs(values: dict, app_version: str = "") -> list[str]:
     that would actually be deployed rather than the empty value written in
     the chart.
     """
-    refs: list[dict] = []
-    _pins.walk(values, refs)
     found = []
-    for ref in refs:
-        full_ref = ref["full_ref"]
+    for ref in _pins.refs_in_tree(values):
+        full_ref = ref.full_ref
         if _pins.DIGEST_RE.search(full_ref) is not None:
             continue
         tag = tag_of(full_ref)
@@ -387,8 +385,7 @@ def collect(releases, allowlist, fetch=None):
 
 
 def main() -> int:
-    _pins.ALLOWLIST_FILE = ALLOWLIST_FILE
-    allowlist = _pins.load_allowlist()
+    allowlist = _pins.load_allowlist(ALLOWLIST_FILE)
     releases = discover_releases()
     checked, allowed, violations, errors, consumed = collect(releases, allowlist)
     stale = sorted(set(allowlist) - consumed)

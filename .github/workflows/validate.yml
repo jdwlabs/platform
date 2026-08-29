@@ -205,6 +205,28 @@ jobs:
           cache-dependency-path: tools/requirements.txt
       - name: Install dependencies
         run: pip install -r tools/requirements.txt
+      - name: Verify the checker matches the org canonical copy
+        # tools/check-image-pins.py and its test file are vendored byte-for-byte
+        # from jdwlabs/.github so a rule fix cannot land here and miss the other
+        # delivery repo. Rule changes go there first; re-vendor both files and
+        # bump this SHA in the same PR. Repo-specific layout lives in
+        # tools/image-pin-check.yaml, which is deliberately not compared.
+        env:
+          CANONICAL_REF: e6ea75a8f0fb33b22434fa03b9163b78c8e9c2ef  # main as of 2026-08-29 (jdwlabs/.github has no tagged releases)
+        run: |
+          status=0
+          while read -r canonical local; do
+            curl -fsSL "https://raw.githubusercontent.com/jdwlabs/.github/${CANONICAL_REF}/${canonical}" -o canonical.tmp
+            if ! git diff --no-index --exit-code canonical.tmp "$local"; then
+              echo "::error file=$local::$local differs from jdwlabs/.github@${CANONICAL_REF}:$canonical — re-vendor it (or bump CANONICAL_REF)"
+              status=1
+            fi
+          done <<'FILES'
+          tools/check-image-pins.py tools/check-image-pins.py
+          tools/tests/test_check_image_pins.py tools/tests/test_check_image_pins.py
+          FILES
+          rm -f canonical.tmp
+          exit $status
       - name: Test the checker against its known false negatives
         run: python3 -m unittest discover -s tools/tests -t tools/tests
       - name: Reject mutable image references
