@@ -236,6 +236,11 @@ jobs:
   # chart archives, so an upstream museum being unreachable must be
   # distinguishable at a glance from an actually-unpinned image.
   remote-chart-image-pin-check:
+    # Waits on image-pin-check: this job's own test discovery imports the
+    # vendored check-image-pins.py (test_check_image_pins.py execs it at
+    # module load), so a tampered vendored copy must be caught by the drift
+    # guard there before it runs here too.
+    needs: image-pin-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -256,6 +261,8 @@ jobs:
   # describe the same tenant folder have drifted, and the fix is in whichever
   # of the three was not updated.
   gitsync-tenant-folders:
+    # See remote-chart-image-pin-check's needs comment above — same reason.
+    needs: image-pin-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -272,6 +279,8 @@ jobs:
         run: python3 tools/check-gitsync-tenant-folders.py
 
   adr-numbering:
+    # See remote-chart-image-pin-check's needs comment above — same reason.
+    needs: image-pin-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
