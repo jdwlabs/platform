@@ -353,8 +353,12 @@ class MalformedReferences(FixtureTest):
         self.assertEqual([], report.allowed)
 
     def test_raw_reference_with_a_digest_and_no_tag_is_valid(self):
-        # `repo@sha256:…` is a well-formed reference; only the structured
-        # `tag: "@sha256:…"` shape renders into junk.
+        # `repo@sha256:…` is well-formed only when the digest arrived
+        # already embedded in one raw string. The structured {repository,
+        # tag} map and the sibling-scalar image/tag shape both render into
+        # junk when the tag is digest-only — see
+        # test_digest_only_tag_is_rejected and
+        # test_digest_only_sibling_tag_is_malformed.
         self.repo.chart("app").overlay(
             "app",
             "prd",
@@ -606,6 +610,25 @@ class TreeUnquotedTags(TreeTest):
         )
         report = self.repo.check()
         self.assertEqual(["docker.io/library/postgres:17"], [r.full_ref for r in report.malformed])
+
+    def test_digest_only_sibling_tag_is_malformed(self):
+        # A digest-only value in the sibling-scalar shape (image/tag as two
+        # separate keys, e.g. litellm's dbReadyImage/dbReadyTag) renders
+        # exactly the same unpullable "repo:@sha256:..." the structured
+        # {repository, tag} map produces — it must be rejected the same way,
+        # not read as a bare `repo@sha256:...` digest reference.
+        self.repo.write(
+            "tenants/probe/services/svc/values.yaml",
+            f"""
+            db:
+              dbReadyImage: docker.io/library/postgres
+              dbReadyTag: "{OTHER_DIGEST}"
+            """,
+        )
+        report = self.repo.check()
+        self.assertEqual([], report.pinned)
+        self.assertEqual(1, len(report.malformed))
+        self.assertIn("digest-only tag", report.malformed[0].problem)
 
 
 class GlobCoverage(TreeTest):

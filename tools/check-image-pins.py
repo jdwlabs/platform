@@ -497,8 +497,18 @@ def walk(node, refs: list, trail: str = "") -> None:
                 sibling = node.get(tag_key) if tag_key else None
                 repository, tag = split_raw_reference(image)
                 raw_tag: object = tag
+                # A tag that arrived as a separate scalar the chart template
+                # concatenates behaves like the structured {repository, tag}
+                # map for reference_problem's purposes: a digest-only value
+                # ("@sha256:...") renders into "repo:@sha256:..." either way,
+                # which is exactly as unpullable as the map form. Only a tag
+                # already embedded in one raw string (split_raw_reference's
+                # own "repo@sha256:..." parse) is exempt, since that shape is
+                # a genuinely valid digest reference with no tag at all.
+                composed_tag = False
                 if not has_tag_or_digest(image) and as_str(sibling).strip():
                     raw_tag = sibling
+                    composed_tag = True
                 refs.append(
                     {
                         "where": child_trail,
@@ -507,7 +517,7 @@ def walk(node, refs: list, trail: str = "") -> None:
                         "repository": repository,
                         "raw_tag": raw_tag,
                         "digest": "",
-                        "structured": False,
+                        "structured": composed_tag,
                     }
                 )
             walk(value, refs, child_trail)
