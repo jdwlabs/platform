@@ -6,7 +6,7 @@
 # tools/check-image-pins.py's own docstring is explicit that it checks format
 # only and never resolves a digest itself, so a stale one here would pass CI
 # and only fail at image pull time.
-FROM golang:1.26-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS build
+FROM golang:1.27-bookworm@sha256:ded31c68586d2e49e760acc2e65a884b23d032e9bbbed0ae0c55abd3fcaf4452 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
