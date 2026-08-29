@@ -74,7 +74,7 @@ class RemoteCheckerHarness(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
-        self._saved = (checker.REPO_ROOT, checker.ALLOWLIST_FILE, pins.ALLOWLIST_FILE)
+        self._saved = (checker.REPO_ROOT, checker.ALLOWLIST_FILE)
         checker.REPO_ROOT = self.root
         checker.ALLOWLIST_FILE = self.root / "tools/remote-chart-image-pin-allowlist.yaml"
         self.charts = {}
@@ -82,7 +82,7 @@ class RemoteCheckerHarness(unittest.TestCase):
         self.write_allowlist("exceptions: []")
 
     def _restore(self):
-        checker.REPO_ROOT, checker.ALLOWLIST_FILE, pins.ALLOWLIST_FILE = self._saved
+        checker.REPO_ROOT, checker.ALLOWLIST_FILE = self._saved
         self._tmp.cleanup()
 
     def write(self, relpath: str, content: str) -> Path:
@@ -105,8 +105,7 @@ class RemoteCheckerHarness(unittest.TestCase):
 
     def run_checker(self):
         """Returns (exit_code, stdout)."""
-        pins.ALLOWLIST_FILE = checker.ALLOWLIST_FILE
-        allowlist = pins.load_allowlist()
+        allowlist = pins.load_allowlist(checker.ALLOWLIST_FILE)
         releases = checker.discover_releases()
         checked, allowed, violations, errors, consumed = checker.collect(
             releases, allowlist, fetch=self.fake_fetch
@@ -174,10 +173,9 @@ class Jdwlabs369(RemoteCheckerHarness):
 
     def test_registry_only_image_block_is_extracted_at_all(self):
         """The chart has no `repository` key; keying on it alone saw nothing."""
-        refs = []
-        pins.walk(DEMOCRATIC_CSI_DEFAULTS["values"], refs)
+        refs = pins.refs_in_tree(DEMOCRATIC_CSI_DEFAULTS["values"])
         self.assertEqual(
-            sorted(r["full_ref"] for r in refs),
+            sorted(r.full_ref for r in refs),
             ["ghcr.io/democratic-csi/democratic-csi:latest"] * 2,
         )
 
@@ -525,12 +523,7 @@ class RepositoryAllowlistIntegrity(unittest.TestCase):
     """The committed allowlist must parse and carry a reason on every entry."""
 
     def test_committed_allowlist_is_well_formed(self):
-        saved = pins.ALLOWLIST_FILE
-        pins.ALLOWLIST_FILE = checker.ALLOWLIST_FILE
-        try:
-            allowlist = pins.load_allowlist()
-        finally:
-            pins.ALLOWLIST_FILE = saved
+        allowlist = pins.load_allowlist(checker.ALLOWLIST_FILE)
         self.assertTrue(allowlist, "expected the committed allowlist to have entries")
         for (path, ref), entry in allowlist.items():
             self.assertTrue(path.startswith("tenants/"), path)
