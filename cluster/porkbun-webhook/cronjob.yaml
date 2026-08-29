@@ -1,0 +1,39 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: porkbun-ddns
+  namespace: porkbun-webhook
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          dnsPolicy: ClusterFirst
+          dnsConfig:
+            nameservers:
+              - 1.1.1.1
+              - 8.8.8.8
+          containers:
+            - name: ddns-update
+              image: ghcr.io/jdwlabs/porkbun-ddns:latest
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: PORKBUN_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: porkbun-api
+                      key: api_key
+                - name: PORKBUN_SECRET_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: porkbun-api
+                      key: secret_api_key
+                - name: DOMAIN
+                  value: "jdwlabs.technology"
+                - name: SUBDOMAINS
+                  value: "@,www"
+                - name: TTL
+                  value: "600"
