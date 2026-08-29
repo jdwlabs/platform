@@ -1,0 +1,28 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: holmes-drift-scan
+  namespace: ai-sre
+spec:
+  schedule: "0 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: drift-scan
+            image: curlimages/curl:8.5.0
+            command:
+            - /bin/sh
+            - -c
+            - |
+              RESPONSE=$(curl -s -X POST http://platform-holmes-holmes/api/chat -d '{"prompt":"Scan for drift"}')
+              PENDING_COUNT=$(kubectl get pods --field-selector=status.phase=Pending -o name 2>/dev/null | wc -l)
+              if echo "$RESPONSE" | grep -q "VERDICT: ISSUE:" && [ "$PENDING_COUNT" -eq 0 ]; then
+                echo "Holmes reported issue but pending pods count is zero; suppressing alert."
+                exit 0
+              fi
+              if echo "$RESPONSE" | grep -q "VERDICT: ISSUE:"; then
+                /usr/local/bin/alert-relay --message "$RESPONSE"
+              fi
+          restartPolicy: OnFailure
