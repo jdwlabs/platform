@@ -1,0 +1,74 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vault-auto-unseal
+  namespace: vault
+spec:
+  schedule: "*/2 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      parallelism: 1
+      completions: 1
+      activeDeadlineSeconds: 90
+      backoffLimit: 5
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: vault-unseal-0
+            image: hashicorp/vault:1.15
+            env:
+            - name: VAULT_ADDR
+              value: "http://platform-vault-0.platform-vault-internal.vault.svc:8200"
+            - name: VAULT_UNSEAL_KEY_1
+              valueFrom:
+                secretKeyRef:
+                  name: vault-unseal-keys
+                  key: key1
+            command: ["/bin/sh","-c"]
+            args:
+            - |
+              if vault status -format=json | jq -e .sealed; then
+                vault operator unseal "$VAULT_UNSEAL_KEY_1";
+              else
+                exit 0;
+              fi
+          - name: vault-unseal-1
+            image: hashicorp/vault:1.15
+            env:
+            - name: VAULT_ADDR
+              value: "http://platform-vault-1.platform-vault-internal.vault.svc:8200"
+            - name: VAULT_UNSEAL_KEY_1
+              valueFrom:
+                secretKeyRef:
+                  name: vault-unseal-keys
+                  key: key1
+            command: ["/bin/sh","-c"]
+            args:
+            - |
+              if vault status -format=json | jq -e .sealed; then
+                vault operator unseal "$VAULT_UNSEAL_KEY_1";
+              else
+                exit 0;
+              fi
+          - name: vault-unseal-2
+            image: hashicorp/vault:1.15
+            env:
+            - name: VAULT_ADDR
+              value: "http://platform-vault-2.platform-vault-internal.vault.svc:8200"
+            - name: VAULT_UNSEAL_KEY_1
+              valueFrom:
+                secretKeyRef:
+                  name: vault-unseal-keys
+                  key: key1
+            command: ["/bin/sh","-c"]
+            args:
+            - |
+              if vault status -format=json | jq -e .sealed; then
+                vault operator unseal "$VAULT_UNSEAL_KEY_1";
+              else
+                exit 0;
+              fi
