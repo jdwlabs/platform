@@ -249,6 +249,26 @@ jobs:
       - name: Reject a git sync tenant folder that is created but not granted
         run: python3 tools/check-gitsync-tenant-folders.py
 
+  # Content checks cannot see this failure: a manifest can be valid YAML,
+  # pass kubeconform, and still be inert because no Application reads its
+  # path. Derives the watched set from bootstrap/ and each tenant.yaml
+  # rather than restating it, so the gate moves with the wiring.
+  orphaned-manifest-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: tools/requirements.txt
+      - name: Install dependencies
+        run: pip install -r tools/requirements.txt
+      - name: Test the checker against its known false negatives
+        run: python3 -m unittest discover -s tools/tests -t tools/tests
+      - name: Reject YAML that no ArgoCD Application or ApplicationSet reads
+        run: python3 tools/check-orphaned-manifests.py
+
   adr-numbering:
     runs-on: ubuntu-latest
     steps:
