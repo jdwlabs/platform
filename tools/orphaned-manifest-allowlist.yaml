@@ -1,0 +1,21 @@
+# YAML that tools/check-orphaned-manifests.py would otherwise fail, kept on
+# purpose. Every entry is a path prefix relative to the repo root plus the
+# reason nothing reads it today. An entry here is a debt marker: the files
+# are inert until the reason is resolved, and removing the entry is how the
+# check starts enforcing them again.
+allow:
+  # ARC runner sets are dormant: the service entries are commented out in
+  # every tenant.yaml, so the envelope renders no Application for them. The
+  # manifests are parked for re-enable rather than deleted.
+  - path: tenants/platform/services/arc-systems
+    reason: dormant release, service entry commented out in tenants/platform/tenant.yaml
+  - path: tenants/jdwlabs/services/arc-runner-set-jdwlabs
+    reason: dormant release, service entry commented out in tenants/jdwlabs/tenant.yaml
+  - path: tenants/dotablaze-tech/services/arc-runner-set-dotablaze-tech
+    reason: dormant release, service entry commented out in tenants/dotablaze-tech/tenant.yaml
+  # Pre-existing orphan the check surfaced: the postInstall source is read
+  # flat (no directory.recurse), so this subdirectory is never applied and
+  # the Role it declares does not exist in the cluster. Flatten or delete
+  # under its own change, then drop this entry.
+  - path: tenants/platform/services/cert-manager/postInstall/rbac
+    reason: nested one level below postInstall/, which ArgoCD reads without recurse; never applied
