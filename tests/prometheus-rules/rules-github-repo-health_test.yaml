@@ -1,0 +1,187 @@
+# Unit tests for the cross-repo CI health alerts.
+#
+# The healthy case is asserted as deliberately as the failing ones: these
+# rules replaced a step summary nobody opened, and a rule that fires on every
+# flaky run would be muted just as quickly.
+#
+# Rule files are extracted from the PrometheusRule manifests under tenants/ by
+# run.sh, since promtool reads bare rule groups and not the CRD wrapper.
+#
+# promtool starts time() at the Unix epoch, so the staleness test reads a
+# refresh timestamp of 0 as "never refreshed" and a large one as "just now".
+rule_files:
+  - rules/github-repo-health-rules.yaml
+evaluation_interval: 1m
+tests:
+  # Healthy: two green workflows, a fresh refresh, the target up. Silent.
+  - interval: 1m
+    name: healthy repos are silent
+    input_series:
+      - series: 'jdwlabs_repo_ci_consecutive_failures{repo="deployments",workflow="prd Drift"}'
+        values: '0+0x180'
+      - series: 'jdwlabs_repo_ci_consecutive_failures{repo="platform",workflow="Validate"}'
+        values: '1+0x180'
+      - series: 'jdwlabs_repo_health_exporter_last_refresh_timestamp_seconds'
+        values: '1000000000+0x180'
+      - series: 'jdwlabs_repo_health_exporter_refreshes_total{outcome="failed"}'
+        values: '0+0x180'
+      - series: 'up{job="github-repo-health-exporter",namespace="monitoring"}'
+        values: '1+0x180'
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: RepoCiWorkflowFailingOnMain
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: RepoCiWorkflowFailingOnMainWeek
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: RepoHealthExporterStale
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: RepoHealthExporterRefreshFailing
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: RepoHealthExporterTargetDown
+        exp_alerts: []
+
+  # The motivating incident: a daily workflow red for three runs, then a
+  # week. Warning at three; critical joins it at seven and both keep firing.
+  - interval: 1m
+    name: consecutive main failures escalate
+    input_series:
+      - series: 'jdwlabs_repo_ci_consecutive_failures{repo="deployments",workflow="prd Drift"}'
+        values: '3+0x180 7+0x180'
+    alert_rule_test:
+      # Two failures in a row is not yet a pattern.
+      - eval_time: 30m
+        alertname: RepoCiWorkflowFailingOnMain
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: RepoCiWorkflowFailingOnMain
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              repo: deployments
+              workflow: prd Drift
+            exp_annotations:
+              summary: "deployments: workflow 'prd Drift' has failed 3 consecutive runs on main"
+              description: "The most recent 3 completed runs of 'prd Drift' on jdwlabs/deployments@main all concluded failure. Nothing on the branch is going to fix itself; open the workflow's run list and read the newest failure."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+      - eval_time: 2h
+        alertname: RepoCiWorkflowFailingOnMainWeek
+        exp_alerts: []
+      - eval_time: 5h
+        alertname: RepoCiWorkflowFailingOnMainWeek
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              repo: deployments
+              workflow: prd Drift
+            exp_annotations:
+              summary: "deployments: workflow 'prd Drift' has failed 7 consecutive runs on main"
+              description: "'prd Drift' on jdwlabs/deployments@main has now failed 7 runs in a row — for a daily schedule that is a week without a green run and whatever it guards has been unverified for as long."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+      - eval_time: 5h
+        alertname: RepoCiWorkflowFailingOnMain
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              repo: deployments
+              workflow: prd Drift
+            exp_annotations:
+              summary: "deployments: workflow 'prd Drift' has failed 7 consecutive runs on main"
+              description: "The most recent 7 completed runs of 'prd Drift' on jdwlabs/deployments@main all concluded failure. Nothing on the branch is going to fix itself; open the workflow's run list and read the newest failure."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+  # A streak of two that never grows stays silent however long it lasts.
+  - interval: 1m
+    name: a short streak never fires
+    input_series:
+      - series: 'jdwlabs_repo_ci_consecutive_failures{repo="apps",workflow="CI"}'
+        values: '2+0x600'
+    alert_rule_test:
+      - eval_time: 10h
+        alertname: RepoCiWorkflowFailingOnMain
+        exp_alerts: []
+
+  # A pod that never authenticated: the timestamp gauge sits at 0 from start.
+  - interval: 1m
+    name: exporter that never refreshed is stale
+    input_series:
+      - series: 'jdwlabs_repo_health_exporter_last_refresh_timestamp_seconds'
+        values: '0+0x180'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: RepoHealthExporterStale
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: RepoHealthExporterStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "github-repo-health-exporter has not refreshed from GitHub in over an hour"
+              description: "No polling cycle has updated any repo for over 1h, so every jdwlabs_repo_ci_* series is frozen at its last value and the CI alerts above are blind. Check the exporter logs for the GitHub API error — an App token failure is the usual cause."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+  # One repo failing every 15m cycle while the others succeed: four failures
+  # an hour, and the staleness rule cannot see it. The window sees three or
+  # four steps depending on alignment, which is why the threshold is three.
+  - interval: 1m
+    name: one repo failing every cycle fires refresh-failing only
+    input_series:
+      - series: 'jdwlabs_repo_health_exporter_refreshes_total{outcome="failed"}'
+        values: '0+0x14 1+0x14 2+0x14 3+0x14 4+0x14 5+0x14 6+0x14 7+0x14 8+0x14 9+0x14'
+      - series: 'jdwlabs_repo_health_exporter_last_refresh_timestamp_seconds'
+        values: '1000000000+0x150'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: RepoHealthExporterRefreshFailing
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: RepoHealthExporterRefreshFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              outcome: failed
+            exp_annotations:
+              summary: "github-repo-health-exporter refresh cycles are failing"
+              description: "4 per-repo refreshes failed in the last hour. At least one repo's CI series is no longer being updated — the exporter log names the repo and the GitHub API status it got back."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+      - eval_time: 2h
+        alertname: RepoHealthExporterStale
+        exp_alerts: []
+
+  # Scrape lost: both halves of the target-down rule.
+  - interval: 1m
+    name: target down and target absent both fire
+    input_series:
+      - series: 'up{job="github-repo-health-exporter",namespace="monitoring"}'
+        values: '1+0x30 0+0x60'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: RepoHealthExporterTargetDown
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: RepoHealthExporterTargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: github-repo-health-exporter
+              namespace: monitoring
+            exp_annotations:
+              summary: "github-repo-health-exporter metrics are not being scraped"
+              description: "Prometheus has not scraped github-repo-health-exporter for 15m, or the target has vanished from service discovery. Every repo-health alert is keyed on its series and is blind until this is fixed."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+      # absent() carries the equality matchers of its selector as labels.
+      - eval_time: 2h
+        alertname: RepoHealthExporterTargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: github-repo-health-exporter
+              namespace: monitoring
+            exp_annotations:
+              summary: "github-repo-health-exporter metrics are not being scraped"
+              description: "Prometheus has not scraped github-repo-health-exporter for 15m, or the target has vanished from service discovery. Every repo-health alert is keyed on its series and is blind until this is fixed."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"

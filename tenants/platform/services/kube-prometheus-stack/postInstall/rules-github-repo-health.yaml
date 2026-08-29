@@ -1,0 +1,102 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: github-repo-health-rules
+  namespace: monitoring
+spec:
+  groups:
+    # The exporter exists because a scheduled workflow on main failed 13 of
+    # 15 daily runs with nobody noticing — its only sink was a step summary.
+    # These rules are that sink. Both CI series are gauges recomputed every
+    # 15m from the last 100 completed main-branch runs per repo, so a streak
+    # is measured in runs, not time: for a daily-scheduled workflow, 3
+    # consecutive failures is three days of red.
+    #
+    # Severity is routing, not impact. Only critical reaches Discord; warning
+    # reaches the AI-SRE relay alone, which investigates and may open a PR.
+    # A workflow that has been red for a week is past the point where an
+    # automated investigation is the right recipient, so the streak escalates
+    # to critical at 7 rather than warning forever.
+    - name: github-repo-health
+      rules:
+        # A single failed run is ordinary (flaky runner, a transient upstream
+        # 5xx); the second is a coincidence; the third is a pattern. The 1h
+        # `for` spans four refresh cycles so one transient view of the API
+        # (a run mid-completion, a partial page) cannot open the alert alone.
+        - alert: RepoCiWorkflowFailingOnMain
+          expr: jdwlabs_repo_ci_consecutive_failures >= 3
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.repo }}: workflow '{{ $labels.workflow }}' has failed {{ $value }} consecutive runs on main"
+            description: "The most recent {{ $value }} completed runs of '{{ $labels.workflow }}' on jdwlabs/{{ $labels.repo }}@main all concluded failure. Nothing on the branch is going to fix itself; open the workflow's run list and read the newest failure."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+        # Same series, one week of daily runs. Fires alongside the warning
+        # above rather than replacing it — inhibition is a router concern and
+        # the two carry different recipients on purpose.
+        - alert: RepoCiWorkflowFailingOnMainWeek
+          expr: jdwlabs_repo_ci_consecutive_failures >= 7
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.repo }}: workflow '{{ $labels.workflow }}' has failed {{ $value }} consecutive runs on main"
+            description: "'{{ $labels.workflow }}' on jdwlabs/{{ $labels.repo }}@main has now failed {{ $value }} runs in a row — for a daily schedule that is a week without a green run and whatever it guards has been unverified for as long."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+        # The failure gauges only move when a refresh succeeds, so a broken
+        # App key, a revoked installation or a GitHub outage leave every CI
+        # series frozen at its last value — a stale "0 consecutive failures"
+        # reads exactly like a healthy one. The last-refresh timestamp is the
+        # only series that exposes the freeze. 1h is four missed cycles; the
+        # exporter starts at 0 for this gauge so a pod that never once
+        # authenticated fires this after the `for`, which is the intent.
+        - alert: RepoHealthExporterStale
+          expr: |
+            time() - jdwlabs_repo_health_exporter_last_refresh_timestamp_seconds > 3600
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "github-repo-health-exporter has not refreshed from GitHub in over an hour"
+            description: "No polling cycle has updated any repo for over 1h, so every jdwlabs_repo_ci_* series is frozen at its last value and the CI alerts above are blind. Check the exporter logs for the GitHub API error — an App token failure is the usual cause."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+        # The exporter refreshes each repo independently, so one repo failing
+        # every cycle while the other three succeed never trips the staleness
+        # rule above — that repo's series just silently age in place. Each
+        # failed repo adds one to the counter per cycle, so one repo failing
+        # every cycle is four increments an hour; the threshold is three
+        # because a 1h window over a counter that steps every 15m sees three
+        # steps or four depending on alignment, and a threshold of four would
+        # flap out of pending on every misaligned evaluation.
+        - alert: RepoHealthExporterRefreshFailing
+          expr: |
+            increase(jdwlabs_repo_health_exporter_refreshes_total{outcome="failed"}[1h]) >= 3
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "github-repo-health-exporter refresh cycles are failing"
+            description: "{{ $value | printf \"%.0f\" }} per-repo refreshes failed in the last hour. At least one repo's CI series is no longer being updated — the exporter log names the repo and the GitHub API status it got back."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+        # Every rule above reads exporter series, so a lost scrape silences
+        # them all. absent() is the load-bearing half: if the ServiceMonitor
+        # stops selecting the Service, `up` for this job disappears entirely
+        # and the == 0 comparison matches nothing. The 15m `for` absorbs the
+        # sync skew between the ArgoCD Application carrying the exporter and
+        # the one carrying these rules.
+        - alert: RepoHealthExporterTargetDown
+          expr: |
+            up{job="github-repo-health-exporter", namespace="monitoring"} == 0
+            or absent(up{job="github-repo-health-exporter", namespace="monitoring"})
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "github-repo-health-exporter metrics are not being scraped"
+            description: "Prometheus has not scraped github-repo-health-exporter for 15m, or the target has vanished from service discovery. Every repo-health alert is keyed on its series and is blind until this is fixed."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"

@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: github-repo-health-exporter-metrics
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: github-repo-health-exporter
+  namespaceSelector:
+    matchNames:
+      - monitoring
+  endpoints:
+    - port: metrics
+      path: /metrics
+      # The exporter recomputes every 15m; scraping at the cluster's usual
+      # 60s keeps `up` responsive without re-reading an unchanged view faster
+      # than is useful.
+      interval: 60s

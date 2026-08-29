@@ -336,6 +336,19 @@ services:
     postInstall: false
     syncWave: 2
 
+  # Cross-repo CI health (main-branch failure ratio and consecutive-failure
+  # streak per workflow) from the GitHub API into Prometheus, so a scheduled
+  # workflow failing for two weeks is an alert and not a step summary nobody
+  # opens. rawManifests: single-tenant poller against an in-house image.
+  - name: github-repo-health-exporter
+    chart: ""
+    repo: ""
+    revision: ""
+    namespace: monitoring
+    rawManifests: true
+    postInstall: false
+    syncWave: 2
+
   # Distributed tracing backend. Single-binary Tempo chart now lives in the
   # grafana-community repo (grafana/helm-charts copy is deprecated).
   - name: tempo
