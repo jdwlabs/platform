@@ -212,7 +212,7 @@ jobs:
         # bump this SHA in the same PR. Repo-specific layout lives in
         # tools/image-pin-check.yaml, which is deliberately not compared.
         env:
-          CANONICAL_REF: e6ea75a8f0fb33b22434fa03b9163b78c8e9c2ef  # main as of 2026-08-29 (jdwlabs/.github has no tagged releases)
+          CANONICAL_REF: accde604cc0f391e9dfd68aa9a7ed8259fad825c  # main as of 2026-08-29 (jdwlabs/.github has no tagged releases)
         run: |
           status=0
           while read -r canonical local; do
