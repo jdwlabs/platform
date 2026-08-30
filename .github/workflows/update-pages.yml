@@ -37,11 +37,8 @@ jobs:
     uses: jdwlabs/.github/.github/workflows/update-pages.yml@b827924589b7e129a81762131b9d451121718bdc  # main as of 2026-08-26 (jdwlabs/.github has no tagged releases)
     permissions:
       contents: write
-    # RELEASE_APP_ID / RELEASE_APP_PRIVATE_KEY are not configured in this
-    # repo today, so the reusable job falls back to GITHUB_TOKEN and the
-    # github-actions[bot] identity. Passing them anyway means the
-    # jdwlabs-release-bot identity lights up the moment the secrets are
-    # provisioned, with no workflow change.
+    # If RELEASE_APP_ID / RELEASE_APP_PRIVATE_KEY are absent the reusable job
+    # falls back to GITHUB_TOKEN and the github-actions[bot] identity.
     secrets:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
