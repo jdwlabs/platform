@@ -46,23 +46,6 @@ jobs:
                 min-spaces-from-content: 1
               document-start: disable
 
-  platformctl-validate:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: cli
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-go@v7.0.0
-        with:
-          go-version-file: cli/go.mod
-          cache: true
-      - name: Build platformctl
-        run: go build -o /tmp/platformctl ./cmd/platformctl
-      - name: Validate tenants
-        working-directory: .
-        run: /tmp/platformctl tenants validate tenants/
-
   kubeconform:
     runs-on: ubuntu-latest
     env:
@@ -300,6 +283,11 @@ jobs:
         run: go build ./...
       - name: Test
         run: go test -race ./...
+      - name: Build platformctl
+        run: go build -o /tmp/platformctl ./cmd/platformctl
+      - name: Validate tenants
+        working-directory: .
+        run: /tmp/platformctl tenants validate tenants/
 
   go-lint:
     runs-on: ubuntu-latest
