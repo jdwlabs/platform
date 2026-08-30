@@ -1,0 +1,21 @@
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: democratic-csi-iscsi-snapclass
+  annotations:
+    snapshot.storage.kubernetes.io/is-default-class: "true"
+driver: democratic-csi.io/iscsi
+deletionPolicy: Delete
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotContent
+metadata:
+  name: placeholder-content
+spec:
+  deletionPolicy: Delete
+  driver: democratic-csi.io/iscsi
+  source:
+    volumeHandle: placeholder-volume
+  volumeSnapshotRef:
+    name: placeholder-snapshot
+    namespace: default
