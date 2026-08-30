@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: memory-alert
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+  - name: memory.rules
+    rules:
+    - alert: HighMemoryUsage
+      expr: container_memory_working_set_bytes > 3221225472
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Container memory usage high ({{ $value | humanize }})"
+        description: "Container {{ $labels.container }} in pod {{ $labels.pod }} namespace {{ $labels.namespace }} is using high memory."
