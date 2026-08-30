@@ -3,6 +3,16 @@
 # periodic scan never spends free-tier cloud quota. Real alerts keep the full
 # cloud-first fallback chain via the relay's own model selection.
 #
+# Holmes's verdict is a hypothesis, not a finding. The local model has
+# escalated "pending pods" with zero pods Pending and "restart spikes" that
+# were lifetime restart counts on months-old pods, so every ISSUE it returns
+# is re-checked against Prometheus with a fixed query per category and only
+# escalated when the query agrees. Each verification prints one JSON line
+# (event=drift-scan-verify) so the false-positive rate is readable from the
+# job logs. When Prometheus itself cannot be queried the claim is escalated
+# unverified: an unreachable ground truth is not evidence that the model was
+# wrong.
+#
 # Known limitation: gpt-oss-20b under vLLM occasionally returns an empty
 # response to Holmes for this open-ended, tool-heavy prompt (Holmes then
 # 500s with "analysis: Input should be a valid string"), without ever
@@ -88,12 +98,23 @@ spec:
                 - sh
                 - -ec
                 - |
-                  ask='Scan this Kubernetes cluster for drift: pending pods,
-                  restart spikes, near-OOM nodes, and TLS cert expiry within
-                  30 days. Investigate using the available tools before
-                  concluding. End your reply with exactly one final line:
-                  "VERDICT: CLEAN" if nothing actionable was found, or
-                  "VERDICT: ISSUE: <one-sentence summary>" if something is.'
+                  ask='Scan this Kubernetes cluster for drift. Check exactly
+                  these four conditions, using the available tools before
+                  concluding, and use these definitions:
+                  - pending-pods: a pod in phase Pending for more than 5 minutes.
+                  - restart-spike: a container that restarted 3 or more times
+                    in the last hour. A high lifetime restart count on an old
+                    pod is NOT a spike; use increase() over the last hour.
+                  - node-memory: a node with more than 90% of memory in use.
+                  - tls-expiry: a cert-manager Certificate expiring within 30 days.
+                  Report each condition you confirmed on its own final line,
+                  in exactly this form, after all other text:
+                  "VERDICT: ISSUE: <category>: <one-sentence summary> (evidence: <pod, node or certificate names and the metric values you observed>)"
+                  where <category> is one of pending-pods, restart-spike,
+                  node-memory, tls-expiry. Do not report a condition you could
+                  not check or could not name concrete evidence for. If no
+                  condition is confirmed, end with exactly one line:
+                  "VERDICT: CLEAN".'
 
                   http_code=$(curl -s -m 480 -o /tmp/resp.json -w '%{http_code}' \
                     http://platform-holmes-holmes/api/chat \
@@ -109,14 +130,68 @@ spec:
                   analysis=$(jq -r '.analysis // empty' /tmp/resp.json)
                   echo "$analysis"
 
-                  if ! echo "$analysis" | grep -q '^VERDICT: ISSUE:'; then
+                  claims=$(printf '%s\n' "$analysis" | sed -n 's/^VERDICT: ISSUE: *//p')
+                  if [ -z "$claims" ]; then
                     echo "drift-scan: clean, nothing to escalate"
                     exit 0
                   fi
 
-                  summary=$(echo "$analysis" | sed -n 's/^VERDICT: ISSUE: //p')
+                  # Ground truth per category. Each query is wrapped so an
+                  # empty instant vector still yields a scalar 0, and each
+                  # threshold matches the definition given to Holmes above.
+                  prom=http://platform-kube-prometheus-s-prometheus.monitoring.svc.cluster.local:9090
+                  q_pending='count(kube_pod_status_phase{phase="Pending"} == 1 and on (namespace, pod) (time() - kube_pod_created) > 300) or vector(0)'
+                  q_restart='count(increase(kube_pod_container_status_restarts_total[1h]) >= 3) or vector(0)'
+                  q_memory='count((1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.9) or vector(0)'
+                  q_tls='count(certmanager_certificate_expiration_timestamp_seconds - time() < 30 * 86400) or vector(0)'
+
+                  # Prints the scalar result, or nothing when Prometheus could
+                  # not answer, so the caller can tell "0" from "unknown".
+                  truth() {
+                    curl -sf -m 20 "$prom/api/v1/query" --data-urlencode "query=$1" \
+                      | jq -r '.data.result[0].value[1] // empty'
+                  }
+
+                  printf '%s\n' "$claims" | while IFS= read -r claim; do
+                    category=$(printf '%s' "$claim" | cut -d: -f1 | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+                    case "$category" in
+                      pending-pods)  query="$q_pending" ;;
+                      restart-spike) query="$q_restart" ;;
+                      node-memory)   query="$q_memory" ;;
+                      tls-expiry)    query="$q_tls" ;;
+                      # An unlabelled claim is checked against every category
+                      # rather than dropped: the model missing the format is
+                      # not evidence that the cluster is fine.
+                      *) category=unknown; query="($q_pending) + ($q_restart) + ($q_memory) + ($q_tls)" ;;
+                    esac
+                    count=$(truth "$query")
+                    if [ -z "$count" ]; then
+                      outcome=unverified
+                    elif [ "${count%.*}" -gt 0 ]; then
+                      outcome=confirmed
+                    else
+                      outcome=rejected
+                    fi
+                    jq -nc --arg category "$category" --arg outcome "$outcome" --arg count "${count:-null}" --arg claim "$claim" \
+                      '{event: "drift-scan-verify", category: $category, outcome: $outcome, groundTruth: $count, claim: $claim}'
+                    # The loop runs in a subshell, so results leave it via files.
+                    if [ "$outcome" != rejected ]; then
+                      printf '%s\n' "$claim" >> /tmp/confirmed
+                      printf '%s: %s (prometheus: %s)\n' "$category" "$outcome" "${count:-unavailable}" >> /tmp/evidence
+                    fi
+                  done
+
+                  if [ ! -s /tmp/confirmed ]; then
+                    echo "drift-scan: holmes claimed $(printf '%s\n' "$claims" | wc -l) issue(s), none confirmed by prometheus, not escalating"
+                    exit 0
+                  fi
+
+                  confirmed=$(cat /tmp/confirmed)
+                  evidence=$(cat /tmp/evidence)
+                  summary=$(printf '%s\n' "$confirmed" | head -n 1)
+                  description=$(printf '%s\n\nGround truth:\n%s\n' "$analysis" "$evidence")
                   fingerprint="drift-scan-$(date -u +%Y%m%d)"
-                  echo "drift-scan: issue found, escalating via relay (fingerprint=$fingerprint)"
+                  echo "drift-scan: $(printf '%s\n' "$confirmed" | wc -l) issue(s) confirmed or unverifiable, escalating via relay (fingerprint=$fingerprint)"
 
                   # --retry only covers transient classes (connection refused,
                   # timeout, 5xx/429), so a rejected bearer or a bad payload
@@ -126,7 +201,7 @@ spec:
                     http://ai-sre-relay:8080/webhook \
                     -H 'Content-Type: application/json' \
                     -H "Authorization: Bearer $RELAY_WEBHOOK_TOKEN" \
-                    -d "$(jq -n --arg fp "$fingerprint" --arg summary "$summary" --arg desc "$analysis" '{
+                    -d "$(jq -n --arg fp "$fingerprint" --arg summary "$summary" --arg desc "$description" '{
                       receiver: "ai-sre",
                       status: "firing",
                       alerts: [{
