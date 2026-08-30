@@ -40,20 +40,34 @@ spec:
         # would swallow. It fires on deliberate reboots too — an upgrade will
         # trip it — which is the intended trade for catching every unplanned
         # one.
-        - alert: TrueNASRestarted
+        #
+        # The retained window bears the temperature-independence out: of the
+        # four power-offs it holds, the two on 2026-08-19 came with the package
+        # at 92-95C, and the two on 2026-08-25 with it at 35-39C — half the
+        # recorded events had no thermal signature at all. All four also fell
+        # between 04:19 and 05:27, inside the nightly scheduled-job window.
+        #
+        # 600s rather than a wider threshold: the alert fires from 2m after
+        # boot until uptime crosses 10m, which is long enough to be seen and
+        # short enough that back-to-back power-cycles — the recorded pairs were
+        # 18 and 25 minutes apart — resolve and refire as distinct events
+        # instead of blurring into one episode.
+        - alert: TrueNASUnexpectedReboot
           expr: |
-            truenas_uptime_seconds < 900
+            truenas_uptime_seconds < 600
           for: 2m
           labels:
             severity: warning
           annotations:
-            summary: "TrueNAS {{ $labels.host }} restarted {{ $value | humanizeDuration }} ago"
+            summary: "TrueNAS {{ $labels.host }} rebooted {{ $value | humanizeDuration }} ago"
             description: >-
-              The NAS reports an uptime under 15m, so it has restarted. If the
-              restart was not deliberate, the cause is not visible from the
+              The NAS reports an uptime under 10m, so it has rebooted. If the
+              reboot was not deliberate, the cause is not visible from the
               cluster — the Graphite push carries no power, PSU or thermal-event
               data. Read the host's own logs and its UPS service state, and
-              check whether the restart coincided with heavy pool IO.
+              check whether the reboot coincided with heavy pool IO; half of
+              the recorded power-offs happened with the CPU cool, so do not
+              assume a thermal cause.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
 
         # 95C is not a fault on this hardware, it is the part's design limit:
@@ -81,45 +95,59 @@ spec:
         # reached (no useful threshold without knowing Tjmax) was right, and a
         # first pass at 85C here would have paged on routine scrubs.
         #
-        # The recurrence detector for the fault above. With cooling working the
-        # package sits at 35-40C under a full pool scrub, so 80C sustained is
-        # nowhere near reachable on this workload and can only mean heat is no
-        # longer leaving the block — the same signature that preceded two
-        # power-cycles inside half an hour. Set below Tjmax on purpose: by the
-        # time the part is regulating at its limit the margin is already gone,
-        # and this needs to fire while there is still time to shed load.
-        - alert: TrueNASCPUCoolingDegraded
+        # Two tiers of one alert, replacing an earlier 80C-for-10m critical and
+        # a 95C-for-15m warning, and calibrated against the recorded thermal
+        # power-off rather than against generic AM5 guidance:
+        #
+        #   - warning, >80C for 5m: the recurrence detector. With cooling
+        #     working the package has not exceeded 71C in eleven days of the
+        #     same workload, scrubs included, so 80C sustained can only mean
+        #     heat is no longer leaving the block. On the degraded-cooling days
+        #     this tier would have fired during the nightly IO window on each
+        #     of the two nights *before* the first power-off — days of notice,
+        #     routed to the relay for investigation.
+        #   - critical, >90C for 2m: the pre-shutdown ramp. In the recorded
+        #     incident the package crossed 90C nine minutes before the host
+        #     went dark, and sat at 92-95C for the whole approach; a 2m hold
+        #     above 90C pages Discord with roughly seven minutes still on the
+        #     clock — enough to pause a scrub and shed load, not enough to
+        #     waste on a longer window. Brief boost excursions to Tjmax do not
+        #     survive the 2m hold and stay silent, as they must.
+        #
+        # The warning deliberately keeps no <=90 upper bound: both tiers firing
+        # together is the expected shape of the real incident, the same
+        # overlapping-tier convention the pool-capacity rules use.
+        - alert: TrueNASCPUPackageHot
           expr: |
-            truenas_cpu_temperature_celsius >= 80
-          for: 10m
+            truenas_cpu_temperature_celsius{sensor="package"} > 80
+          for: 5m
           labels:
-            severity: critical
+            severity: warning
           annotations:
-            summary: "TrueNAS {{ $labels.host }} CPU at {{ $value }}C — cooling suspect"
+            summary: "TrueNAS {{ $labels.host }} CPU package at {{ $value }}C — cooling suspect"
             description: >-
-              The CPU package on {{ $labels.host }} has held at or above 80C
-              for 10m, against a 35-40C reference under full pool load. Heat is
-              not leaving the CPU: check that the fan is actually spinning, and
+              The CPU package on {{ $labels.host }} has held above 80C for 5m,
+              against a 35-40C reference under full pool load. Heat is not
+              leaving the CPU: check that the fan is actually spinning, and
               check the fan header and curve before anything else. The host has
               previously power-cycled twice in 26 minutes in this state, taking
               every PVC on the truenas-nfs and truenas-iscsi classes with it.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
 
-        - alert: TrueNASCPUThermallySaturated
+        - alert: TrueNASCPUPackageHot
           expr: |
-            truenas_cpu_temperature_celsius >= 95
-          for: 15m
+            truenas_cpu_temperature_celsius{sensor="package"} > 90
+          for: 2m
           labels:
-            severity: warning
+            severity: critical
           annotations:
-            summary: "TrueNAS {{ $labels.host }} CPU pinned at Tjmax ({{ $value }}C)"
+            summary: "TrueNAS {{ $labels.host }} CPU package at {{ $value }}C — power-off imminent"
             description: >-
-              The CPU package on {{ $labels.host }} has sat at its thermal
-              limit for 15m, so the part is throttling rather than idling
-              between boosts. Under a pool scrub that points at cooling
-              capacity — heatsink mounting, fan curve, dust, or case airflow —
-              rather than at the workload. Pausing the scrub sheds the load
-              but does not fix it.
+              The CPU package on {{ $labels.host }} has held above 90C for 2m —
+              the same ramp that preceded a hard power-off by nine minutes.
+              Pause any running scrub or resilver from the TrueNAS UI now to
+              shed load; that buys minutes, not a fix. A power-off takes every
+              PVC on the truenas-nfs and truenas-iscsi classes with it.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
 
         # truenas_memory_available_bytes is a straight read of this host's
