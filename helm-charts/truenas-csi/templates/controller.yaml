@@ -3,6 +3,13 @@ kind: Deployment
 metadata:
   name: truenas-csi-controller
   namespace: {{ .Release.Namespace }}
+  # Replace rather than server-side apply: the live Deployment was created
+  # before the chart declared a strategy, so the API server's defaulted
+  # rollingUpdate block has no field manager and an apply that only states
+  # type: Recreate leaves it in place, which the API server then rejects as
+  # Forbidden. A replace submits the whole spec, so no stale default survives.
+  annotations:
+    argocd.argoproj.io/sync-options: Replace=true
 spec:
   replicas: {{ .Values.controller.replicas }}
   # Recreate, not RollingUpdate: with leader election off at a single replica
