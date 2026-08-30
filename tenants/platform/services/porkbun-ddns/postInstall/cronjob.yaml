@@ -21,13 +21,21 @@ spec:
       # 4h repeat_interval, so a still-firing alert is never retracted before
       # it has been notified.
       ttlSecondsAfterFinished: 86400
-      # No pod-level retries: a run that only succeeds after the job controller
-      # spins up a second pod means the outage outlasted one attempt entirely,
-      # and that is worth surfacing rather than quietly absorbing. A single
-      # bad DNS lookup within one attempt is a different case, handled below
-      # by curl's own retry so it doesn't cost a pod restart (or a page) on
-      # its own.
-      backoffLimit: 0
+      # Resolver blips here outlast a single pod. Observed over two weeks:
+      # 8 of ~1140 runs failed, every one with "Could not resolve host"
+      # on all four in-pod curl attempts (~35s), on two different nodes,
+      # while both CoreDNS pods stayed up with zero SERVFAILs and zero
+      # forward health-check failures -- and the next scheduled run always
+      # succeeded. So a fresh pod (new sandbox, new endpoint) is the retry
+      # that actually helps, and each pod attempt below is already ~65s of
+      # curl retries. Two extra pods keep the whole Job well inside one
+      # schedule interval; an outage that outlasts all three still fails
+      # the Job and fires KubeJobFailed, which is the case worth a page.
+      backoffLimit: 2
+      # Pod attempts plus the job controller's backoff (10s, 20s) must never
+      # spill into the next 15-minute slot, where concurrencyPolicy: Forbid
+      # would skip it. Everything finishes far short of this; it is a ceiling.
+      activeDeadlineSeconds: 600
       template:
         spec:
           restartPolicy: Never
@@ -77,13 +85,12 @@ spec:
                   # --retry-all-errors is load-bearing: plain --retry only
                   # covers HTTP-transient response codes, not a resolver
                   # failure, and "Could not resolve host" (curl exit 6) is
-                  # exactly the failure mode CoreDNS's own intermittent
-                  # timeouts produce. Three attempts with a fixed 5s gap
-                  # absorb one such blip inside a single pod run, well
-                  # short of the 15-minute cron cadence, without weakening
-                  # backoffLimit's guarantee above for an outage that
-                  # doesn't clear.
-                  CURL="curl -4 -sS --max-time 20 --retry 3 --retry-delay 5 --retry-all-errors"
+                  # exactly the failure mode the intermittent blips
+                  # produce. Six attempts with a fixed 5s gap (~65s with
+                  # musl's own resolver timeouts) absorb a blip inside one
+                  # pod run; the pod-level retries above cover the ones
+                  # that outlast it.
+                  CURL="curl -4 -sS --max-time 20 --retry 5 --retry-delay 5 --retry-all-errors"
                   API="https://api.porkbun.com/api/json/v3"
                   AUTH="{\"apikey\":\"$API_KEY\",\"secretapikey\":\"$SECRET_KEY\"}"
 
