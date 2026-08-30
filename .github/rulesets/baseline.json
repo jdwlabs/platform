@@ -27,6 +27,7 @@
         },
         "require_last_push_approval": false,
         "required_review_thread_resolution": false,
+        "require_extra_approval_for_unattributed_changes": true,
         "allowed_merge_methods": [
           "merge",
           "squash",
@@ -34,15 +35,9 @@
         ]
       }
     },
-    {
-      "type": "deletion"
-    },
-    {
-      "type": "non_fast_forward"
-    },
-    {
-      "type": "required_linear_history"
-    },
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "required_linear_history" },
     {
       "type": "required_status_checks",
       "parameters": {
@@ -66,22 +61,14 @@
     }
   ],
   "node_id": "RRS_lACqUmVwb3NpdG9yec5HRzfDzgENX8s",
-  "created_at": "2026-06-13T23:41:31.344-05:00",
-  "updated_at": "2026-06-13T23:41:31.377-05:00",
+  "created_at": "2026-06-14T04:41:31.344Z",
+  "updated_at": "2026-08-02T05:16:17.167Z",
   "bypass_actors": [
-    {
-      "actor_id": null,
-      "actor_type": "OrganizationAdmin",
-      "bypass_mode": "always"
-    }
+    { "actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always" }
   ],
   "current_user_can_bypass": "always",
   "_links": {
-    "self": {
-      "href": "https://api.github.com/repos/jdwlabs/platform/rulesets/17653707"
-    },
-    "html": {
-      "href": "https://github.com/jdwlabs/platform/rules/17653707"
-    }
+    "self": { "href": "https://api.github.com/repos/jdwlabs/platform/rulesets/17653707" },
+    "html": { "href": "https://github.com/jdwlabs/platform/rules/17653707" }
   }
 }
