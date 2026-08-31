@@ -5,16 +5,8 @@ metadata:
   namespace: monitoring
   labels:
     app: github-repo-health-exporter
-  annotations:
-    # The App key is read once at startup; a rotated key in Vault would
-    # otherwise sit unused until the pod happened to restart.
-    secret.reloader.stakater.com/reload: "github-repo-health-exporter"
 spec:
-  # Single replica: every replica would poll the same GitHub API with the
-  # same App token and expose the same view, so a second one only spends
-  # rate limit and gives Prometheus two identical targets to flap between.
   replicas: 1
-  revisionHistoryLimit: 0
   selector:
     matchLabels:
       app: github-repo-health-exporter
@@ -25,50 +17,15 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
+        runAsUser: 65534
       containers:
         - name: exporter
           image: jdwlabs/github-repo-health-exporter:0.0.1@sha256:3f697eefb82e9cd1266efee0ba13e32f82bcc9a1956c08cb1d51e31f670b33c4
           ports:
-            - name: metrics
-              containerPort: 9090
-              protocol: TCP
-          envFrom:
-            - secretRef:
-                name: github-repo-health-exporter
+            - containerPort: 8080
           env:
-            - name: PORT
-              value: "9090"
-            - name: GITHUB_ORG
-              value: "jdwlabs"
-            # 15m is the cadence the originating investigation asked for; at
-            # one request per repo per cycle this is far below the App's
-            # rate limit and Prometheus scrapes it at 60s regardless.
-            - name: REFRESH_INTERVAL
-              value: "15m"
-            - name: GOMEMLIMIT
-              value: "48MiB"
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: metrics
-            initialDelaySeconds: 3
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: metrics
-            initialDelaySeconds: 10
-            periodSeconds: 30
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              memory: 64Mi
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-token
+                  key: token
