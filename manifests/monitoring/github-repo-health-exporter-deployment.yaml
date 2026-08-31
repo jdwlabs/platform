@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-repo-health-exporter
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: github-repo-health-exporter
+  template:
+    metadata:
+      labels:
+        app: github-repo-health-exporter
+    spec:
+      securityContext:
+        runAsUser: 1000
+      containers:
+        - name: exporter
+          image: ghcr.io/jdwlabs/github-repo-health-exporter:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-token
+                  key: token
