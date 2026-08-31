@@ -22,6 +22,9 @@ tests:
         alertname: TrueNASCPUPackageHot
         exp_alerts: []
       - eval_time: 45m
+        alertname: TrueNASCPUPackageCritical
+        exp_alerts: []
+      - eval_time: 45m
         alertname: TrueNASUnexpectedReboot
         exp_alerts: []
 
@@ -37,8 +40,14 @@ tests:
       - eval_time: 4m
         alertname: TrueNASCPUPackageHot
         exp_alerts: []
+      - eval_time: 4m
+        alertname: TrueNASCPUPackageCritical
+        exp_alerts: []
       - eval_time: 8m
         alertname: TrueNASCPUPackageHot
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: TrueNASCPUPackageCritical
         exp_alerts: []
 
   # 92C sustained is the measured pre-power-off plateau. The critical tier
@@ -52,7 +61,23 @@ tests:
         values: '92+0x20'
     alert_rule_test:
       - eval_time: 3m
-        alertname: TrueNASCPUPackageHot
+        alertname: TrueNASCPUPackageCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              host: truenas
+              sensor: package
+            exp_annotations:
+              summary: "TrueNAS truenas CPU package at 92C — power-off imminent"
+              description: >-
+                The CPU package on truenas has held above 90C for 2m —
+                the same ramp that preceded a hard power-off by nine minutes.
+                Pause any running scrub or resilver from the TrueNAS UI now to
+                shed load; that buys minutes, not a fix. A power-off takes every
+                PVC on the truenas-nfs and truenas-iscsi classes with it.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+      - eval_time: 6m
+        alertname: TrueNASCPUPackageCritical
         exp_alerts:
           - exp_labels:
               severity: critical
@@ -70,19 +95,6 @@ tests:
       - eval_time: 6m
         alertname: TrueNASCPUPackageHot
         exp_alerts:
-          - exp_labels:
-              severity: critical
-              host: truenas
-              sensor: package
-            exp_annotations:
-              summary: "TrueNAS truenas CPU package at 92C — power-off imminent"
-              description: >-
-                The CPU package on truenas has held above 90C for 2m —
-                the same ramp that preceded a hard power-off by nine minutes.
-                Pause any running scrub or resilver from the TrueNAS UI now to
-                shed load; that buys minutes, not a fix. A power-off takes every
-                PVC on the truenas-nfs and truenas-iscsi classes with it.
-              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
           - exp_labels:
               severity: warning
               host: truenas
@@ -109,6 +121,12 @@ tests:
     alert_rule_test:
       - eval_time: 3m
         alertname: TrueNASCPUPackageHot
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: TrueNASCPUPackageCritical
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: TrueNASCPUPackageCritical
         exp_alerts: []
       - eval_time: 6m
         alertname: TrueNASCPUPackageHot
