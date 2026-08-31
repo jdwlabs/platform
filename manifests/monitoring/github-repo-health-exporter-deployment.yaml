@@ -13,16 +13,9 @@ spec:
       labels:
         app: github-repo-health-exporter
     spec:
-      securityContext:
-        runAsUser: 1000
       containers:
         - name: exporter
-          image: ghcr.io/jdwlabs/github-repo-health-exporter:latest
+          image: jdwlabs/github-repo-health-exporter:0.0.1@sha256:3f697eefb82e9cd1266efee0ba13e32f82bcc9a1956c08cb1d51e31f670b33c4
           ports:
             - containerPort: 8080
-          env:
-            - name: GITHUB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: github-token
-                  key: token
+          # resources, env, etc. can be added as needed
