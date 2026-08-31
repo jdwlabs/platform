@@ -1,13 +1,26 @@
 {
   "title": "jdwillmsen / Tenant Overview",
   "uid": "jdwillmsen-tenant-overview",
-  "description": "USE-method resource usage for the jdwillmsen tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2), plus Minecraft-Bedrock- and backup-pipeline-specific panels. Every panel here was checked against this cluster's live Prometheus on 2026-08-25 (mc-monitor's minecraft_status_* and the backup-exporter's backup_* series confirmed producing real values; the quota/USE panels reuse the exact query shape already live on the jdwlabs dashboard). Both datasource variables are pinned and hidden: the tenant Loki datasource carries the X-Scope-OrgID header that is the log tenancy boundary (§5.3); metrics have no per-tenant datasource and are scoped by the namespace label instead (§5.2).",
+  "description": "USE-method resource usage for the jdwillmsen tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2), plus Minecraft-Bedrock- and backup-pipeline-specific panels. Every panel here was checked against this cluster's live Prometheus (original set 2026-08-25; uptime/version/CronJob/PVC/network/restart/log-rate additions 2026-08-31 — server_version label, kube_cronjob_status_last_successful_time, kubelet_volume_stats_*, and container_network_* all confirmed producing real values for this namespace). Both datasource variables are pinned and hidden: the tenant Loki datasource carries the X-Scope-OrgID header that is the log tenancy boundary (§5.3); metrics have no per-tenant datasource and are scoped by the namespace label instead (§5.2).",
   "tags": ["jdwillmsen", "tenant", "minecraft"],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
   "refresh": "1m",
   "time": { "from": "now-6h", "to": "now" },
+  "annotations": {
+    "list": [
+      {
+        "name": "CronJob runs",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "expr": "changes(kube_cronjob_status_last_schedule_time{namespace=~\"$namespace\"}[5m]) > 0",
+        "titleFormat": "{{cronjob}}",
+        "enable": true,
+        "hide": false,
+        "iconColor": "blue"
+      }
+    ]
+  },
   "templating": {
     "list": [
       {
@@ -187,14 +200,34 @@
       ]
     },
     {
-      "id": 11,
+      "id": 20,
       "type": "stat",
-      "title": "mc-monitor response time",
+      "title": "Uptime (24h)",
+      "description": "Fraction of the last 24h the mc-monitor probe saw the server healthy. This is probe-observed availability (60s scrape), so a sub-minute blip can hide; planned hourly version-check restarts show up here as the small dips they are.",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "gridPos": { "h": 4, "w": 8, "x": 16, "y": 18 },
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.95 },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        },
+        "overrides": []
+      },
       "targets": [
-        { "expr": "minecraft_status_response_time_seconds{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"}", "refId": "A" }
+        {
+          "expr": "avg_over_time(max(minecraft_status_healthy{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"})[24h:1m])",
+          "refId": "A"
+        }
       ]
     },
     {
@@ -203,7 +236,7 @@
       "title": "AFK bots online",
       "description": "Deployments matching *afk-bot* with at least one available replica. Two exist today: bot (LightBlaz3) and bot2 (Dotablaze7321).",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 22 },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 22 },
       "fieldConfig": {
         "defaults": {
           "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
@@ -222,16 +255,149 @@
       "type": "stat",
       "title": "Player capacity",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 22 },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 22 },
       "targets": [
         { "expr": "minecraft_status_players_max_count{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"}", "refId": "A" }
       ]
     },
     {
+      "id": 21,
+      "type": "stat",
+      "title": "Server version",
+      "description": "Bedrock version as reported by the server itself (mc-monitor's server_version label). The version-check CronJob restarts the server when upstream moves ahead of this, so a stale value here plus a fresh check (panel to the right) means the restart path is broken, not the check.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 22 },
+      "options": {
+        "textMode": "name",
+        "colorMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "expr": "max by (server_version) (minecraft_status_healthy{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"})",
+          "legendFormat": "{{server_version}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Version check age",
+      "description": "Time since the hourly version-check CronJob last succeeded. Over 2h = it has missed a cycle; over 4h = the Bedrock staleness bound it exists to enforce is no longer being enforced.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 22 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dtdurations",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 7200 },
+              { "color": "red", "value": 14400 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "time() - kube_cronjob_status_last_successful_time{namespace=~\"$namespace\", cronjob=\"jdwillmsen-minecraft-fwb-prd-version-check\"}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Ping latency",
+      "description": "mc-monitor probe round-trip. Sustained spikes are server lag players feel before anyone reports it; the stat-panel snapshot this replaces hid the shape.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 26 },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "minecraft_status_response_time_seconds{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"}",
+          "legendFormat": "probe RTT",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Server network throughput",
+      "description": "Bedrock speaks UDP. Traffic flatlining at zero while the health panel stays UP means the external path (HAProxy/nftables DNAT) is broken, not the server — the failure mode the local mc-monitor probe cannot see.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 26 },
+      "fieldConfig": { "defaults": { "unit": "Bps", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "rate(container_network_receive_bytes_total{namespace=~\"$namespace\", pod=~\".*minecraft-bedrock.*\", interface=\"eth0\"}[5m])",
+          "legendFormat": "rx",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(container_network_transmit_bytes_total{namespace=~\"$namespace\", pod=~\".*minecraft-bedrock.*\", interface=\"eth0\"}[5m])",
+          "legendFormat": "tx",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Container restarts (1h)",
+      "description": "Restarts per pod over the trailing hour. The mc-monitor sidecar has crash-looped before on a bad flag; a slow crash-loop hides behind a healthy-looking pod count.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 33 },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=~\"$namespace\"}[1h]))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "type": "bargauge",
+      "title": "PVC usage",
+      "description": "World data only grows; a full datadir PVC kills the server harder than any crash. 85% is the act-now line.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 33 },
+      "options": { "orientation": "horizontal", "displayMode": "gradient" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.7 },
+              { "color": "red", "value": 0.85 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "kubelet_volume_stats_used_bytes{namespace=~\"$namespace\"} / kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\"}",
+          "legendFormat": "{{persistentvolumeclaim}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "id": 14,
       "type": "row",
-      "title": "Backup pipeline",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 }
+      "title": "Backup & ops pipeline",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 }
     },
     {
       "id": 15,
@@ -239,7 +405,7 @@
       "title": "Time since last successful backup",
       "description": "The freshness contract's own budget (backup_max_age_seconds) is 48h. This alone is a gauge, not an alert — JdwillmsenMinecraftBackupCronJobAbsent/BackupProducerAbsent (platform PrometheusRule) are what actually page on a stopped pipeline.",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 27 },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 41 },
       "fieldConfig": {
         "defaults": {
           "unit": "dtdurations",
@@ -267,7 +433,7 @@
       "title": "Last archive size",
       "description": "Floor for a plausible archive is 100 MB — below that, the pipeline treats it as a failure regardless of exit code.",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 27 },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 41 },
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
@@ -294,7 +460,7 @@
       "title": "Last backup quiesced",
       "description": "1 = the server was held (save hold/query/resume) or scaled to zero when this archive was taken, so it's provably consistent. 0 = the server was meant to be running and couldn't be reached to hold — treat that archive with suspicion.",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 27 },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 41 },
       "fieldConfig": {
         "defaults": {
           "mappings": [
@@ -312,17 +478,87 @@
       ]
     },
     {
+      "id": 27,
+      "type": "bargauge",
+      "title": "Time since last CronJob success",
+      "description": "All four CronJobs (backup, restore, volume-recovery, version-check) in one view. Deliberately no color thresholds: their schedules differ by orders of magnitude (hourly to on-demand), so one threshold set would lie for three of the four. Paging on staleness is the PrometheusRules' job; this is for eyeballing which leg of the pipeline stopped.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 45 },
+      "options": { "orientation": "horizontal", "displayMode": "basic" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dtdurations",
+          "min": 0,
+          "color": { "mode": "fixed", "fixedColor": "blue" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "time() - kube_cronjob_status_last_successful_time{namespace=~\"$namespace\"}",
+          "legendFormat": "{{cronjob}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "Failed Jobs",
+      "description": "kube_job_status_failed summed per parent Job. Non-zero here with a green freshness bar means a run failed and a later one recovered — worth reading the logs even though nothing paged.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 45 },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (job_name) (kube_job_status_failed{namespace=~\"$namespace\"})",
+          "legendFormat": "{{job_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "id": 18,
       "type": "row",
       "title": "Logs",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 }
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 52 }
+    },
+    {
+      "id": 29,
+      "type": "logs",
+      "title": "Player joins / leaves",
+      "description": "Selector is the container label, not pod — this tenant's Alloy pipeline ships streams without a pod label (verified against live Loki 2026-08-31).",
+      "datasource": { "type": "loki", "uid": "${loki_datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 53 },
+      "targets": [
+        {
+          "expr": "{namespace=~\"$namespace\", container=~\".*minecraft-bedrock.*\"} |~ \"Player connected|Player disconnected\"",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Log error rate",
+      "description": "Errors per 5m across the namespace's logs. Crash spam ramps here minutes before a restart shows anywhere else.",
+      "datasource": { "type": "loki", "uid": "${loki_datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 53 },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({namespace=~\"$namespace\"} |~ \"(?i)(error|exception)\" [5m]))",
+          "legendFormat": "errors / 5m",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 19,
       "type": "logs",
       "title": "Namespace logs",
       "datasource": { "type": "loki", "uid": "${loki_datasource}" },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 32 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 61 },
       "targets": [
         { "expr": "{namespace=~\"$namespace\"}", "refId": "A" }
       ]
