@@ -13,9 +13,9 @@
       {
         "name": "CronJob runs",
         "datasource": { "type": "prometheus", "uid": "${datasource}" },
-        "expr": "changes(kube_cronjob_status_last_schedule_time{namespace=~\"$namespace\"}[5m]) > 0",
+        "expr": "changes(kube_cronjob_status_last_schedule_time{namespace=~\"$namespace\", cronjob=~\".*(backup|version-check)\"}[5m]) > 0",
         "titleFormat": "{{cronjob}}",
-        "enable": true,
+        "enable": false,
         "hide": false,
         "iconColor": "blue"
       }
@@ -169,12 +169,12 @@
       "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
       "targets": [
         {
-          "expr": "minecraft_status_players_online_count{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"}",
+          "expr": "max(minecraft_status_players_online_count{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"})",
           "legendFormat": "online",
           "refId": "A"
         },
         {
-          "expr": "minecraft_status_players_max_count{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"}",
+          "expr": "max(minecraft_status_players_max_count{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"})",
           "legendFormat": "capacity",
           "refId": "B"
         }
@@ -196,7 +196,7 @@
         "overrides": []
       },
       "targets": [
-        { "expr": "minecraft_status_healthy{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"}", "refId": "A" }
+        { "expr": "max(minecraft_status_healthy{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"})", "refId": "A" }
       ]
     },
     {
@@ -251,13 +251,15 @@
       ]
     },
     {
-      "id": 13,
+      "id": 31,
       "type": "stat",
-      "title": "Player capacity",
+      "title": "Players online now",
+      "description": "Authoritative live count from mc-monitor. Capacity dropped from its own stat — the Players online timeseries already draws it as a line. For who they are, see the Online players panel in the Logs row.",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 22 },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
       "targets": [
-        { "expr": "minecraft_status_players_max_count{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"}", "refId": "A" }
+        { "expr": "max(minecraft_status_players_online_count{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"})", "refId": "A" }
       ]
     },
     {
@@ -318,7 +320,7 @@
       "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
       "targets": [
         {
-          "expr": "minecraft_status_response_time_seconds{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"}",
+          "expr": "max(minecraft_status_response_time_seconds{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"})",
           "legendFormat": "probe RTT",
           "refId": "A"
         }
@@ -538,12 +540,70 @@
       ]
     },
     {
+      "id": 32,
+      "type": "bargauge",
+      "title": "Online players (by name)",
+      "description": "Derived from join/leave log events over 24h (connects minus disconnects per name) — Bedrock's mc-monitor exports only a count, never names. Verified to match the live metric count exactly. Caveat: a server crash that logs no disconnects, or a session older than 24h, can skew a name until their next event.",
+      "datasource": { "type": "loki", "uid": "${loki_datasource}" },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 53 },
+      "options": { "orientation": "horizontal", "displayMode": "basic", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "color": { "mode": "fixed", "fixedColor": "green" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "(sum by (player) (count_over_time({namespace=~\"$namespace\", container=~\".*minecraft-bedrock.*\"} |~ \"Player connected\" | regexp \"Player connected: (?P<player>[^,]+),\" [24h])) - sum by (player) (count_over_time({namespace=~\"$namespace\", container=~\".*minecraft-bedrock.*\"} |~ \"Player disconnected\" | regexp \"Player disconnected: (?P<player>[^,]+),\" [24h]))) > 0",
+          "legendFormat": "{{player}}",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "type": "bargauge",
+      "title": "Player joins (24h, by name)",
+      "description": "Session starts per player over the trailing day — who actually uses the server, not just how many.",
+      "datasource": { "type": "loki", "uid": "${loki_datasource}" },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 53 },
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (player) (count_over_time({namespace=~\"$namespace\", container=~\".*minecraft-bedrock.*\"} |~ \"Player connected\" | regexp \"Player connected: (?P<player>[^,]+),\" [24h]))",
+          "legendFormat": "{{player}}",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "type": "logs",
+      "title": "Server messages",
+      "description": "Messages the server itself sent to players (whispers/says from console commands, e.g. the AFK-bot pipeline's tells). Player-to-player chat is NOT here: Bedrock dedicated server never writes chat to stdout, so no stream on this cluster carries it — capturing it would need the AFK bot (a connected client that does see chat) to log Text packets.",
+      "datasource": { "type": "loki", "uid": "${loki_datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 61 },
+      "targets": [
+        {
+          "expr": "{namespace=~\"$namespace\", container=~\".*minecraft-bedrock.*\"} |~ \"You whisper|You say|\\\\[Server\\\\]\"",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "id": 30,
       "type": "timeseries",
       "title": "Log error rate",
       "description": "Errors per 5m across the namespace's logs. Crash spam ramps here minutes before a restart shows anywhere else.",
       "datasource": { "type": "loki", "uid": "${loki_datasource}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 53 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 61 },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
       "targets": [
         {
@@ -558,7 +618,7 @@
       "type": "logs",
       "title": "Namespace logs",
       "datasource": { "type": "loki", "uid": "${loki_datasource}" },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 61 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 69 },
       "targets": [
         { "expr": "{namespace=~\"$namespace\"}", "refId": "A" }
       ]
