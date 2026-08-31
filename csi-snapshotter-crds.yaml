@@ -1,0 +1,148 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: volumesnapshotclasses.snapshot.storage.k8s.io
+spec:
+  group: snapshot.storage.k8s.io
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                deletionPolicy:
+                  type: string
+                driver:
+                  type: string
+                parameters:
+                  type: object
+                secretRef:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+            status:
+              type: object
+              properties:
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      message:
+                        type: string
+                      reason:
+                        type: string
+                      status:
+                        type: string
+                      type:
+                        type: string
+                creationTime:
+                  type: string
+                  format: date-time
+                error:
+                  type: object
+                  properties:
+                    message:
+                      type: string
+                    time:
+                      type: string
+                      format: date-time
+  scope: Namespaced
+  names:
+    plural: volumesnapshotclasses
+    singular: volumesnapshotclass
+    kind: VolumeSnapshotClass
+    shortNames:
+      - volsnapclass
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: volumesnapshotcontents.snapshot.storage.k8s.io
+spec:
+  group: snapshot.storage.k8s.io
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                deletionPolicy:
+                  type: string
+                driver:
+                  type: string
+                source:
+                  type: object
+                  properties:
+                    volumeHandle:
+                      type: string
+                    snapshotHandle:
+                      type: string
+                volumeSnapshotRef:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                volumeSnapshotName:
+                  type: string
+            status:
+              type: object
+              properties:
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      message:
+                        type: string
+                      reason:
+                        type: string
+                      status:
+                        type: string
+                      type:
+                        type: string
+                creationTime:
+                  type: string
+                  format: date-time
+                error:
+                  type: object
+                  properties:
+                    message:
+                      type: string
+                    time:
+                      type: string
+                      format: date-time
+                readyToUse:
+                  type: boolean
+                restoreSize:
+                  type: integer
+                size:
+                  type: integer
+  scope: Cluster
+  names:
+    plural: volumesnapshotcontents
+    singular: volumesnapshotcontent
+    kind: VolumeSnapshotContent
+    shortNames:
+      - volsnapcont
