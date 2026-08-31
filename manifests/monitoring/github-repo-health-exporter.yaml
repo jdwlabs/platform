@@ -16,15 +16,8 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
-        runAsGroup: 1000
       containers:
-        - name: exporter
-          image: jdwlabs/github-repo-health-exporter:0.0.1@sha256:3f697eefb82e9cd1266efee0ba13e32f82bcc9a1956c08cb1d51e31f670b33c4
-          ports:
-            - containerPort: 8080
-          env:
-            - name: GITHUB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: github-token
-                  key: token
+      - name: exporter
+        image: jdwlabs/github-repo-health-exporter:0.0.1@sha256:3f697eefb82e9cd1266efee0ba13e32f82bcc9a1956c08cb1d51e31f670b33c4
+        ports:
+        - containerPort: 8080
