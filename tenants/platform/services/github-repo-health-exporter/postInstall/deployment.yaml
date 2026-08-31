@@ -25,6 +25,14 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        # gcr.io/distroless/base-debian12:nonroot sets USER nonroot:nonroot
+        # (a name, not a UID) — kubelet can't verify runAsNonRoot against a
+        # non-numeric image user, so the pod sits in CreateContainerConfigError
+        # without an explicit numeric UID here. 65532 matches the convention
+        # already used for the other distroless-nonroot service in this repo
+        # (truenas-prometheus-exporter).
+        runAsUser: 65532
+        runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:
