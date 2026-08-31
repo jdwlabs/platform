@@ -116,7 +116,11 @@ spec:
         #
         # The warning deliberately keeps no <=90 upper bound: both tiers firing
         # together is the expected shape of the real incident, the same
-        # overlapping-tier convention the pool-capacity rules use.
+        # overlapping-tier convention the pool-capacity rules use. That only
+        # works if the two tiers have distinct alertnames — alertmanager's
+        # inhibit_rules suppress a severity=warning alert once a severity=critical
+        # alert with the same alertname is active, which would silently drop
+        # this warning the moment the critical tier fired.
         - alert: TrueNASCPUPackageHot
           expr: |
             truenas_cpu_temperature_celsius{sensor="package"} > 80
@@ -134,7 +138,7 @@ spec:
               every PVC on the truenas-nfs and truenas-iscsi classes with it.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
 
-        - alert: TrueNASCPUPackageHot
+        - alert: TrueNASCPUPackageCritical
           expr: |
             truenas_cpu_temperature_celsius{sensor="package"} > 90
           for: 2m
