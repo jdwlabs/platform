@@ -164,7 +164,10 @@ spec:
                       # not evidence that the cluster is fine.
                       *) category=unknown; query="($q_pending) + ($q_restart) + ($q_memory) + ($q_tls)" ;;
                     esac
-                    count=$(truth "$query")
+                    # || count="" so a malformed/partial Prometheus response
+                    # (jq failing under `sh -ec`) degrades to unverified
+                    # instead of aborting the whole verification loop.
+                    count=$(truth "$query") || count=""
                     if [ -z "$count" ]; then
                       outcome=unverified
                     elif [ "${count%.*}" -gt 0 ]; then
