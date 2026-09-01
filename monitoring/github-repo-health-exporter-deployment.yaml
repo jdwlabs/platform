@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-repo-health-exporter
+  namespace: monitoring
+  labels:
+    app: github-repo-health-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: github-repo-health-exporter
+  template:
+    metadata:
+      labels:
+        app: github-repo-health-exporter
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+      - name: github-repo-health-exporter
+        image: jdwlabs/github-repo-health-exporter:0.0.1@sha256:3f697eefb82e9cd1266efee0ba13e32f82bcc9a1956c08cb1d51e31f670b33c4
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 64Mi
