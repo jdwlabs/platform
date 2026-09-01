@@ -359,3 +359,114 @@ spec:
               CronJob and that ArgoCD has the tenant's deployment repo synced. If the actor is being retired
               deliberately, delete this rule in the same change — it exists to force that decision, not to be silenced.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # Everything above watches the machinery around the world -- the
+        # backup producer, the recovery actor. Nothing watched the server
+        # itself or the world's contents, which is why a two-week corruption
+        # and four server crashes were all found by a human reading logs
+        # rather than by anything here. The four rules below close that.
+        #
+        # See jdwillmsen/jdw-deployments docs/incidents/ for both write-ups.
+
+        # mc-monitor already pings the server and publishes this; nothing
+        # consumed it until now.
+        #
+        # 2m because the crash this server actually suffers recovers on its
+        # own in about thirty seconds, so a shorter window would page for
+        # something already fixed by the time anyone looked. Anything still
+        # unreachable after two minutes is not self-healing. Crashes are
+        # caught by the restart rule below instead, which is the signal that
+        # survives the recovery.
+        - alert: JdwillmsenMinecraftServerUnreachable
+          expr: minecraft_status_healthy{namespace="jdwillmsen-prd"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+          annotations:
+            summary: "Minecraft server is not answering pings"
+            description: >-
+              The mc-monitor sidecar has been unable to reach the Bedrock server on 127.0.0.1:31132 for two minutes,
+              so players cannot join either. The container restarts itself on a crash, so a fault lasting this long
+              is one that did not recover: check the pod's status and its previous container's logs for a crash
+              dump, and the world volume for an ext4 read-only latch.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # The rule above can only fire while something is publishing the
+        # series it reads. Same reasoning as the backup producer's absent()
+        # rule: an expectation this repository holds cannot be forgotten by
+        # Prometheus, so it survives a deleted sidecar, a ServiceMonitor that
+        # stopped matching, and a cluster rebuilt from scratch.
+        - alert: JdwillmsenMinecraftServerHealthSignalAbsent
+          expr: absent(minecraft_status_healthy{namespace="jdwillmsen-prd"})
+          for: 15m
+          labels:
+            severity: critical
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+          annotations:
+            summary: "No health signal exists for the Minecraft server"
+            description: >-
+              minecraft_status_healthy has not been scraped from jdwillmsen-prd for fifteen minutes. The server may be
+              fine, but nothing can now tell you if it is not -- JdwillmsenMinecraftServerUnreachable reads this
+              series and is silent while it is missing. Check the mc-monitor sidecar, its Service and ServiceMonitor.
+              If the sidecar is being retired deliberately, delete these rules in the same change.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # The server has crashed four times between 2026-08-25 and 09-01, each
+        # within a second of a player connecting, and each time the container
+        # restarted in place and was serving again about thirty seconds later.
+        # A reachability alert cannot see that: by the time any sane `for:`
+        # elapsed the server is back. The restart counter is the only evidence
+        # that outlives the recovery.
+        #
+        # Note this also fires on a deliberate restart, because the version
+        # check now upgrades the server by stopping it and letting the kubelet
+        # bring the container back. That is not a false positive worth
+        # engineering away -- an unplanned Bedrock version change is worth
+        # seeing -- but it is why this is a warning rather than critical, and
+        # why the description says how to tell the two apart.
+        - alert: JdwillmsenMinecraftServerRestarted
+          expr: increase(kube_pod_container_status_restarts_total{namespace="jdwillmsen-prd", container="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}[1h]) > 0
+          for: 5m
+          labels:
+            severity: warning
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+          annotations:
+            summary: "Minecraft server container restarted in the last hour"
+            description: >-
+              The Bedrock container restarted, which disconnects everyone for roughly thirty seconds. If the
+              version-check CronJob logged a "restarted" event in that window this was a deliberate version upgrade
+              and no action is needed. Otherwise it crashed: the previous container's logs hold the dump, and the
+              known defect is an upstream crash on player connect that recovers on its own.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # The only rule here that watches the world rather than the server.
+        # Every other signal reports on processes; this one would have caught
+        # the 2026-08-30 data loss on its own, without anyone understanding
+        # iSCSI, because the archive simply got smaller.
+        #
+        # 2% against a 7d peak. Real archives grew monotonically over two
+        # weeks with day-to-day variation under 0.1%, so 2% is roughly fifty
+        # times the observed noise floor; the loss that prompted this was
+        # 5.7%. Compare against the peak rather than the previous sample so a
+        # slow multi-day bleed cannot walk the baseline down with it.
+        - alert: JdwillmsenMinecraftWorldArchiveShrank
+          expr: |
+            backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup", artifact="world"}
+              < max_over_time(backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup", artifact="world"}[7d]) * 0.98
+          for: 15m
+          labels:
+            severity: critical
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+          annotations:
+            summary: "Minecraft world backup is smaller than its recent peak"
+            description: >-
+              The newest world archive is more than 2% smaller than the largest taken in the past week. A world that
+              is played in grows; it does not shrink. Treat this as data loss until proven otherwise and do not let
+              the next backup rotate the good one away. Check the server log for "Corruption: N missing files" and
+              the CSI driver's log for an fsck that recovered a journal.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
