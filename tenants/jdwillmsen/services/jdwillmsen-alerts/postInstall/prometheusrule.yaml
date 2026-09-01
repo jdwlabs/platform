@@ -470,3 +470,79 @@ spec:
               the next backup rotate the good one away. Check the server log for "Corruption: N missing files" and
               the CSI driver's log for an fsck that recovered a journal.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # sum() rather than count(... > 0): with both bots down the count form
+        # matches nothing and the alert goes silent at exactly the moment it
+        # matters most — an empty vector fires no comparison. The sum exists
+        # as long as the Deployments do, and both Deployments disappearing is
+        # ArgoCD-drift territory, not this rule's.
+        #
+        # Warning, not critical: the bots keep the mob farm ticking and the
+        # chat log flowing, but nothing player-facing breaks while they are
+        # down. 30m so a server restart (which disconnects both, by design,
+        # roughly hourly when a version bump lands) never pages — their own
+        # backoff reconnects them well inside that.
+        - alert: JdwillmsenMinecraftAfkBotsDegraded
+          expr: sum(kube_deployment_status_replicas_available{namespace="jdwillmsen-prd", deployment=~"jdwillmsen-minecraft-fwb-prd-afk-bot(-2)?"}) < 2
+          for: 30m
+          labels:
+            severity: warning
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+          annotations:
+            summary: "Fewer than two AFK bots are running"
+            description: >-
+              At least one AFK bot Deployment has had no available replica for 30 minutes. The mob farm stops ticking
+              and chat capture pauses with bot 1. Deployment-level, so this is a pod that will not run — not a bot that
+              runs but cannot join the server; that shape (a protocol-schema change the 0.2.0 spoof cannot bridge) shows
+              as protocol_spoofed log lines followed by short session_lasted_ms reconnect events instead, with this
+              rule quiet. Check both bot pods and their logs in jdwillmsen-prd.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # The world only grows, and a full datadir kills the server harder
+        # than any crash — writes fail, the ext4 read-only latch follows, and
+        # recovery needs human volume surgery rather than the volume-recovery
+        # actor's pod delete. 80% on a 15m hold is early enough to grow the
+        # PVC calmly. Covers every PVC in the namespace deliberately: the two
+        # bot token caches are tiny but a full one bricks that bot's auth just
+        # the same.
+        - alert: JdwillmsenMinecraftVolumeNearFull
+          expr: max by (persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace="jdwillmsen-prd"} / kubelet_volume_stats_capacity_bytes{namespace="jdwillmsen-prd"}) > 0.8
+          for: 15m
+          labels:
+            severity: warning
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+          annotations:
+            summary: "A jdwillmsen-prd volume is over 80% full"
+            description: >-
+              PVC {{ $labels.persistentvolumeclaim }} is at {{ $value | humanizePercentage }} of capacity. The world
+              datadir only grows, and filling it ends in failed writes and an ext4 read-only latch that the
+              volume-recovery actor cannot fix. Expand the PVC (TrueNAS iSCSI/NFS both support online expansion)
+              before it crosses 90%.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # The version-check CronJob is what bounds how stale the LATEST-
+        # tracking server can get, and — as one leg — dispatches the AFK bot
+        # repo's protocol check. Its occasional single-run flake (candidate
+        # pod missing its 60s reporting budget) is known and benign; four
+        # hours of no success is four missed cycles, which is the mechanism
+        # actually off, not a flake. max() because kube-state-metrics can
+        # briefly serve duplicate series across a restart.
+        - alert: JdwillmsenMinecraftVersionCheckStale
+          expr: time() - max(kube_cronjob_status_last_successful_time{namespace="jdwillmsen-prd", cronjob="jdwillmsen-minecraft-fwb-prd-version-check"}) > 14400
+          for: 15m
+          labels:
+            severity: warning
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+          annotations:
+            summary: "The Minecraft version-check has not succeeded for over 4 hours"
+            description: >-
+              The hourly version-check CronJob has missed at least four consecutive cycles, so the Bedrock server's
+              staleness bound is not being enforced and the AFK bot repo is not being told the production version.
+              Players on newly-updated clients lose the ability to join once Mojang ships a version the server no
+              longer matches. Read the last failed Job's logs in jdwillmsen-prd; the known benign single-run flake is
+              the candidate pod missing its 60s reporting budget, which this rule's four-hour threshold already
+              tolerates.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
