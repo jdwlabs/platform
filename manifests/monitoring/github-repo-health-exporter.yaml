@@ -14,8 +14,7 @@ spec:
         app: github-repo-health-exporter
     spec:
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
+        runAsNonRoot: false
       containers:
       - name: exporter
         image: jdwlabs/github-repo-health-exporter:0.0.1@sha256:3f697eefb82e9cd1266efee0ba13e32f82bcc9a1956c08cb1d51e31f670b33c4
