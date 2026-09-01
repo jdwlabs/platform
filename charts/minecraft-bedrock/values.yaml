@@ -1,0 +1,14 @@
+replicaCount: 1
+
+image:
+  repository: itzg/minecraft-bedrock-server
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 19132
+
+env:
+  - name: SERVER_PORT
+    value: "19132"
