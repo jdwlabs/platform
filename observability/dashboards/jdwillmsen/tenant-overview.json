@@ -483,7 +483,7 @@
       "id": 27,
       "type": "bargauge",
       "title": "Time since last CronJob success",
-      "description": "All four CronJobs (backup, restore, volume-recovery, version-check) in one view. Deliberately no color thresholds: their schedules differ by orders of magnitude (hourly to on-demand), so one threshold set would lie for three of the four. Paging on staleness is the PrometheusRules' job; this is for eyeballing which leg of the pipeline stopped.",
+      "description": "Scheduled CronJobs only — suspended ones are filtered out via kube_cronjob_spec_suspend. The restore CronJob is suspended by design (placeholder yearly schedule, manual-trigger only), so its 'time since success' is meaningless and only ever alarmed people. Deliberately no color thresholds: the remaining schedules still differ by orders of magnitude. Paging on staleness is the PrometheusRules' job; this is for eyeballing which leg of the pipeline stopped.",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "gridPos": { "h": 7, "w": 12, "x": 0, "y": 45 },
       "options": { "orientation": "horizontal", "displayMode": "basic" },
@@ -497,7 +497,7 @@
       },
       "targets": [
         {
-          "expr": "time() - kube_cronjob_status_last_successful_time{namespace=~\"$namespace\"}",
+          "expr": "(time() - kube_cronjob_status_last_successful_time{namespace=~\"$namespace\"}) and on(namespace, cronjob) (kube_cronjob_spec_suspend{namespace=~\"$namespace\"} == 0)",
           "legendFormat": "{{cronjob}}",
           "refId": "A"
         }
@@ -507,7 +507,7 @@
       "id": 28,
       "type": "timeseries",
       "title": "Failed Jobs",
-      "description": "kube_job_status_failed summed per parent Job. Non-zero here with a green freshness bar means a run failed and a later one recovered — worth reading the logs even though nothing paged.",
+      "description": "kube_job_status_failed summed per parent Job — every Job object still on the cluster, including hand-made ones (fwb-restore-*, fwb-*-backup), which linger here until deleted or TTL'd; a failed manual job someone already superseded still counts. Non-zero with a green freshness bar means a run failed and a later one recovered — worth reading the logs even though nothing paged. Known benign shape: an occasional version-check failure when the throwaway candidate server doesn't report a version inside its 60s poll budget.",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "gridPos": { "h": 7, "w": 12, "x": 12, "y": 45 },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
@@ -584,12 +584,27 @@
       ]
     },
     {
+      "id": 35,
+      "type": "logs",
+      "title": "Player chat",
+      "description": "Real player chat, heard and mirrored to stdout by AFK bot 1 (the bot's structured chat event; the Bedrock server itself never logs chat). container=\"bot\" is bot 1 alone once the bot2 container rename lands — until then both bots match and lines double, which the exact-dedup setting mostly hides. Color codes stripped from names. If bot 1 is offline, chat capture pauses with it.",
+      "datasource": { "type": "loki", "uid": "${loki_datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 61 },
+      "options": { "dedupStrategy": "exact", "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true },
+      "targets": [
+        {
+          "expr": "{namespace=~\"$namespace\", container=\"bot\"} |= \"\\\"event\\\":\\\"chat\\\"\" | json | chat_type=~\"chat|announcement\" | line_format \"{{regexReplaceAll \\\"§.\\\" .player \\\"\\\"}}: {{.message}}\"",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "id": 34,
       "type": "logs",
       "title": "Server messages",
-      "description": "Messages the server itself sent to players (whispers/says from console commands, e.g. the AFK-bot pipeline's tells). Player-to-player chat is NOT here: Bedrock dedicated server never writes chat to stdout, so no stream on this cluster carries it — capturing it would need the AFK bot (a connected client that does see chat) to log Text packets.",
+      "description": "Messages the server itself sent to players (whispers/says from console commands, e.g. the AFK-bot pipeline's tells). Player-to-player chat lives in the Player chat panel to the left, mirrored by the AFK bots — the Bedrock server itself never writes chat to stdout.",
       "datasource": { "type": "loki", "uid": "${loki_datasource}" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 61 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 61 },
       "targets": [
         {
           "expr": "{namespace=~\"$namespace\", container=~\".*minecraft-bedrock.*\"} |~ \"You whisper|You say|\\\\[Server\\\\]\"",
@@ -603,7 +618,7 @@
       "title": "Log error rate",
       "description": "Errors per 5m across the namespace's logs. Crash spam ramps here minutes before a restart shows anywhere else.",
       "datasource": { "type": "loki", "uid": "${loki_datasource}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 61 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 69 },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
       "targets": [
         {
@@ -614,11 +629,27 @@
       ]
     },
     {
+      "id": 36,
+      "type": "timeseries",
+      "title": "Chat messages per hour",
+      "description": "Chat activity heard by bot 1 — a liveliness pulse for the server, and a quick way to spot which evening the regulars were actually on.",
+      "datasource": { "type": "loki", "uid": "${loki_datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 69 },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({namespace=~\"$namespace\", container=\"bot\"} |= \"\\\"event\\\":\\\"chat\\\"\" | json | chat_type=~\"chat|announcement\" [1h]))",
+          "legendFormat": "messages / h",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "id": 19,
       "type": "logs",
       "title": "Namespace logs",
       "datasource": { "type": "loki", "uid": "${loki_datasource}" },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 69 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 77 },
       "targets": [
         { "expr": "{namespace=~\"$namespace\"}", "refId": "A" }
       ]
