@@ -1279,6 +1279,305 @@
       ]
     },
     {
+      "id": 40,
+      "type": "row",
+      "title": "Chat answering (LLM)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 84
+      }
+    },
+    {
+      "id": 41,
+      "type": "stat",
+      "title": "Answer attempts (24h)",
+      "description": "Questions the bot tried to answer, before the outcome splits into replied/error/skipped below.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki_datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 85
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "count_over_time({namespace=~\"$namespace\", container=\"bot\"} |~ \"\\\"event\\\":\\\"(replied|answer_error|answer_skipped)\\\"\" [24h])",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "type": "stat",
+      "title": "Replies sent (24h)",
+      "description": "Answers actually broadcast into chat.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki_datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 85
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "count_over_time({namespace=~\"$namespace\", container=\"bot\"} |= \"\\\"event\\\":\\\"replied\\\"\" | json [24h])",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 43,
+      "type": "stat",
+      "title": "Answer errors (24h)",
+      "description": "LLM call failed or the reply couldn't be sent (see the Answer errors log panel below).",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki_datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 85
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "count_over_time({namespace=~\"$namespace\", container=\"bot\"} |= \"\\\"event\\\":\\\"answer_error\\\"\" | json [24h])",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 44,
+      "type": "stat",
+      "title": "Answer skipped (24h)",
+      "description": "Question was eligible but dropped by a guardrail (cooldown, rate cap, in-flight cap, empty reply, or a dead session) — see Answer skip reasons below.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki_datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 85
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "count_over_time({namespace=~\"$namespace\", container=\"bot\"} |= \"\\\"event\\\":\\\"answer_skipped\\\"\" | json [24h])",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "Answer outcomes per hour",
+      "description": "Replies, errors, and skips (by reason) over time — a spike in errors or skips without a matching spike in replies usually means the LLM backend (MC_LLM_BASE_URL) is unreachable or misconfigured.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki_datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 89
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({namespace=~\"$namespace\", container=\"bot\"} |= \"\\\"event\\\":\\\"replied\\\"\" | json [1h]))",
+          "legendFormat": "replied",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(count_over_time({namespace=~\"$namespace\", container=\"bot\"} |= \"\\\"event\\\":\\\"answer_error\\\"\" | json [1h]))",
+          "legendFormat": "error",
+          "refId": "B"
+        },
+        {
+          "expr": "sum by (reason) (count_over_time({namespace=~\"$namespace\", container=\"bot\"} |= \"\\\"event\\\":\\\"answer_skipped\\\"\" | json [1h]))",
+          "legendFormat": "skipped: {{reason}}",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 46,
+      "type": "timeseries",
+      "title": "Answer latency",
+      "description": "Wall time from question to outcome (the `ms` field on replied/answer_error) — the bot's own hard ceiling is MC_LLM_TIMEOUT_MS (default 8s); sustained latency near that means the backend is struggling.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki_datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 89
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "avg(avg_over_time({namespace=~\"$namespace\", container=\"bot\"} |= \"\\\"event\\\":\\\"replied\\\"\" | json | unwrap ms [5m]))",
+          "legendFormat": "avg (replied)",
+          "refId": "A"
+        },
+        {
+          "expr": "quantile_over_time(0.95, {namespace=~\"$namespace\", container=\"bot\"} |= \"\\\"event\\\":\\\"replied\\\"\" | json | unwrap ms [5m])",
+          "legendFormat": "p95 (replied)",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 47,
+      "type": "bargauge",
+      "title": "Answer skip reasons (24h)",
+      "description": "Which guardrail is doing the dropping — a `rate_limited`/`cooldown`-heavy mix suggests genuine chat volume; `session_ended`/`empty_reply` point at backend reliability instead.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki_datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 97
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (reason) (count_over_time({namespace=~\"$namespace\", container=\"bot\"} |= \"\\\"event\\\":\\\"answer_skipped\\\"\" | json [24h]))",
+          "legendFormat": "{{reason}}",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 48,
+      "type": "logs",
+      "title": "Replies",
+      "description": "Every answer the bot actually broadcast, with who asked (or `<server>` for a console message) and how long it took.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki_datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 97
+      },
+      "options": {
+        "dedupStrategy": "exact",
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "expr": "{namespace=~\"$namespace\", container=\"bot\"} |= \"\\\"event\\\":\\\"replied\\\"\" | json | line_format \"[{{.source}}] {{.player}}: {{.reply}} ({{.ms}}ms)\"",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 49,
+      "type": "logs",
+      "title": "Answer errors",
+      "description": "Failed LLM calls or failed sends — the `error` field is the exception message, useful for catching a misconfigured or unreachable MC_LLM_BASE_URL early.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki_datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 97
+      },
+      "options": {
+        "dedupStrategy": "exact",
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "expr": "{namespace=~\"$namespace\", container=\"bot\"} |= \"\\\"event\\\":\\\"answer_error\\\"\" | json | line_format \"[{{.source}}] {{.player}}: {{.error}}\"",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "id": 19,
       "type": "logs",
       "title": "Namespace logs",
@@ -1290,7 +1589,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 84
+        "y": 104
       },
       "targets": [
         {
