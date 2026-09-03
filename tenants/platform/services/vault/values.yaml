@@ -31,6 +31,13 @@ server:
       config: |
         cluster_name = "vault-integrated-storage"
 
+        # The top-level `ui.enabled` value only renders the vault-ui
+        # Service; it does not reach the server. In HA mode this config is
+        # passed through verbatim, so without this line the server keeps the
+        # `ui = false` default and every /ui/ request 404s while the API on
+        # the same host answers normally.
+        ui = true
+
         listener "tcp" {
           address = "[::]:8200"
           cluster_address = "[::]:8201"
