@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-sre-relay-config
+  namespace: ai-sre
+data:
+  config.yaml: |
+    # AI-SRE Relay configuration
+    log_level: info
+    deduplication:
+      enabled: true
+      skip_if_open_ticket: false
+    # other settings...
