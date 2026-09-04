@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: jdwillmsen-minecraft-fwb-prd-minecraft-bedrock
+spec:
+  serviceName: jdwillmsen-minecraft-fwb-prd-minecraft-bedrock
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minecraft-bedrock
+  template:
+    metadata:
+      labels:
+        app: minecraft-bedrock
+    spec:
+      imagePullSecrets:
+      - name: ghcr-io-secret
+      containers:
+      - name: minecraft-bedrock
+        image: ghcr.io/jdwillmsen/minecraft-bedrock:latest
+        ports:
+        - containerPort: 19132
+      - name: console-bridge
+        image: ghcr.io/jdwillmsen/mc-console-bridge:0.1.0
+        env:
+        - name: MINECRAFT_RCON_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: minecraft-fwb-rcon
+              key: password
