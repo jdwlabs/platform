@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: jdwillmsen-minecraft-fwb-prd-version-check
+  labels:
+    app.kubernetes.io/name: minecraft
+    app.kubernetes.io/instance: jdwillmsen-minecraft-fwb-prd
+spec:
+  ttlSecondsAfterFinished: 100
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minecraft
+        app.kubernetes.io/instance: jdwillmsen-minecraft-fwb-prd
+        app.kubernetes.io/component: version-check
+    spec:
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: regcred
+      containers:
+        - name: version-check
+          image: itzg/minecraft-bedrock-server:1.26.45
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args: ["echo \"Starting version check...\" && sleep 5"]
+          env:
+            - name: KUBECONFIG
+              value: "/root/.kube/config"
