@@ -136,3 +136,18 @@ data:
                 END LOOP;
         END
     $$;
+
+  V3__auth_fk_indexes.sql: |
+    -- Every authenticated request hydrates the caller by filtering each of these
+    -- tables on its foreign key, and none of the four columns carried an index.
+
+    -- Plain CREATE INDEX rather than CONCURRENTLY: Flyway keeps its schema-history
+    -- connection open inside a transaction for the whole of a non-transactional
+    -- migration, so CONCURRENTLY on the migration connection waits on that
+    -- virtualxid and never returns, and killing the Job leaves an INVALID index
+    -- that IF NOT EXISTS then skips forever. Both environments hold single-digit
+    -- rows, so the momentary write lock costs nothing.
+    CREATE INDEX IF NOT EXISTS profiles_user_id_idx ON auth.profiles (user_id);
+    CREATE INDEX IF NOT EXISTS addresses_profile_id_idx ON auth.addresses (profile_id);
+    CREATE INDEX IF NOT EXISTS profile_icons_profile_id_idx ON auth.profile_icons (profile_id);
+    CREATE INDEX IF NOT EXISTS users_roles_role_id_idx ON auth.users_roles (role_id);
