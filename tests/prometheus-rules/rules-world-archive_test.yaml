@@ -1,0 +1,233 @@
+# Unit tests for JdwillmsenMinecraftWorldArchiveShrank — the rule that reads
+# the world backup's own size and calls a drop data loss.
+#
+# The fixtures below are the archive sizes Prometheus actually recorded, not
+# invented numbers, because the whole question this rule got wrong is which
+# real movements are losses. Two of them are incidents that already happened:
+# a LevelDB compaction that inflated one archive and made the next one look
+# like a 2.7% loss, and a genuine 5.5% loss that lasted a single archive. A
+# baseline that suppresses the first must not suppress the second, and that
+# tension is what every case here is really asserting.
+#
+# Sampled at 4m. The rule looks back 7d, so a fixture has to carry a week of
+# continuous samples; anything sparser than the 5m lookback delta goes stale
+# between points and the rule silently evaluates against nothing.
+#
+# Rule files are extracted from the PrometheusRule manifests under tenants/ by
+# run.sh, since promtool reads bare rule groups and not the CRD wrapper.
+rule_files:
+  - rules/jdwillmsen-tenant-alerts.yaml
+evaluation_interval: 4m
+tests:
+  # THE REGRESSION FIXTURE.
+  #
+  # Seven consecutive archives across a compaction. The sixth caught LevelDB
+  # with both generations of the tables it was merging on disk and came out
+  # 2.6% larger than the fifth; the seventh held one generation and read 2.7%
+  # under that peak, which is what paged critical for a day over a world that
+  # had lost nothing.
+  #
+  # Against the median the seventh archive is not a drop at all — it sits
+  # slightly above the middle of its own week — so there is nothing here for
+  # a threshold to be tuned around. That is the point: the fix is the
+  # baseline, not the number.
+  - interval: 4m
+    name: an archive that shrank only against a compaction-inflated peak does not page
+    input_series:
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.245:9101"}'
+        values: '394585604+0x359 394387039+0x359 394481069+0x359 398803255+0x359 399655669+0x359 410041241+0x359 398973244+0x359'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.245:9101"}'
+        values: '1+0x2519'
+    alert_rule_test:
+      # Mid-compaction, while the inflated archive is the newest one. An
+      # archive that grew cannot be a loss under any baseline.
+      - eval_time: 150h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts: []
+      # The archive that paged. Well past for: 15m.
+      - eval_time: 167h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts: []
+
+  # THE TRUE POSITIVE THE FIX MUST NOT COST.
+  #
+  # 2026-08-30, the loss this rule was written for — and, because the rule
+  # postdates it by two days, one it has only ever caught here:
+  # 394,585,604 -> 372,064,563, restored before the next backup ran. It lived
+  # in exactly one archive, which is why "require the shrink to persist across
+  # two archives" was rejected: it would have bought silence on the compaction
+  # by going silent on this too.
+  - interval: 4m
+    name: a single archive 5.5% under the weekly median still pages critical
+    input_series:
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.245:9101"}'
+        values: '386039110+0x359 386049005+0x359 391234063+0x359 391368573+0x359 392504624+0x359 393604306+0x359 394585604+0x359 372064563+0x59'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.245:9101"}'
+        values: '1+0x2519 1+0x59'
+    alert_rule_test:
+      # Inside for: 15m. Pending, not firing.
+      - eval_time: 168h8m
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts: []
+      - eval_time: 168h30m
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+              artifact: world
+              instance: 10.244.7.245:9101
+            exp_annotations:
+              summary: "Minecraft world backup is smaller than its recent typical size"
+              description: >-
+                The newest world archive is more than 2% smaller than the median of those taken in the past week. A
+                world that is played in grows; it does not shrink, and it does not fall below its own recent middle.
+                Treat this as data loss until proven otherwise and do not let the next backup rotate the good one
+                away. Check the server log for "Corruption: N missing files" and the CSI driver's log for an fsck that
+                recovered a journal. A LevelDB compaction does not produce this: it inflates one archive rather than
+                shrinking the next, and the median baseline already absorbs that. If the archive is smaller and the
+                save-time file list shows removed tables re-created at the same sizes, that is compaction and the
+                world is intact.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      # Still firing three hours later, before the restore lands.
+      - eval_time: 171h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+              artifact: world
+              instance: 10.244.7.245:9101
+            exp_annotations:
+              summary: "Minecraft world backup is smaller than its recent typical size"
+              description: >-
+                The newest world archive is more than 2% smaller than the median of those taken in the past week. A
+                world that is played in grows; it does not shrink, and it does not fall below its own recent middle.
+                Treat this as data loss until proven otherwise and do not let the next backup rotate the good one
+                away. Check the server log for "Corruption: N missing files" and the CSI driver's log for an fsck that
+                recovered a journal. A LevelDB compaction does not produce this: it inflates one archive rather than
+                shrinking the next, and the median baseline already absorbs that. If the archive is smaller and the
+                save-time file list shows removed tables re-created at the same sizes, that is compaction and the
+                world is intact.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # A quarter of the world gone and still gone the following night. The
+  # unambiguous case, asserted at both archives so nothing about the median
+  # walking down lets the second one off.
+  - interval: 4m
+    name: a 25% loss persisting across two archives pages critical throughout
+    input_series:
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.245:9101"}'
+        values: '400000000+0x2519 300000000+0x719'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.245:9101"}'
+        values: '1+0x3239'
+    alert_rule_test:
+      - eval_time: 168h30m
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+              artifact: world
+              instance: 10.244.7.245:9101
+            exp_annotations:
+              summary: "Minecraft world backup is smaller than its recent typical size"
+              description: >-
+                The newest world archive is more than 2% smaller than the median of those taken in the past week. A
+                world that is played in grows; it does not shrink, and it does not fall below its own recent middle.
+                Treat this as data loss until proven otherwise and do not let the next backup rotate the good one
+                away. Check the server log for "Corruption: N missing files" and the CSI driver's log for an fsck that
+                recovered a journal. A LevelDB compaction does not produce this: it inflates one archive rather than
+                shrinking the next, and the median baseline already absorbs that. If the archive is smaller and the
+                save-time file list shows removed tables re-created at the same sizes, that is compaction and the
+                world is intact.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 200h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+              artifact: world
+              instance: 10.244.7.245:9101
+            exp_annotations:
+              summary: "Minecraft world backup is smaller than its recent typical size"
+              description: >-
+                The newest world archive is more than 2% smaller than the median of those taken in the past week. A
+                world that is played in grows; it does not shrink, and it does not fall below its own recent middle.
+                Treat this as data loss until proven otherwise and do not let the next backup rotate the good one
+                away. Check the server log for "Corruption: N missing files" and the CSI driver's log for an fsck that
+                recovered a journal. A LevelDB compaction does not produce this: it inflates one archive rather than
+                shrinking the next, and the median baseline already absorbs that. If the archive is smaller and the
+                save-time file list shows removed tables re-created at the same sizes, that is compaction and the
+                world is intact.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # A backup that did not run is not a backup that shrank. Nothing rewrites
+  # the ConfigMap, so the exporter serves the last good size unchanged and
+  # this rule has nothing to say — staleness and the CronJob rules own it.
+  - interval: 4m
+    name: a missed backup holds the last size and does not page this rule
+    input_series:
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.245:9101"}'
+        values: '394585604+0x359 394387039+0x359 394481069+0x359 398803255+0x359 399655669+0x359 400041241+0x359 400973244+0x359 400973244+0x719'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.245:9101"}'
+        values: '1+0x3239'
+    alert_rule_test:
+      - eval_time: 180h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts: []
+      - eval_time: 214h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts: []
+
+  # The other shape a missing backup takes, and the second false positive
+  # this rule was carrying: the exporter came up with no state to serve and
+  # published placeholder zeros for 19h on 2026-08-27, days before this rule
+  # existed to see them. Zero against a full week of real archives is a 100%
+  # drop, and the peak-baseline expression fires on this fixture at every
+  # eval time below. A producer that has not reported is
+  # BackupStateNeverReported's and
+  # BackupVisibilityLost's; a real zero-byte archive is BackupArtifactEmpty's.
+  # Neither is a world that shrank.
+  - interval: 4m
+    name: placeholder zeros from an exporter with no state do not page this rule
+    input_series:
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.245:9101"}'
+        values: '394585604+0x359 394387039+0x359 394481069+0x359 398803255+0x359 399655669+0x359 400041241+0x359 400973244+0x359 0+0x284'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.245:9101"}'
+        values: '1+0x2519 0+0x284'
+    alert_rule_test:
+      - eval_time: 168h30m
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts: []
+      - eval_time: 180h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts: []
+      - eval_time: 186h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts: []
+
+  # The guard is joined on the full label set, which is what keeps one
+  # exporter pod's state gauge from vouching for another's size gauge during
+  # a rollover. Same loss as the 25% fixture, with the two gauges arriving
+  # from different instances: nothing matches, so nothing fires.
+  - interval: 4m
+    name: a size gauge with no state gauge of its own does not page
+    input_series:
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.245:9101"}'
+        values: '400000000+0x2519 300000000+0x719'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.6.58:9101"}'
+        values: '1+0x3239'
+    alert_rule_test:
+      - eval_time: 168h30m
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts: []

@@ -448,27 +448,69 @@ spec:
         # the 2026-08-30 data loss on its own, without anyone understanding
         # iSCSI, because the archive simply got smaller.
         #
-        # 2% against a 7d peak. Real archives grew monotonically over two
-        # weeks with day-to-day variation under 0.1%, so 2% is roughly fifty
-        # times the observed noise floor; the loss that prompted this was
-        # 5.7%. Compare against the peak rather than the previous sample so a
-        # slow multi-day bleed cannot walk the baseline down with it.
+        # The baseline is the 7d median, not the 7d peak, and that is the
+        # whole rule. The world is a LevelDB, and a backup that lands while a
+        # compaction is in flight captures both generations of the tables being
+        # merged: on 2026-09-04 that put a duplicate ~12 MB of tables in the
+        # archive and made it 2.6% larger than the day before. The next
+        # archive held one generation again, and against the inflated peak
+        # that read as a 2.7% shrink and paged critical for a day, over a
+        # world that had lost nothing -- the removed and re-created tables
+        # paired byte-for-byte and the manifest had grown.
+        #
+        # A peak baseline cannot tell those apart, because compaction only
+        # ever moves the peak in the direction that arms the rule, and the
+        # alert then cannot clear until the inflated sample ages out of the
+        # window. A median is unmoved by it: one anomalous archive out of
+        # seven does not shift the middle one. Measured over the 12d to
+        # 2026-09-06, current/median stayed in [1.0000, 1.0394] across every
+        # healthy archive -- a played-in world is always at or above its own
+        # recent median -- while the 08-30 loss read 0.9453. The compaction
+        # transient reads 1.0111. So 2% below the median has the real loss 3.5
+        # points inside it and the false positive 3.1 points outside it, and
+        # 2% stays the number it was against the peak.
+        #
+        # Rejected: requiring the shrink to persist across two archives. The
+        # one real loss in the recorded series appeared in exactly one archive
+        # and was restored before the next one ran, so persistence would have
+        # traded the false positive for the true positive. Also rejected:
+        # publishing table counts and manifest size from the save-time file
+        # list the job already logs. It would work, but the median already
+        # separates the two cases by 6.6 points using gauges that exist, and
+        # new gauges mean new parsing in the backup job to maintain.
+        #
+        # The guards are not decoration. The exporter serves zeros when it has
+        # no state to serve -- for 19h on 2026-08-27, before this rule existed
+        # to read them as a total loss -- and a zero is a producer that has not
+        # reported, which BackupStateNeverReported and BackupVisibilityLost
+        # own. A genuine zero-byte archive is BackupArtifactEmpty's. Both are
+        # excluded here so each condition pages once, from the rule that can
+        # actually describe it. Zeros left in the baseline are harmless: a
+        # median needs half the window to move, and 19h is 11% of it.
         - alert: JdwillmsenMinecraftWorldArchiveShrank
           expr: |
-            backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup", artifact="world"}
-              < max_over_time(backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup", artifact="world"}[7d]) * 0.98
+            (
+              backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup", artifact="world"}
+                < quantile_over_time(0.5, backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup", artifact="world"}[7d]) * 0.98
+            )
+            and (backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup", artifact="world"} > 0)
+            and (backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup", artifact="world"} == 1)
           for: 15m
           labels:
             severity: critical
             tenant: jdwillmsen
             namespace: jdwillmsen-prd
           annotations:
-            summary: "Minecraft world backup is smaller than its recent peak"
+            summary: "Minecraft world backup is smaller than its recent typical size"
             description: >-
-              The newest world archive is more than 2% smaller than the largest taken in the past week. A world that
-              is played in grows; it does not shrink. Treat this as data loss until proven otherwise and do not let
-              the next backup rotate the good one away. Check the server log for "Corruption: N missing files" and
-              the CSI driver's log for an fsck that recovered a journal.
+              The newest world archive is more than 2% smaller than the median of those taken in the past week. A
+              world that is played in grows; it does not shrink, and it does not fall below its own recent middle.
+              Treat this as data loss until proven otherwise and do not let the next backup rotate the good one
+              away. Check the server log for "Corruption: N missing files" and the CSI driver's log for an fsck that
+              recovered a journal. A LevelDB compaction does not produce this: it inflates one archive rather than
+              shrinking the next, and the median baseline already absorbs that. If the archive is smaller and the
+              save-time file list shows removed tables re-created at the same sizes, that is compaction and the
+              world is intact.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
         # sum() rather than count(... > 0): with both bots down the count form
