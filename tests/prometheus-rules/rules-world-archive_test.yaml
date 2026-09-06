@@ -39,12 +39,18 @@ tests:
       - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.245:9101"}'
         values: '1+0x2519'
     alert_rule_test:
-      # Mid-compaction, while the inflated archive is the newest one. An
+      # Inside the sixth block, so the inflated archive is the newest one. An
       # archive that grew cannot be a loss under any baseline.
+      - eval_time: 140h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts: []
+      # Six hours into the seventh block: the honest archive has replaced the
+      # inflated one and the peak baseline has started paging. Well past
+      # for: 15m.
       - eval_time: 150h
         alertname: JdwillmsenMinecraftWorldArchiveShrank
         exp_alerts: []
-      # The archive that paged. Well past for: 15m.
+      # A day later, with the inflated sample still in the 7d window.
       - eval_time: 167h
         alertname: JdwillmsenMinecraftWorldArchiveShrank
         exp_alerts: []
@@ -215,6 +221,84 @@ tests:
       - eval_time: 186h
         alertname: JdwillmsenMinecraftWorldArchiveShrank
         exp_alerts: []
+
+  # UNEVEN CADENCE. quantile_over_time weighs samples, not archives, so an
+  # archive the exporter held for 60h because no backup ran counts for two and
+  # a half archives' worth of the window. Five normal archives, one frozen for
+  # 60h, then a real 5.5% loss.
+  #
+  # The weighting is real and its direction is protective. A played-in world
+  # grows, so the newest archive is the largest and a freeze always plateaus
+  # at the top of the window's distribution; the extra weight pushes the
+  # median up, which tightens the threshold rather than loosening it. Measured
+  # against this fixture: uniform cadence puts the median at 394,585,604 and
+  # the loss at 0.9581 of it, the 60h freeze puts it at 399,229,462 and the
+  # same loss at 0.9469. Swept from a 24h to a 168h freeze the ratio falls
+  # monotonically, 0.9581 to 0.9450, never toward the 0.98 threshold. In the
+  # limit the median simply becomes the plateau value, which is the ideal
+  # baseline: compare against the last archive known good.
+  - interval: 4m
+    name: an archive frozen for 60h by a missed backup does not hide the loss after it
+    input_series:
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.245:9101"}'
+        values: '394585604+0x359 394387039+0x359 394481069+0x359 398803255+0x359 399655669+0x359 400041241+0x899 378038973+0x89'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.245:9101"}'
+        values: '1+0x2789'
+    alert_rule_test:
+      # Deep inside the freeze. The size is stale, not smaller — staleness and
+      # the CronJob rules own that, and this one stays quiet.
+      - eval_time: 170h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts: []
+      # The loss lands at 180h. Inside for: 15m.
+      - eval_time: 180h8m
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts: []
+      - eval_time: 180h30m
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+              artifact: world
+              instance: 10.244.7.245:9101
+            exp_annotations:
+              summary: "Minecraft world backup is smaller than its recent typical size"
+              description: >-
+                The newest world archive is more than 2% smaller than the median of those taken in the past week. A
+                world that is played in grows; it does not shrink, and it does not fall below its own recent middle.
+                Treat this as data loss until proven otherwise and do not let the next backup rotate the good one
+                away. Check the server log for "Corruption: N missing files" and the CSI driver's log for an fsck that
+                recovered a journal. A LevelDB compaction does not produce this: it inflates one archive rather than
+                shrinking the next, and the median baseline already absorbs that. If the archive is smaller and the
+                save-time file list shows removed tables re-created at the same sizes, that is compaction and the
+                world is intact.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      # Still firing once the plateau dominates the window even harder.
+      - eval_time: 185h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+              artifact: world
+              instance: 10.244.7.245:9101
+            exp_annotations:
+              summary: "Minecraft world backup is smaller than its recent typical size"
+              description: >-
+                The newest world archive is more than 2% smaller than the median of those taken in the past week. A
+                world that is played in grows; it does not shrink, and it does not fall below its own recent middle.
+                Treat this as data loss until proven otherwise and do not let the next backup rotate the good one
+                away. Check the server log for "Corruption: N missing files" and the CSI driver's log for an fsck that
+                recovered a journal. A LevelDB compaction does not produce this: it inflates one archive rather than
+                shrinking the next, and the median baseline already absorbs that. If the archive is smaller and the
+                save-time file list shows removed tables re-created at the same sizes, that is compaction and the
+                world is intact.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
   # The guard is joined on the full label set, which is what keeps one
   # exporter pod's state gauge from vouching for another's size gauge during

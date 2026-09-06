@@ -487,6 +487,27 @@ spec:
         # excluded here so each condition pages once, from the rule that can
         # actually describe it. Zeros left in the baseline are harmless: a
         # median needs half the window to move, and 19h is 11% of it.
+        #
+        # backup_state_reported carries artifact alongside backup_job: both
+        # gauges come off the same scrape target and their label sets are
+        # identical, so the guard matches on the full set and wants no on()
+        # clause. The sibling rules aggregate on (backup_job) because they
+        # join against series from elsewhere. Narrowing this one to match them
+        # would let one exporter pod's state gauge vouch for another pod's
+        # size gauge during a rollover, which is the thing the last fixture in
+        # the test file exists to prevent.
+        #
+        # quantile_over_time weighs samples, not archives, so an archive the
+        # exporter holds for days because no backup ran counts for several of
+        # them. That unevenness is assumed, and it is protective rather than
+        # merely tolerable: the world grows, so the newest archive is the
+        # largest and a stall always plateaus at the top of the window's
+        # distribution, which pushes the median up and tightens the threshold.
+        # Swept from a 24h to a 168h freeze against a real 5.5% loss the ratio
+        # falls monotonically, 0.9581 to 0.9450, never toward 0.98. In the
+        # limit the median becomes the plateau value itself -- compare against
+        # the last archive known good, which is the baseline you would have
+        # picked by hand.
         - alert: JdwillmsenMinecraftWorldArchiveShrank
           expr: |
             (
