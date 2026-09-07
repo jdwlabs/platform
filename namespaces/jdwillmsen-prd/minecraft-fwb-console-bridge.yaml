@@ -5,5 +5,7 @@ metadata:
   namespace: jdwillmsen-prd
 type: Opaque
 data:
-  console_websocket_password: Y2hhbmdlbWU=
-  console_bridge_token: Y2hhbmdlbWU=
+  # NOTE: Replace placeholder values with actual configuration required by the Minecraft Bedrock server.
+  # Obtain correct values from secure secret management or application documentation.
+  username: bXlnY3JlYXRlcg==
+  password: bXlcMjRzZWN1cml0eQ==
