@@ -293,7 +293,7 @@ spec:
                   kube_job_owner{namespace="jdwillmsen-prd", owner_kind="CronJob", owner_name="jdwillmsen-minecraft-fwb-prd-volume-recovery"}
                 )
             ) >= 2
-          for: 5m
+          for: 30m
           labels:
             severity: critical
             tenant: jdwillmsen
@@ -429,7 +429,7 @@ spec:
         # why the description says how to tell the two apart.
         - alert: JdwillmsenMinecraftServerRestarted
           expr: increase(kube_pod_container_status_restarts_total{namespace="jdwillmsen-prd", container="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}[1h]) > 0
-          for: 5m
+          for: 30m
           labels:
             severity: warning
             tenant: jdwillmsen
@@ -441,6 +441,49 @@ spec:
               version-check CronJob logged a "restarted" event in that window this was a deliberate version upgrade
               and no action is needed. Otherwise it crashed: the previous container's logs hold the dump, and the
               known defect is an upstream crash on player connect that recovers on its own.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # A StatefulSet will not replace a pod that has never become Ready.
+        # That makes a bad revision self-sustaining: the pod cannot start, so
+        # the controller will not roll it, so the fix -- including a revert
+        # that has already merged and already synced -- never reaches it. No
+        # controller resolves this. Someone has to delete the pod.
+        #
+        # Every other rule here was blind to it on 2026-09-06. Unreachable
+        # fired, correctly, for 42 hours; it says the server is down, not that
+        # the thing that would normally fix it has stalled, and the difference
+        # is whether a human is required. Restarted stayed silent because a pod
+        # that never starts a container never restarts one.
+        #
+        # Backtested against that incident before being written: this
+        # expression was true from 09-06 05:30, when the revert's sync moved
+        # updateRevision and left the pod behind, to 09-07 21:45, when the pod
+        # was finally deleted by hand. It was deliberately false for the first
+        # two hours of the outage, while the pod was still on the current
+        # revision and merely broken -- that window belongs to Unreachable.
+        #
+        # 30m because the server's own startup budget is ten minutes (startup
+        # probe, 60 failures at 10s), so a genuinely slow rollout must be able
+        # to finish without tripping this. replicas_updated is the right
+        # counter rather than replicas_ready: readiness returns on its own
+        # after a crash, and this is specifically about a revision that cannot
+        # be delivered.
+        - alert: JdwillmsenMinecraftServerRolloutWedged
+          expr: kube_statefulset_status_replicas_updated{namespace="jdwillmsen-prd", statefulset="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"} < kube_statefulset_replicas{namespace="jdwillmsen-prd", statefulset="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}
+          for: 30m
+          labels:
+            severity: critical
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+          annotations:
+            summary: "Minecraft server StatefulSet cannot roll out its current revision"
+            description: >-
+              The StatefulSet has a revision its pod is not running, and has been unable to deliver it for thirty
+              minutes. This does not resolve on its own: a pod that has never gone Ready is never replaced, so the
+              running spec stays stuck even after a fix has merged and synced. Check why the current pod will not
+              start (kubectl describe pod -- a config error naming a missing Secret or ConfigMap will not show as a
+              restart), confirm the StatefulSet's spec is the one you want, then delete the pod so the controller can
+              recreate it on that spec. Expect the ArgoCD Application to be stuck in a Running sync until it is.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
         # The only rule here that watches the world rather than the server.

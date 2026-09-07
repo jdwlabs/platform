@@ -1,0 +1,110 @@
+# Unit tests for JdwillmsenMinecraftServerRolloutWedged.
+#
+# The rule exists because a StatefulSet never replaces a pod that has not
+# become Ready, so a revision the pod cannot start is never delivered and no
+# controller ever resolves it. The assertions that matter are therefore about
+# the boundary between that and an ordinary slow rollout: the server's startup
+# budget is ten minutes, and a rule that cannot sit through one is a rule that
+# will be silenced.
+rule_files:
+  - rules/jdwillmsen-tenant-alerts.yaml
+evaluation_interval: 1m
+tests:
+  # Steady state: the pod runs the revision the StatefulSet wants.
+  - interval: 1m
+    name: fully rolled out statefulset is silent
+    input_series:
+      - series: 'kube_statefulset_status_replicas_updated{namespace="jdwillmsen-prd",statefulset="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}'
+        values: '1+0x120'
+      - series: 'kube_statefulset_replicas{namespace="jdwillmsen-prd",statefulset="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}'
+        values: '1+0x120'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftServerRolloutWedged
+        exp_alerts: []
+
+  # An ordinary version bump. The pod is replaced and spends fifteen minutes
+  # not yet counted as updated -- longer than the server's own ten-minute
+  # startup budget -- then completes. Firing here would make the rule useless.
+  - interval: 1m
+    name: slow but progressing rollout is silent
+    input_series:
+      - series: 'kube_statefulset_status_replicas_updated{namespace="jdwillmsen-prd",statefulset="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}'
+        values: '0+0x15 1+0x105'
+      - series: 'kube_statefulset_replicas{namespace="jdwillmsen-prd",statefulset="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}'
+        values: '1+0x120'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftServerRolloutWedged
+        exp_alerts: []
+
+  # The 2026-09-06 shape: the StatefulSet moved to a new revision, the pod
+  # never started on it, and nothing changed for forty hours.
+  - interval: 1m
+    name: wedged rollout fires after thirty minutes and stays firing
+    input_series:
+      - series: 'kube_statefulset_status_replicas_updated{namespace="jdwillmsen-prd",statefulset="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}'
+        values: '0+0x600'
+      - series: 'kube_statefulset_replicas{namespace="jdwillmsen-prd",statefulset="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}'
+        values: '1+0x600'
+    alert_rule_test:
+      # Twenty-nine minutes in, the `for:` has not elapsed. This is the
+      # assertion that keeps a slow rollout from being paged on.
+      - eval_time: 29m
+        alertname: JdwillmsenMinecraftServerRolloutWedged
+        exp_alerts: []
+      - eval_time: 31m
+        alertname: JdwillmsenMinecraftServerRolloutWedged
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              statefulset: jdwillmsen-minecraft-fwb-prd-minecraft-bedrock
+            exp_annotations:
+              summary: "Minecraft server StatefulSet cannot roll out its current revision"
+              description: >-
+                The StatefulSet has a revision its pod is not running, and has been unable to deliver it for thirty
+                minutes. This does not resolve on its own: a pod that has never gone Ready is never replaced, so the
+                running spec stays stuck even after a fix has merged and synced. Check why the current pod will not
+                start (kubectl describe pod -- a config error naming a missing Secret or ConfigMap will not show as a
+                restart), confirm the StatefulSet's spec is the one you want, then delete the pod so the controller can
+                recreate it on that spec. Expect the ArgoCD Application to be stuck in a Running sync until it is.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      # Still firing hours later. The live incident ran forty.
+      - eval_time: 9h
+        alertname: JdwillmsenMinecraftServerRolloutWedged
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              statefulset: jdwillmsen-minecraft-fwb-prd-minecraft-bedrock
+            exp_annotations:
+              summary: "Minecraft server StatefulSet cannot roll out its current revision"
+              description: >-
+                The StatefulSet has a revision its pod is not running, and has been unable to deliver it for thirty
+                minutes. This does not resolve on its own: a pod that has never gone Ready is never replaced, so the
+                running spec stays stuck even after a fix has merged and synced. Check why the current pod will not
+                start (kubectl describe pod -- a config error naming a missing Secret or ConfigMap will not show as a
+                restart), confirm the StatefulSet's spec is the one you want, then delete the pod so the controller can
+                recreate it on that spec. Expect the ArgoCD Application to be stuck in a Running sync until it is.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # The first two hours of that incident, before the revert: the pod was on the
+  # revision the StatefulSet wanted and simply would not start. That is
+  # JdwillmsenMinecraftServerUnreachable's failure, not this one, and the two
+  # collapse into one noisy rule if this fires there too.
+  - interval: 1m
+    name: broken pod on the current revision belongs to the reachability rule
+    input_series:
+      - series: 'kube_statefulset_status_replicas_updated{namespace="jdwillmsen-prd",statefulset="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}'
+        values: '1+0x300'
+      - series: 'kube_statefulset_replicas{namespace="jdwillmsen-prd",statefulset="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}'
+        values: '1+0x300'
+      - series: 'kube_statefulset_status_replicas_ready{namespace="jdwillmsen-prd",statefulset="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}'
+        values: '0+0x300'
+    alert_rule_test:
+      - eval_time: 4h
+        alertname: JdwillmsenMinecraftServerRolloutWedged
+        exp_alerts: []
