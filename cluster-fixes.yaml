@@ -1,0 +1,98 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minecraft-fwb-console-bridge
+  namespace: jdwillmsen-prd
+type: Opaque
+data:
+  # Placeholder values – replace with actual credentials via your secrets management process
+  username: ""
+  password: ""
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: volumesnapshotclasses.snapshot.storage.k8s.io
+spec:
+  group: snapshot.storage.k8s.io
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                deletionPolicy:
+                  type: string
+                driver:
+                  type: string
+                parameters:
+                  type: object
+                  additionalProperties:
+                    type: string
+  scope: Namespaced
+  names:
+    plural: volumesnapshotclasses
+    singular: volumesnapshotclass
+    kind: VolumeSnapshotClass
+    shortNames:
+      - volsnapclass
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: volumesnapshotcontents.snapshot.storage.k8s.io
+spec:
+  group: snapshot.storage.k8s.io
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                deletionPolicy:
+                  type: string
+                source:
+                  type: object
+                  properties:
+                    volumeHandle:
+                      type: string
+                    snapshotHandle:
+                      type: string
+                volumeSnapshotRef:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+            status:
+              type: object
+              properties:
+                readyToUse:
+                  type: boolean
+                restoreSize:
+                  type: string
+                error:
+                  type: object
+                  properties:
+                    message:
+                      type: string
+                    time:
+                      type: string
+  scope: Cluster
+  names:
+    plural: volumesnapshotcontents
+    singular: volumesnapshotcontent
+    kind: VolumeSnapshotContent
+    shortNames:
+      - volsnapcontent
