@@ -104,3 +104,64 @@ data:
     FROM minecraft.sessions
     WHERE left_at IS NOT NULL
     GROUP BY xuid, gamertag, date_trunc('day', joined_at);
+
+  V2__fix_permissions.sql: |
+    -- Grant the runtime role access to what V1 created.
+    --
+    -- Flyway runs as postgres, so every object V1 created is owned by postgres
+    -- and reachable by nobody else. The workload connects as app, which held
+    -- USAGE on the schema and no privilege at all on any table in it. The
+    -- effect in production was that minecraft.players and minecraft.sessions
+    -- stayed empty while the agent reported itself healthy: the failure only
+    -- surfaced as a permission denied on startup orphan cleanup, and every
+    -- other write path either was not wired yet or logged and continued.
+    --
+    -- Ownership moves to postgres and stays there, matching what the migration
+    -- Job's own comment already describes: app is the runtime role and
+    -- deliberately cannot reshape its own schema.
+    --
+    -- Modelled on the equivalent migration in the dotablaze-tech and jdwlabs
+    -- tenants, with one deliberate difference: public is excluded. There it is
+    -- swept up by a loop over every non-system schema, which also rewrites
+    -- public's owner away from pg_database_owner. Nothing here needs that, and
+    -- it is a wider change than a permissions fix should make.
+    DO $$
+    DECLARE
+        s text;
+        r record;
+    BEGIN
+        FOR s IN
+            SELECT nspname FROM pg_namespace
+            WHERE nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'public')
+              AND nspname NOT LIKE 'pg_temp_%'
+              AND nspname NOT LIKE 'pg_toast_temp_%'
+        LOOP
+            EXECUTE format('ALTER SCHEMA %I OWNER TO postgres', s);
+            EXECUTE format('GRANT USAGE ON SCHEMA %I TO app', s);
+
+            FOR r IN
+                SELECT tablename FROM pg_tables
+                WHERE schemaname = s AND tablename <> 'flyway_schema_history'
+            LOOP
+                EXECUTE format('ALTER TABLE %I.%I OWNER TO postgres', s, r.tablename);
+            END LOOP;
+
+            -- Views carry their own ownership and are not covered by the table
+            -- loop above; the agent reads playtime through two of them.
+            FOR r IN SELECT viewname FROM pg_views WHERE schemaname = s LOOP
+                EXECUTE format('ALTER VIEW %I.%I OWNER TO postgres', s, r.viewname);
+            END LOOP;
+
+            FOR r IN SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = s LOOP
+                EXECUTE format('ALTER SEQUENCE %I.%I OWNER TO postgres', s, r.sequence_name);
+            END LOOP;
+
+            EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO app', s);
+            EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO app', s);
+
+            -- Without these, the next migration that adds a table reintroduces
+            -- exactly this bug and nothing notices until a write fails.
+            EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA %I GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app', s);
+            EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA %I GRANT USAGE, SELECT ON SEQUENCES TO app', s);
+        END LOOP;
+    END $$;
