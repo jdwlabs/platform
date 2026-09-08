@@ -24,7 +24,13 @@ spec:
           type: RuntimeDefault
       containers:
         - name: flyway
-          image: flyway/flyway:11.2
+          # Digest-pinned, unlike the jdwlabs jobs this is modelled on.
+          # Those are allowlisted in tools/image-pin-allowlist.yaml as
+          # pre-existing, with digest-pinning recorded as follow-up work --
+          # which is a reason for code that predates the check, not for code
+          # being written after it. Adding a new entry to that list would grow
+          # the debt it exists to track.
+          image: flyway/flyway:11.2@sha256:6b6ce825edb0e199c31864aff792961ab5b37345d5cb0f4ee62a2ee917d98336
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
