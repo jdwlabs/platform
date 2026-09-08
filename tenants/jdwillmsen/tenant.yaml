@@ -44,6 +44,22 @@ services:
   # backup's freshness signal exists at all, which by design cannot live in
   # the deployment repo: a rule shipped by the thing it watches disappears
   # with it.
+  # The Minecraft agent's tables, migrated by Flyway as a sync hook -- the
+  # same shape jdwlabs-schemas uses against the same cluster. Lands in the
+  # database namespace because that is where the cluster and its superuser
+  # secret live; the workload that reads these tables runs in jdwillmsen-prd
+  # with the app role instead, and cannot reshape its own schema.
+  - name: jdwillmsen-schemas
+    chart: ""
+    repo: ""
+    revision: ""
+    namespace: database
+    postInstall: false
+    rawManifests: true
+    # After the database exists (postgresql-cluster-prd) and before anything
+    # expects the tables.
+    syncWave: 5
+
   - name: jdwillmsen-alerts
     chart: ""
     repo: ""
