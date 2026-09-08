@@ -18,7 +18,7 @@ csiDriverName: csi.truenas.io
 # debugging trap, not a safety margin.
 image:
   repository: ghcr.io/truenas/truenas-csi
-  tag: "v1.2.0@sha256:ebb180986823a31110be926d8f14a6cc669540a6c58947220a16de802d852f38"
+  tag: "v1.3.0@sha256:51dba9c815c9508befeaafde4cc5d99b031b51e5c162e37a1b5675f86e4847ba"
   pullPolicy: IfNotPresent
 
 # Sidecar versions are upstream's own pairings for this driver release; digests
