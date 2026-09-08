@@ -92,6 +92,17 @@ databases:
       - name: auth
         owner: app
         ensure: present
+  - name: jdwillmsen_prd
+    ensure: present
+    owner: app
+    schemas:
+      # The Minecraft server agent's tables: player profiles, playtime and the
+      # state behind welcome variants. Its own schema rather than public, so a
+      # future second service in this tenant does not share a namespace with it
+      # -- the same reason jdwlabs_prd puts auth in one.
+      - name: minecraft
+        owner: app
+        ensure: present
   - name: dotablazetech_prd
     ensure: present
     owner: app
