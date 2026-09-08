@@ -22,7 +22,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: flyway
-          image: flyway/flyway:11.2
+          image: flyway/flyway:11.2@sha256:6b6ce825edb0e199c31864aff792961ab5b37345d5cb0f4ee62a2ee917d98336
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
