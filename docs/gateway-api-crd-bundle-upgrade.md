@@ -62,13 +62,16 @@ It is not cosmetic either. The skew has two measurable effects today
   `status` properties are `addresses`, `attachedListenerSets`, `conditions`,
   `listeners`).
 
-The deeper reason this drifted at all: there is no freshness check on the
-Gateway API half of this bundle. `tools/sync-monitoring-crds.py` ties the 3
-prometheus-operator CRDs in the same file to a pinned chart revision and CI
-enforces it (`.github/workflows/validate.yml`, `foundation-crds-freshness`).
-The 8 Gateway API CRDs have no equivalent, no pinned version anywhere in the
-repo, and no Renovate manager — so nothing moved them forward for five
-upstream minors. See [Follow-up](#follow-up-close-the-drift-gap).
+The deeper reason this drifted at all: for five upstream minors there was no
+freshness check on the Gateway API half of this bundle. `tools/sync-monitoring-crds.py`
+ties the 3 prometheus-operator CRDs in the same file to a pinned chart
+revision and CI enforces it (`.github/workflows/validate.yml`,
+`foundation-crds-freshness`); the 8 Gateway API CRDs had no equivalent, no
+pinned version anywhere in the repo, and no Renovate manager, so nothing moved
+them forward. That gap is now closed — see
+[Follow-up](#follow-up-close-the-drift-gap) — which is what makes this
+upgrade a version bump in `tools/gateway-api-crd-pin.yaml` rather than a
+hand-splice of a 17,000-line file.
 
 ## Live state (verified 2026-09-08)
 
@@ -291,16 +294,22 @@ prometheus-operator), 13 after (10 + 3).
 The merge is the deployment: `platform-crds` auto-syncs `main` with
 `selfHeal: true`, so merging the PR is what applies the CRDs.
 
-Regeneration, on the branch:
+Regeneration, on the branch. Set `version: v1.6.1` and `channel: standard` in
+`tools/gateway-api-crd-pin.yaml`, then:
 
 ```bash
-curl -fsSL -o /tmp/standard-v1.6.1.yaml \
-  https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.1/standard-install.yaml
-# Replace ONLY the Gateway API documents in foundation-crds.yaml (currently
-# lines 1-17122), preserving the 3 prometheus-operator CRDs that follow.
-# Do NOT include the ValidatingAdmissionPolicy / Binding from the release
-# file in this stage - they are Stage 4.
+python3 tools/sync-gateway-api-crds.py --write
 ```
+
+The tool replaces only the documents it pins and leaves the 3
+prometheus-operator CRDs that follow them alone. It ignores the
+`ValidatingAdmissionPolicy` and its binding, which is Stage 4's business.
+
+It will refuse to run until `listenersets` — which the v1.6.1 standard channel
+ships and the pin has never heard of — is classified, and `backendtlspolicies`
+has to be moved out of `notVendored` by hand to be picked up. Both refusals
+are the decision this stage is supposed to take deliberately; see
+[What this change enables as a side effect](#what-this-change-enables-as-a-side-effect).
 
 Pre-merge verification (read-only; `--dry-run=server` runs admission but
 persists nothing):
@@ -564,29 +573,37 @@ experimental or to a pre-v1.5.0 bundle without first deleting the policy.
 
 ## Follow-up: close the drift gap
 
-The Gateway API CRDs drifted five minors because nothing watches them. The
+The Gateway API CRDs drifted five minors because nothing watched them. The
 prometheus-operator CRDs in the *same file* do not drift, because
 `tools/sync-monitoring-crds.py` pins them to a chart revision and CI fails a
-PR that lets them age. Recommend the mirror image of that:
+PR that lets them age. The mirror image of that is now in place:
 
-- A `tools/sync-gateway-api-crds.py` that regenerates the Gateway API half of
-  `bootstrap/crds/foundation-crds.yaml` from a pinned upstream release +
-  channel, with the same `--write` / check-mode contract and the same exit
-  codes as the monitoring script.
-- A `foundation-crds-freshness` step (or a sibling job) in
-  `.github/workflows/validate.yml` running it in check mode.
-- A Renovate `customManager` on the pinned version, `datasourceTemplate:
-  github-releases`, `depName: kubernetes-sigs/gateway-api`, so the bump is
-  raised as a PR rather than noticed by a controller condition.
-- Optionally, a `platformctl cluster status` check asserting
-  `GatewayClass nginx` has `SupportedVersion=True` — the same shape as the
-  Longhorn engine-version check proposed in
-  `docs/longhorn-engine-upgrade.md`. This is the signal that would have
-  surfaced the drift years earlier than a chart bump did.
+- `tools/gateway-api-crd-pin.yaml` holds the version, the channel, and the
+  explicit list of which CRDs from that release are vendored. Unlike the
+  monitoring CRDs there is no chart to hang the version off, and a constant
+  buried in a script is not something Renovate can read, so the pin is its
+  own file.
+- `tools/sync-gateway-api-crds.py` compares each pinned document against the
+  release artifact byte-for-byte and regenerates it under `--write`, with the
+  same check-mode contract and exit codes as the monitoring script. It shares
+  the bundle file with that script by owning documents by CRD name rather
+  than by line range, so neither can walk over the other's half.
+- `.github/workflows/validate.yml` runs it in check mode as a second step of
+  the existing `foundation-crds-freshness` job — one file, one red check,
+  whichever half aged.
+- A Renovate `customManager` in `renovate.json` watches the pinned version
+  against `github-releases` for `kubernetes-sigs/gateway-api`, so the bump
+  arrives as a PR rather than as a controller condition nobody reads. It
+  bumps the version only; the regeneration is a human running `--write`, and
+  the failing freshness check in between is the handoff.
 
-The version pin has to live somewhere the tool and Renovate can both read.
-Unlike the monitoring CRDs there is no chart to hang it off, so it would be a
-constant in the script or a small `tools/`-side pin file.
+What is deliberately *not* built: the pin does not assert anything about what
+is installed in the cluster, only about what the repo vendors. A
+`platformctl cluster status` check asserting `GatewayClass nginx` has
+`SupportedVersion=True` — the same shape as the Longhorn engine-version check
+proposed in `docs/longhorn-engine-upgrade.md` — would close the other half,
+and is the signal that would have surfaced this drift years before a chart
+bump did.
 
 ## Out of scope
 
@@ -595,8 +612,9 @@ constant in the script or a small `tools/`-side pin file.
   different freshness tool, must survive the regeneration untouched.
 - Adopting any new Gateway API feature (ListenerSet, BackendTLSPolicy, CORS
   filter, retries). The CRDs arrive; nothing uses them.
-- Building the freshness tooling above — that is the follow-up, not this
-  change.
+- The freshness tooling described under [Follow-up](#follow-up-close-the-drift-gap).
+  It landed separately and pins the bundle at where it is today; this runbook
+  is what moves the pin.
 
 ## Unverified — confirm before relying on these
 
