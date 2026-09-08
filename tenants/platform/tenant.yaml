@@ -265,7 +265,7 @@ services:
   - name: grafana
     chart: grafana
     repo: https://grafana-community.github.io/helm-charts
-    revision: 13.0.1
+    revision: 13.2.1
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -286,7 +286,7 @@ services:
   - name: kube-prometheus-stack
     chart: kube-prometheus-stack
     repo: https://prometheus-community.github.io/helm-charts
-    revision: "88.6.1"
+    revision: "88.6.5"
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -294,7 +294,7 @@ services:
   - name: blackbox-exporter
     chart: prometheus-blackbox-exporter
     repo: https://prometheus-community.github.io/helm-charts
-    revision: "11.17.2"
+    revision: "11.18.0"
     namespace: monitoring
     postInstall: false
     syncWave: 2
