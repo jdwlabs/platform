@@ -14,7 +14,7 @@ sanctioned here because this is a human-run procedure; agents remain bound to
 ## What the GitOps change delivers, and where it stands
 
 - `helm-charts/truenas-csi/` — vendored chart wrapping upstream
-  `deploy/truenas-csi-driver.yaml` at v1.2.0 (see that chart's README for the
+  `deploy/truenas-csi-driver.yaml` at v1.3.0 (see that chart's README for the
   deliberate departures: digest pins, Talos iSCSI hostPath redirect, no
   Secret/Namespace, snapshotter off).
 - Platform tenant service `truenas-csi` (wave 1), namespace `truenas-csi`,
