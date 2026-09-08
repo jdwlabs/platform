@@ -13,13 +13,22 @@ spec:
   template:
     spec:
       restartPolicy: Never
-      # Capability and seccomp restrictions only, matching the jdwlabs job this
-      # is modelled on. The image declares no user and its JVM owns paths under
-      # /flyway, so pinning a uid or sealing the root filesystem risks a
-      # container that never starts -- and this is a sync hook against a
-      # production database, where that failure blocks the sync rather than
-      # degrading quietly.
+      # Fully hardened, unlike the jdwlabs job this is modelled on.
+      #
+      # That job restricts capabilities and seccomp only, on the stated grounds
+      # that the image declares no user and its JVM owns paths under /flyway,
+      # so a uid or a sealed root filesystem "risks a container that never
+      # starts". That was never tested. It was tested on 2026-09-08: this exact
+      # image ran as uid 10001 with a read-only root filesystem and a CPU
+      # limit, connected to jdwillmsen_prd and reported its schema state, given
+      # writable emptyDirs at /tmp and /flyway/conf.
+      #
+      # The uid is above 10000 because Trivy flags lower ones as colliding with
+      # host user ranges (KSV-0020/0021).
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -33,6 +42,7 @@ spec:
           image: flyway/flyway:11.2@sha256:6b6ce825edb0e199c31864aff792961ab5b37345d5cb0f4ee62a2ee917d98336
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           # Well above what one small migration needs, so the JVM is bounded
@@ -43,6 +53,11 @@ spec:
               cpu: 100m
               memory: 256Mi
             limits:
+              # Bounded, where the jdwlabs job leaves CPU unlimited. A
+              # migration that takes twice as long on a throttled core is a
+              # slower sync; a migration that can consume the node is a
+              # neighbour's outage.
+              cpu: "1"
               memory: 1Gi
           env:
             - name: FLYWAY_URL
@@ -70,10 +85,22 @@ spec:
             - "-locations=filesystem:/flyway/sql"
             - "repair"
             - "migrate"
+          # Flyway's JVM writes outside its read-only root, so those paths
+          # are the two emptyDirs below. Established by running the image
+          # this way rather than by reading its Dockerfile.
+          workingDir: /tmp
           volumeMounts:
             - mountPath: /flyway/sql
               name: migrations
+            - mountPath: /tmp
+              name: tmp
+            - mountPath: /flyway/conf
+              name: conf
       volumes:
         - name: migrations
           configMap:
             name: jdwillmsen-migrations
+        - name: tmp
+          emptyDir: {}
+        - name: conf
+          emptyDir: {}
