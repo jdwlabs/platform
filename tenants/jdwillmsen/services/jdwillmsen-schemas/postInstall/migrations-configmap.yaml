@@ -1,0 +1,106 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: jdwillmsen-migrations
+  namespace: database
+data:
+  V1__minecraft_init.sql: |
+    CREATE SCHEMA IF NOT EXISTS minecraft;
+
+    -- Identity is the XUID, never the gamertag.
+    --
+    -- Gamertags change, and on 2026-09-08 working out which Deployment was
+    -- which player took correlating pod spawn timestamps against server
+    -- connection lines, because nothing recorded the mapping. The XUID is the
+    -- stable handle the server itself uses; the gamertag is an attribute of it.
+    CREATE TABLE IF NOT EXISTS minecraft.players
+    (
+        xuid              TEXT        NOT NULL PRIMARY KEY,
+        current_gamertag  TEXT        NOT NULL,
+        first_seen_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_seen_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        -- Drives welcome variants together with last_seen_at: a first-ever
+        -- join and a return after a fortnight deserve different greetings, and
+        -- the two facts answer both questions without a second table.
+        join_count        INTEGER     NOT NULL DEFAULT 0,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- Every gamertag a player has ever appeared under.
+    --
+    -- Kept because a rename otherwise silently rewrites history: without this,
+    -- a player who changes gamertag looks like a stranger in old sessions, and
+    -- there is no way back to who they were.
+    CREATE TABLE IF NOT EXISTS minecraft.player_names
+    (
+        xuid           TEXT        NOT NULL REFERENCES minecraft.players (xuid) ON DELETE CASCADE,
+        gamertag       TEXT        NOT NULL,
+        first_seen_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_seen_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (xuid, gamertag)
+    );
+
+    -- Raw join/leave pairs rather than a running total.
+    --
+    -- A counter is smaller and answers exactly one question forever. Session
+    -- rows answer questions not yet asked -- when someone plays, how long a
+    -- typical visit runs, who was on during an incident -- and a total is a
+    -- SUM away. The playtime views below are that SUM.
+    CREATE TABLE IF NOT EXISTS minecraft.sessions
+    (
+        session_id        BIGINT      NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        xuid              TEXT        NOT NULL REFERENCES minecraft.players (xuid) ON DELETE CASCADE,
+        -- Denormalised on purpose: this is who they were *at the time*, which
+        -- players.current_gamertag stops being the moment they rename.
+        gamertag          TEXT        NOT NULL,
+        joined_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+        left_at           TIMESTAMPTZ,
+        -- 'open' is the live state. 'unknown' is the honest one: the agent
+        -- observes leaves by being connected, so a server restart, an agent
+        -- restart or a crash ends sessions it never sees end. Recording that
+        -- as its own reason keeps those rows from being mistaken for real
+        -- departures, and keeps their durations out of any average that cares.
+        ended_reason      TEXT        NOT NULL DEFAULT 'open'
+            CHECK (ended_reason IN ('open', 'left', 'agent_restart', 'unknown')),
+        duration_seconds  INTEGER     GENERATED ALWAYS AS
+            (EXTRACT(EPOCH FROM (left_at - joined_at))::INTEGER) STORED
+    );
+
+    CREATE INDEX IF NOT EXISTS sessions_xuid_joined_idx
+        ON minecraft.sessions (xuid, joined_at DESC);
+    CREATE INDEX IF NOT EXISTS sessions_joined_idx
+        ON minecraft.sessions (joined_at DESC);
+    -- Partial: the agent reopens or closes these on startup, and there is
+    -- normally a handful at most, so scanning the whole table for them would
+    -- get slower every day for no reason.
+    CREATE INDEX IF NOT EXISTS sessions_open_idx
+        ON minecraft.sessions (xuid) WHERE ended_reason = 'open';
+
+    -- Totals are a view, not a column: a stored counter and the rows it
+    -- summarises drift the first time a session is corrected, and then neither
+    -- can be trusted.
+    CREATE OR REPLACE VIEW minecraft.player_playtime AS
+    SELECT p.xuid,
+           p.current_gamertag,
+           p.join_count,
+           p.first_seen_at,
+           p.last_seen_at,
+           COALESCE(SUM(s.duration_seconds), 0)::BIGINT AS total_seconds,
+           COUNT(s.session_id) FILTER (WHERE s.left_at IS NOT NULL) AS completed_sessions,
+           -- Surfaced rather than hidden: a player whose sessions are mostly
+           -- 'unknown' has playtime that is a lower bound, not a measurement.
+           COUNT(s.session_id) FILTER (WHERE s.ended_reason = 'unknown') AS unclean_sessions
+    FROM minecraft.players p
+             LEFT JOIN minecraft.sessions s ON s.xuid = p.xuid
+    GROUP BY p.xuid, p.current_gamertag, p.join_count, p.first_seen_at, p.last_seen_at;
+
+    CREATE OR REPLACE VIEW minecraft.player_playtime_daily AS
+    SELECT xuid,
+           gamertag,
+           date_trunc('day', joined_at) AS day,
+           COALESCE(SUM(duration_seconds), 0)::BIGINT AS total_seconds,
+           COUNT(*) AS sessions
+    FROM minecraft.sessions
+    WHERE left_at IS NOT NULL
+    GROUP BY xuid, gamertag, date_trunc('day', joined_at);
