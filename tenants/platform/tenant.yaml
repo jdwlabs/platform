@@ -163,7 +163,7 @@ services:
   - name: nginx-gateway-fabric
     chart: nginx-gateway-fabric
     repo: ghcr.io/nginx/charts
-    revision: 2.6.7
+    revision: 2.7.0
     namespace: nginx-gateway
     postInstall: true
     syncWave: 1
