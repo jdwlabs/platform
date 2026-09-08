@@ -1,0 +1,73 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: flyway-jdwillmsen-prd-v1
+  namespace: database
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      # Capability and seccomp restrictions only, matching the jdwlabs job this
+      # is modelled on. The image declares no user and its JVM owns paths under
+      # /flyway, so pinning a uid or sealing the root filesystem risks a
+      # container that never starts -- and this is a sync hook against a
+      # production database, where that failure blocks the sync rather than
+      # degrading quietly.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: flyway
+          image: flyway/flyway:11.2
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # Well above what one small migration needs, so the JVM is bounded
+          # without risking an OOM kill mid-migration: a killed container
+          # leaves the schema half-applied and blocks the sync.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          env:
+            - name: FLYWAY_URL
+              value: "jdbc:postgresql://platform-postgresql-cluster-prd-rw.database.svc:5432/jdwillmsen_prd"
+            # The superuser, as the jdwlabs migrations do. Migrations create
+            # schemas and objects the app role does not own; the app role is
+            # what the workload connects with, and it deliberately cannot
+            # reshape its own schema.
+            - name: FLYWAY_USER
+              value: postgres
+            - name: FLYWAY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: password
+                  name: platform-postgresql-cluster-prd-superuser
+            - name: FLYWAY_BASELINE_ON_MIGRATE
+              value: "true"
+            - name: FLYWAY_BASELINE_VERSION
+              value: "0"
+            - name: FLYWAY_DEFAULT_SCHEMA
+              value: public
+            - name: FLYWAY_SCHEMAS
+              value: public,minecraft
+          args:
+            - "-locations=filesystem:/flyway/sql"
+            - "repair"
+            - "migrate"
+          volumeMounts:
+            - mountPath: /flyway/sql
+              name: migrations
+      volumes:
+        - name: migrations
+          configMap:
+            name: jdwillmsen-migrations
