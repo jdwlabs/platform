@@ -2,7 +2,7 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
     "Renovate is the single owner of dependency updates for this repo; keep repository-level (UI) Dependabot disabled.",
-    "Covers: Go modules (cli/), Helm chart dependencies (helm-charts/*/Chart.yaml), GitHub Actions pins, and chart revision pins in tenants/*/tenant.yaml via the custom regex managers below.",
+    "Covers: Go modules (cli/), Helm chart dependencies (helm-charts/*/Chart.yaml), GitHub Actions pins, and chart revision pins in tenants/*/tenant.yaml and tools/gateway-api-crd-pin.yaml via the custom regex managers below.",
     "Tenant service entries with chart: \"\" (git-sourced or vendored via chartPath) are intentionally not matched — only registry-backed chart pins are updated."
   ],
   "extends": ["github>jdwlabs/.github"],
@@ -27,6 +27,16 @@
       "datasourceTemplate": "docker",
       "depNameTemplate": "{{{chartName}}}",
       "packageNameTemplate": "{{{ociRepo}}}/{{{chartName}}}"
+    },
+    {
+      "customType": "regex",
+      "description": "Gateway API CRD bundle vendored into bootstrap/crds/foundation-crds.yaml. Renovate raises the version; it cannot regenerate 17k lines of CRD from a hosted run, so its PR fails foundation-crds-freshness until someone runs 'python3 tools/sync-gateway-api-crds.py --write'. That red check is the handoff, not a bug — do not resolve it by reverting the bump. The channel is a deliberate choice and is never updated automatically.",
+      "managerFilePatterns": ["/^tools/gateway-api-crd-pin\\.ya?ml$/"],
+      "matchStrings": [
+        "version: (?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "kubernetes-sigs/gateway-api",
+      "datasourceTemplate": "github-releases"
     }
   ]
 }
