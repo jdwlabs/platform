@@ -164,34 +164,6 @@ exceptions:
       never been digest-pinned. Recorded here rather than fixed as part of
       introducing the check; digest-pinning this reference is follow-up work.
 
-  - path: tenants/dotablaze-tech/services/dotablaze-tech-schemas/postInstall/flyway-migrate-non.yaml
-    ref: flyway/flyway:11.2
-    reason: >-
-      pre-existing: flyway migration Job image predates this check and has
-      never been digest-pinned. Recorded here rather than fixed as part of
-      introducing the check; digest-pinning this reference is follow-up work.
-
-  - path: tenants/dotablaze-tech/services/dotablaze-tech-schemas/postInstall/flyway-migrate-prd.yaml
-    ref: flyway/flyway:11.2
-    reason: >-
-      pre-existing: flyway migration Job image predates this check and has
-      never been digest-pinned. Recorded here rather than fixed as part of
-      introducing the check; digest-pinning this reference is follow-up work.
-
-  - path: tenants/jdwlabs/services/jdwlabs-schemas/postInstall/flyway-migrate-non.yaml
-    ref: flyway/flyway:11.2
-    reason: >-
-      pre-existing: flyway migration Job image predates this check and has
-      never been digest-pinned. Recorded here rather than fixed as part of
-      introducing the check; digest-pinning this reference is follow-up work.
-
-  - path: tenants/jdwlabs/services/jdwlabs-schemas/postInstall/flyway-migrate-prd.yaml
-    ref: flyway/flyway:11.2
-    reason: >-
-      pre-existing: flyway migration Job image predates this check and has
-      never been digest-pinned. Recorded here rather than fixed as part of
-      introducing the check; digest-pinning this reference is follow-up work.
-
   - path: tenants/platform/services/litellm-redis/postInstall/redis.yaml
     ref: redis:7.4-alpine
     reason: >-
