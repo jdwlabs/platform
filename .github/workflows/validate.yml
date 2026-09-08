@@ -163,6 +163,10 @@ jobs:
       - name: Check the rendered config and resolve the routing matrix
         run: tests/alertmanager-routing/run.sh
 
+  # Both halves of bootstrap/crds/foundation-crds.yaml, in one job because they
+  # are one file and a reviewer chasing a red check should not have to work out
+  # which half aged. The two tools own disjoint documents, selected by CRD name,
+  # so their order here carries no meaning.
   foundation-crds-freshness:
     runs-on: ubuntu-latest
     steps:
@@ -176,6 +180,8 @@ jobs:
         run: pip install -r tools/requirements.txt
       - name: Check vendored monitoring CRDs match the pinned chart revision
         run: python3 tools/sync-monitoring-crds.py
+      - name: Check vendored Gateway API CRDs match the pinned bundle version
+        run: python3 tools/sync-gateway-api-crds.py
 
   image-pin-check:
     runs-on: ubuntu-latest
