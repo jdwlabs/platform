@@ -193,7 +193,7 @@ Each tenant (jdwlabs, dotablaze-tech) has:
 
 | Wave | Services |
 |------|----------|
-| -1   | CRDs (Gateway API, Prometheus, Cert-Manager) |
+| -1   | CRDs (Gateway API — version and channel pinned in `tools/gateway-api-crd-pin.yaml`, Prometheus, Cert-Manager) |
 | 0    | Bootstrap (AppProjects, ArgoCD self-management) |
 | 1    | cert-manager, porkbun-webhook, kubelet-serving-cert-approver, nginx-gateway-fabric, Longhorn, local-path-provisioner, democratic-csi |
 | 2    | Vault, ESO, vault-config-operator, metrics-server, monitoring, Grafana, Loki, kube-prometheus-stack, Tempo, Headlamp |
