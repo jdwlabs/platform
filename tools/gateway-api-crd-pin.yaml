@@ -1,0 +1,36 @@
+# Pin for the Gateway API half of bootstrap/crds/foundation-crds.yaml. Read by
+# tools/sync-gateway-api-crds.py, which fails CI when the vendored documents
+# stop matching the release artifact named here, and bumped by the
+# gateway-api custom manager in renovate.json.
+#
+# The bundle file is shared with tools/sync-monitoring-crds.py, which owns the
+# 3 prometheus-operator CRDs at its tail. Ownership is by CRD name, never by
+# position, so each tool rewrites only the documents it lists here and leaves
+# every other byte of the file alone.
+version: v1.1.0
+channel: experimental
+
+# Applied at sync-wave -1 by the platform-crds Application, which prunes:
+# deleting a name from this list deletes every object of that kind from the
+# cluster on the next sync. The list only ever grows.
+vendored:
+  - gatewayclasses.gateway.networking.k8s.io
+  - gateways.gateway.networking.k8s.io
+  - httproutes.gateway.networking.k8s.io
+  - referencegrants.gateway.networking.k8s.io
+  - grpcroutes.gateway.networking.k8s.io
+  - tlsroutes.gateway.networking.k8s.io
+  - tcproutes.gateway.networking.k8s.io
+  - udproutes.gateway.networking.k8s.io
+
+# Shipped by the pinned channel and deliberately left out. A CRD the release
+# ships that appears in neither list fails the check, so a version bump has to
+# take a decision on every new kind instead of silently skipping it.
+notVendored:
+  backendlbpolicies.gateway.networking.k8s.io: >-
+    No consumer in this cluster, and removed from upstream bundles in v1.3.0 —
+    vendoring it would only create an object for prune to reclaim later.
+  backendtlspolicies.gateway.networking.k8s.io: >-
+    No consumer in this cluster. NGINX Gateway Fabric disables its
+    BackendTLSPolicy controller at startup as a result; adopting the kind is a
+    decision for the bundle upgrade, not a side effect of this pin.
