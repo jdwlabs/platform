@@ -203,3 +203,97 @@ data:
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         PRIMARY KEY (xuid, name)
     );
+
+  V4__minecraft_announcements.sql: |
+    -- Things the server wants said, and who has already heard them.
+    --
+    -- An outbox rather than a chat call: four different sources will want to
+    -- announce, and every question about who sees a message, when, and
+    -- whether it is still worth saying should be answered once rather than
+    -- once per source.
+    CREATE TABLE IF NOT EXISTS minecraft.announcements
+    (
+        announcement_id BIGINT      NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        body            TEXT        NOT NULL,
+        source          TEXT        NOT NULL
+            CHECK (source IN ('command', 'schedule', 'event', 'api')),
+        -- SET NULL, not CASCADE: deleting a player must not delete the
+        -- announcements the server made. Null for everything the server said
+        -- on its own initiative.
+        author_xuid     TEXT        REFERENCES minecraft.players (xuid) ON DELETE SET NULL,
+        target_kind     TEXT        NOT NULL
+            CHECK (target_kind IN ('everyone', 'player', 'permission', 'online_only')),
+        -- The XUID for 'player', the level for 'permission', null otherwise.
+        -- One nullable column rather than three: no target kind needs two.
+        target_value    TEXT,
+        priority        TEXT        NOT NULL DEFAULT 'normal'
+            CHECK (priority IN ('normal', 'expedited')),
+        -- Derived from target_kind on write rather than chosen freely: a
+        -- 'player' announcement that broadcast would leak exactly what
+        -- whispering a waypoint protects.
+        delivery        TEXT        NOT NULL
+            CHECK (delivery IN ('broadcast', 'whisper')),
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        deliver_after   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        -- The column that makes this a queue rather than a nag. A restart
+        -- warning delivered three days late is noise; a farm relocation is
+        -- still true. Null means it never expires.
+        expires_at      TIMESTAMPTZ
+    );
+
+    -- Serves the pending-delivery scan: target_kind and target_value are
+    -- matched by equality (a specific player's XUID or a permission level),
+    -- deliver_after is the range bound, so the equality columns lead and the
+    -- range column trails. 'online_only' rows are excluded because they are
+    -- delivered on join rather than pulled from this queue.
+    --
+    -- expires_at cannot join the predicate: now() is not IMMUTABLE, and
+    -- Postgres rejects it in a partial index. The anti-join against
+    -- announcement_deliveries needs nothing here either -- that table's own
+    -- primary key (announcement_id, xuid) already serves it.
+    --
+    -- This table stays small in practice; the index is as much about not
+    -- misleading a future reader into thinking deliver_after alone is
+    -- selective as it is about speed.
+    CREATE INDEX IF NOT EXISTS announcements_pending_idx
+        ON minecraft.announcements (target_kind, target_value, deliver_after)
+        WHERE target_kind <> 'online_only';
+
+    -- One row per person who actually received it: the idempotency key and
+    -- the audit record at once. Written even for a broadcast, because
+    -- otherwise a player who was present when it went out would receive it
+    -- again on their next join.
+    --
+    -- CASCADE here, unlike announcements above: a delivery record is
+    -- personal data about that player and goes with them.
+    CREATE TABLE IF NOT EXISTS minecraft.announcement_deliveries
+    (
+        announcement_id BIGINT      NOT NULL REFERENCES minecraft.announcements (announcement_id) ON DELETE CASCADE,
+        xuid            TEXT        NOT NULL REFERENCES minecraft.players (xuid) ON DELETE CASCADE,
+        delivered_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (announcement_id, xuid)
+    );
+
+    -- Every command dispatch, whatever the outcome.
+    --
+    -- xuid is deliberately not a foreign key, unlike everywhere else in this
+    -- schema: an audit row must outlive the player it describes, which is the
+    -- opposite of what waypoints need.
+    CREATE TABLE IF NOT EXISTS minecraft.command_audit
+    (
+        audit_id     BIGINT      NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        xuid         TEXT        NOT NULL,
+        gamertag     TEXT        NOT NULL,
+        -- The level resolved at the time, not the actor's level now.
+        -- Permissions change; what they were allowed to do when they ran it
+        -- is the auditable fact.
+        permission   TEXT        NOT NULL,
+        command      TEXT        NOT NULL,
+        args         TEXT        NOT NULL,
+        outcome      TEXT        NOT NULL
+            CHECK (outcome IN ('ok', 'denied', 'unknown', 'error', 'rate_limited', 'timeout')),
+        occurred_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS command_audit_xuid_idx ON minecraft.command_audit (xuid, occurred_at DESC);
+    CREATE INDEX IF NOT EXISTS command_audit_time_idx ON minecraft.command_audit (occurred_at DESC);
