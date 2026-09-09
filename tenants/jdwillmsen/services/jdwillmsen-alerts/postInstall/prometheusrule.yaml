@@ -605,6 +605,73 @@ spec:
               rule quiet. Check both bot pods and their logs in jdwillmsen-prd.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
+        # jdwillmsen-minecraft-fwb-prd-server-agent has published mc_agent_connected
+        # since its first release and nothing has ever read it. Its Xbox Live
+        # session dropped on 2026-09-08 and it could not log back in for forty
+        # minutes; nothing paged, and the only reason anyone knew was a player
+        # standing in the world who saw it leave.
+        #
+        # The agent already retries a dropped session on its own, and does so
+        # fast — an ordinary server restart or a protocol bump recovers inside a
+        # couple of minutes without anyone noticing, which is why this cannot be
+        # a short window. Ten minutes down is past that: it is no longer the
+        # agent recovering, it is the retry loop itself failing over and over.
+        # The cause worth naming outright is Xbox Live parking the account in an
+        # abuse-mode hold after enough rapid attempts — that is not something
+        # the agent's own retry loop can clear, and describing this as a client
+        # bug sends whoever is paged looking in the wrong place. Only a human
+        # signing into that Microsoft account in a browser and clearing the
+        # security challenge fixes it; once that happens the agent's existing
+        # retry loop does the rest unattended.
+        - alert: JdwillmsenMinecraftAgentDisconnected
+          expr: mc_agent_connected{namespace="jdwillmsen-prd"} == 0
+          for: 10m
+          labels:
+            severity: critical
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+          annotations:
+            summary: "Minecraft chat agent has lost its Bedrock session"
+            description: >-
+              mc_agent_connected has read 0 in jdwillmsen-prd for ten minutes straight. The agent reconnects on its
+              own inside a couple of minutes for an ordinary server restart or protocol bump, so ten minutes down
+              means its own retry loop has been failing the whole time, not merely retrying. The known cause is Xbox
+              Live placing the account in an abuse-mode hold after repeated login attempts, which the agent cannot
+              clear itself: sign into the Microsoft account behind jdwillmsen-minecraft-fwb-prd-server-agent in a
+              browser and complete the security challenge, and the agent's existing retry loop will log it back in
+              without anything further.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # The rule above can only fire while something is publishing the series
+        # it reads. Same reasoning as JdwillmsenMinecraftServerHealthSignalAbsent:
+        # a workload that vanished outright — a crashlooping pod, a deleted
+        # Deployment, a ServiceMonitor that stopped matching — produces no series
+        # at all, and `== 0` is blind to that; it has nothing to compare. This is
+        # the gap a human noticing the agent was gone would otherwise be the only
+        # thing to catch, same as the incident above.
+        #
+        # 15m, not the disconnected rule's 10m: this reads a scrape gap rather
+        # than a session, so it needs margin past an ordinary redeploy of the
+        # single agent pod. The Deployment's strategy is Recreate, so the old
+        # pod always terminates before the new one starts, and this must not
+        # mistake that brief, expected gap for the workload being gone.
+        - alert: JdwillmsenMinecraftAgentConnectionSignalAbsent
+          expr: absent(mc_agent_connected{namespace="jdwillmsen-prd"})
+          for: 15m
+          labels:
+            severity: critical
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+          annotations:
+            summary: "No connection signal exists for the Minecraft chat agent"
+            description: >-
+              mc_agent_connected has not been scraped from jdwillmsen-prd for fifteen minutes. The agent may be
+              connected fine, but nothing can now tell you if it is not — JdwillmsenMinecraftAgentDisconnected reads
+              this series and is silent while it is missing. Check the jdwillmsen-minecraft-fwb-prd-server-agent
+              Deployment, its pod, and its ServiceMonitor in jdwillmsen-prd. If the agent is being retired
+              deliberately, delete these rules in the same change.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
         # The world only grows, and a full datadir kills the server harder
         # than any crash — writes fail, the ext4 read-only latch follows, and
         # recovery needs human volume surgery rather than the volume-recovery
