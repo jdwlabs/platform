@@ -607,9 +607,9 @@ spec:
 
         # jdwillmsen-minecraft-fwb-prd-server-agent has published mc_agent_connected
         # since its first release and nothing has ever read it. Its Xbox Live
-        # session dropped on 2026-09-08 and it could not log back in for forty
-        # minutes; nothing paged, and the only reason anyone knew was a player
-        # standing in the world who saw it leave.
+        # session dropped at 2026-09-09 02:48:09Z and it could not log back in
+        # until 03:27:53Z — thirty-nine minutes; nothing paged, and the only
+        # reason anyone knew was a player standing in the world who saw it leave.
         #
         # The agent already retries a dropped session on its own, and does so
         # fast — an ordinary server restart or a protocol bump recovers inside a
@@ -617,12 +617,14 @@ spec:
         # a short window. Ten minutes down is past that: it is no longer the
         # agent recovering, it is the retry loop itself failing over and over.
         # The cause worth naming outright is Xbox Live parking the account in an
-        # abuse-mode hold after enough rapid attempts — that is not something
-        # the agent's own retry loop can clear, and describing this as a client
-        # bug sends whoever is paged looking in the wrong place. Only a human
-        # signing into that Microsoft account in a browser and clearing the
-        # security challenge fixes it; once that happens the agent's existing
-        # retry loop does the rest unattended.
+        # abuse-mode hold: what is confirmed is that the account was flagged
+        # after a dozen headless logins over the preceding afternoon, not that
+        # attempt volume is what tripped it — either way, clearing the hold is
+        # not something the agent's own retry loop can do, and describing this
+        # as a client bug sends whoever is paged looking in the wrong place.
+        # Only a human signing into that Microsoft account in a browser and
+        # clearing the security challenge fixes it; once that happens the
+        # agent's existing retry loop does the rest unattended.
         - alert: JdwillmsenMinecraftAgentDisconnected
           expr: mc_agent_connected{namespace="jdwillmsen-prd"} == 0
           for: 10m
