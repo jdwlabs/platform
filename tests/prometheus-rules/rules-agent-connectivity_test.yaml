@@ -1,0 +1,135 @@
+# Unit tests for JdwillmsenMinecraftAgentDisconnected and its absent()
+# companion JdwillmsenMinecraftAgentConnectionSignalAbsent.
+#
+# mc_agent_connected has existed since the chat agent's first release and
+# nothing alerted on it until a real session outage went unwatched for forty
+# minutes and was only noticed by a player in the world. The central
+# assertion below is not "does it fire" alone, but "does it fire only on a
+# session that stays down" — the agent's own retry loop clears an ordinary
+# server restart or protocol bump in well under ten minutes on its own, and a
+# rule that cannot sit through one of those is a rule that pages on nothing.
+#
+# Rule files are extracted from the PrometheusRule manifests under tenants/ by
+# run.sh, since promtool reads bare rule groups and not the CRD wrapper.
+rule_files:
+  - rules/jdwillmsen-tenant-alerts.yaml
+evaluation_interval: 1m
+tests:
+  # Connected for an hour, then down and staying down. Past the rule's own
+  # ten-minute `for:` this is exactly the shape of the incident that prompted
+  # the rule: a retry loop that is not succeeding, not one still working.
+  - interval: 1m
+    name: agent down past the retry-loop window pages critical
+    input_series:
+      - series: 'mc_agent_connected{namespace="jdwillmsen-prd",service="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '1+0x60 0+0x600'
+    alert_rule_test:
+      # Five minutes into the drop — under the ten-minute `for:`, and also
+      # under the couple of minutes the agent's own retry loop normally takes.
+      # This is the boundary that keeps an ordinary reconnect from paging.
+      - eval_time: 65m
+        alertname: JdwillmsenMinecraftAgentDisconnected
+        exp_alerts: []
+      # Eleven minutes down: past `for: 10m`, so the retry loop itself is now
+      # the thing that is broken.
+      - eval_time: 71m
+        alertname: JdwillmsenMinecraftAgentDisconnected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              job: jdwillmsen-minecraft-fwb-prd-server-agent-metrics
+              service: jdwillmsen-minecraft-fwb-prd-server-agent-metrics
+              pod: jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde
+            exp_annotations:
+              summary: "Minecraft chat agent has lost its Bedrock session"
+              description: >-
+                mc_agent_connected has read 0 in jdwillmsen-prd for ten minutes straight. The agent reconnects on its
+                own inside a couple of minutes for an ordinary server restart or protocol bump, so ten minutes down
+                means its own retry loop has been failing the whole time, not merely retrying. The known cause is Xbox
+                Live placing the account in an abuse-mode hold after repeated login attempts, which the agent cannot
+                clear itself: sign into the Microsoft account behind jdwillmsen-minecraft-fwb-prd-server-agent in a
+                browser and complete the security challenge, and the agent's existing retry loop will log it back in
+                without anything further.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      # Still firing hours later — the live incident this rule exists for ran
+      # forty minutes with nobody paged at all.
+      - eval_time: 3h
+        alertname: JdwillmsenMinecraftAgentDisconnected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              job: jdwillmsen-minecraft-fwb-prd-server-agent-metrics
+              service: jdwillmsen-minecraft-fwb-prd-server-agent-metrics
+              pod: jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde
+            exp_annotations:
+              summary: "Minecraft chat agent has lost its Bedrock session"
+              description: >-
+                mc_agent_connected has read 0 in jdwillmsen-prd for ten minutes straight. The agent reconnects on its
+                own inside a couple of minutes for an ordinary server restart or protocol bump, so ten minutes down
+                means its own retry loop has been failing the whole time, not merely retrying. The known cause is Xbox
+                Live placing the account in an abuse-mode hold after repeated login attempts, which the agent cannot
+                clear itself: sign into the Microsoft account behind jdwillmsen-minecraft-fwb-prd-server-agent in a
+                browser and complete the security challenge, and the agent's existing retry loop will log it back in
+                without anything further.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # The ordinary case this rule must stay quiet for: a five-minute drop — the
+  # shape of a server restart or a protocol bump — that clears on its own well
+  # before the ten-minute `for:` is ever satisfied. Firing here would make the
+  # rule indistinguishable from routine churn, which is the whole reason it
+  # is not a shorter window.
+  - interval: 1m
+    name: a short disconnect that recovers on its own never pages
+    input_series:
+      - series: 'mc_agent_connected{namespace="jdwillmsen-prd",service="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '1+0x60 0+0x5 1+0x600'
+    alert_rule_test:
+      # Three minutes into the blip.
+      - eval_time: 64m
+        alertname: JdwillmsenMinecraftAgentDisconnected
+        exp_alerts: []
+      # Long after it reconnected on its own — the `for:` window was never
+      # satisfied, so there is nothing left to resolve either.
+      - eval_time: 90m
+        alertname: JdwillmsenMinecraftAgentDisconnected
+        exp_alerts: []
+
+  # The gap `== 0` cannot see: the agent Deployment vanishes outright (deleted,
+  # crashlooping, or a ServiceMonitor that stopped matching) rather than
+  # reporting a stuck zero, so JdwillmsenMinecraftAgentDisconnected has no
+  # series to read and stays silent — the exact blind spot that left the
+  # actual outage undetected until a human noticed. Only the absent()
+  # companion can see this.
+  - interval: 1m
+    name: workload vanishing entirely pages the absent rule, not the disconnected one
+    input_series:
+      - series: 'mc_agent_connected{namespace="jdwillmsen-prd",service="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '1+0x30'
+    alert_rule_test:
+      # Well past the last sample, the staleness window, and the rule's own
+      # 15m `for:`.
+      - eval_time: 3h
+        alertname: JdwillmsenMinecraftAgentConnectionSignalAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+            exp_annotations:
+              summary: "No connection signal exists for the Minecraft chat agent"
+              description: >-
+                mc_agent_connected has not been scraped from jdwillmsen-prd for fifteen minutes. The agent may be
+                connected fine, but nothing can now tell you if it is not — JdwillmsenMinecraftAgentDisconnected reads
+                this series and is silent while it is missing. Check the jdwillmsen-minecraft-fwb-prd-server-agent
+                Deployment, its pod, and its ServiceMonitor in jdwillmsen-prd. If the agent is being retired
+                deliberately, delete these rules in the same change.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      # The point of pairing the two rules: `== 0` has nothing to read once
+      # the series is gone, so it cannot see this failure mode at all.
+      - eval_time: 3h
+        alertname: JdwillmsenMinecraftAgentDisconnected
+        exp_alerts: []
