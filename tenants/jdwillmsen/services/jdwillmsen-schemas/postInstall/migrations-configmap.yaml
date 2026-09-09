@@ -165,3 +165,41 @@ data:
             EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA %I GRANT USAGE, SELECT ON SEQUENCES TO app', s);
         END LOOP;
     END $$;
+
+  V3__minecraft_knowledge.sql: |
+    -- Curated server facts the @server answer path reads.
+    --
+    -- Operator-written on purpose: everything knowledge_lookup returns is
+    -- quoted to players as the server's own word, so the write side is gated
+    -- on the same permissions.json the ! commands already resolve against.
+    CREATE TABLE IF NOT EXISTS minecraft.knowledge
+    (
+        topic       TEXT        NOT NULL PRIMARY KEY,
+        body        TEXT        NOT NULL,
+        -- SET NULL, not CASCADE: deleting a player must not delete the server
+        -- rules they happened to write.
+        author_xuid TEXT        REFERENCES minecraft.players (xuid) ON DELETE SET NULL,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        search      TSVECTOR    GENERATED ALWAYS AS
+            (to_tsvector('english', topic || ' ' || body)) STORED
+    );
+
+    CREATE INDEX IF NOT EXISTS knowledge_search_idx
+        ON minecraft.knowledge USING GIN (search);
+
+    -- Personal named coordinates. CASCADE here, unlike knowledge above: these
+    -- are the player's own data and go with them.
+    CREATE TABLE IF NOT EXISTS minecraft.waypoints
+    (
+        xuid       TEXT        NOT NULL REFERENCES minecraft.players (xuid) ON DELETE CASCADE,
+        name       TEXT        NOT NULL,
+        x          INTEGER     NOT NULL,
+        y          INTEGER     NOT NULL,
+        z          INTEGER     NOT NULL,
+        dimension  TEXT        NOT NULL DEFAULT 'overworld'
+            CHECK (dimension IN ('overworld', 'nether', 'end')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (xuid, name)
+    );
