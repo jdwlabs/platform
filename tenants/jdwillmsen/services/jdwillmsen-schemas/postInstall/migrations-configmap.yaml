@@ -297,3 +297,68 @@ data:
 
     CREATE INDEX IF NOT EXISTS command_audit_xuid_idx ON minecraft.command_audit (xuid, occurred_at DESC);
     CREATE INDEX IF NOT EXISTS command_audit_time_idx ON minecraft.command_audit (occurred_at DESC);
+
+  V5__minecraft_announcement_schedules.sql: |
+    -- Recurring announcements. A schedule is not itself something anyone
+    -- hears: each time it comes due, the agent writes one ordinary row to
+    -- minecraft.announcements, so delivery, expiry and the delivery record
+    -- stay the outbox's job and are not reimplemented for a second source.
+    CREATE TABLE IF NOT EXISTS minecraft.announcement_schedules
+    (
+        schedule_id   BIGINT      NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        body          TEXT        NOT NULL,
+        -- SET NULL, not CASCADE: a reminder the server keeps making outlives
+        -- the operator who set it up.
+        author_xuid   TEXT        REFERENCES minecraft.players (xuid) ON DELETE SET NULL,
+        -- 'player' is excluded on purpose: a recurring whisper to one person
+        -- is a nag, and a one-off message to them already has a command.
+        target_kind   TEXT        NOT NULL
+            CHECK (target_kind IN ('everyone', 'permission', 'online_only')),
+        target_value  TEXT,
+        priority      TEXT        NOT NULL DEFAULT 'normal'
+            CHECK (priority IN ('normal', 'expedited')),
+        -- Exactly one cadence. The floor on every_seconds keeps a typo from
+        -- turning a reminder into spam.
+        every_seconds INTEGER     CHECK (every_seconds >= 900),
+        -- UTC. No zone is stored, so no daylight-saving rule is either.
+        daily_at      TIME,
+        CHECK ((every_seconds IS NULL) <> (daily_at IS NULL)),
+        -- Advanced by a compare-and-set on its own previous value, which is
+        -- what lets exactly one writer claim each occurrence.
+        next_fire_at  TIMESTAMPTZ NOT NULL,
+        -- Deactivated rather than deleted, so announcements already made
+        -- from a schedule keep their provenance.
+        active        BOOLEAN     NOT NULL DEFAULT true,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS announcement_schedules_due_idx
+        ON minecraft.announcement_schedules (next_fire_at) WHERE active;
+
+    ALTER TABLE minecraft.announcements
+        ADD COLUMN IF NOT EXISTS schedule_id BIGINT
+            REFERENCES minecraft.announcement_schedules (schedule_id) ON DELETE SET NULL;
+
+  V6__minecraft_moderation.sql: |
+    -- Flagged public chat, and what the agent did about it.
+    --
+    -- Only messages that tripped a rule are stored, never chat as a whole: a
+    -- complete chat log is a far larger privacy exposure than anything a
+    -- moderation record needs, and the agent prunes these rows after 90 days.
+    --
+    -- xuid is not a foreign key, for the same reason command_audit's is not:
+    -- the record has to outlive the player it describes.
+    CREATE TABLE IF NOT EXISTS minecraft.moderation_events
+    (
+        event_id    BIGINT      NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        xuid        TEXT        NOT NULL,
+        gamertag    TEXT        NOT NULL,
+        message     TEXT        NOT NULL,
+        rule        TEXT        NOT NULL CHECK (rule IN ('term', 'flood', 'caps')),
+        detail      TEXT        NOT NULL DEFAULT '',
+        action      TEXT        NOT NULL CHECK (action IN ('logged', 'warned')),
+        occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS moderation_events_xuid_idx ON minecraft.moderation_events (xuid, occurred_at DESC);
+    CREATE INDEX IF NOT EXISTS moderation_events_time_idx ON minecraft.moderation_events (occurred_at DESC);
