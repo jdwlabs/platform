@@ -7,7 +7,7 @@
 # 3 prometheus-operator CRDs at its tail. Ownership is by CRD name, never by
 # position, so each tool rewrites only the documents it lists here and leaves
 # every other byte of the file alone.
-version: v1.1.0
+version: v1.6.2
 channel: experimental
 
 # Applied at sync-wave -1 by the platform-crds Application, which prunes:
