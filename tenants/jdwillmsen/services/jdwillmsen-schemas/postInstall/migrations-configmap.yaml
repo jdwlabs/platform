@@ -362,3 +362,40 @@ data:
 
     CREATE INDEX IF NOT EXISTS moderation_events_xuid_idx ON minecraft.moderation_events (xuid, occurred_at DESC);
     CREATE INDEX IF NOT EXISTS moderation_events_time_idx ON minecraft.moderation_events (occurred_at DESC);
+
+  V7__minecraft_auth_tokens.sql: |
+    -- The agent's Xbox Live token, one row per account.
+    --
+    -- This exists so two agent pods can coexist during a release. The token
+    -- used to live on a ReadWriteOnce volume, which one pod at a time may
+    -- mount: a standby scheduled onto another node waited in
+    -- ContainerCreating until the pod it was replacing released the volume,
+    -- which is the absence the warm handover exists to remove. A row costs no
+    -- new Kubernetes object, since the agent already holds this pool for
+    -- player profiles and for its leader lock.
+    --
+    -- account is MC_USERNAME, the same identity the leader lock is keyed on:
+    -- what two processes cannot share is the login, not the deployment. It is
+    -- not a foreign key to minecraft.players -- the agent's own account is not
+    -- a tracked player, and the token has to be writable before any session
+    -- row exists.
+    --
+    -- token holds the whole encoded OAuth token rather than columns per field.
+    -- Microsoft rotates the refresh token on every refresh, so the value is
+    -- replaced wholesale and never read field-by-field; splitting it would
+    -- invite a partial update that leaves a token that no longer refreshes.
+    --
+    -- The file cache this replaces was protected by its 0600 mode. A row has
+    -- no equivalent, and the grant is what stands in for it: app is the only
+    -- role that may read or write here, which V2's default privileges in this
+    -- schema already confer on tables created after it. Nothing else in the
+    -- schema references this table and nothing joins to it, so that grant is
+    -- the whole of the protection at rest -- stated rather than implied,
+    -- because a reader expecting the file mode to have an equivalent will
+    -- otherwise go looking for one.
+    CREATE TABLE IF NOT EXISTS minecraft.auth_tokens
+    (
+        account    TEXT        NOT NULL PRIMARY KEY,
+        token      TEXT        NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
