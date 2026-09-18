@@ -1,7 +1,7 @@
 {
   "title": "jdwillmsen / Tenant Overview",
   "uid": "jdwillmsen-tenant-overview",
-  "description": "USE-method resource usage for the jdwillmsen tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2), plus Minecraft-Bedrock- and backup-pipeline-specific panels. Every panel here was checked against this cluster's live Prometheus (original set 2026-08-25; uptime/version/CronJob/PVC/network/restart/log-rate additions 2026-08-31 — server_version label, kube_cronjob_status_last_successful_time, kubelet_volume_stats_*, and container_network_* all confirmed producing real values for this namespace). Server performance and agent answer/command panels added 2026-09-11, after minecraft-server-agent 0.11.0 shipped the metrics package that had been merged but never tagged — until then the agent exported only mc_agent_connected and mc_agent_reconnects_total, so !ping could report TPS in chat while Prometheus held no TPS series at all. Every query in those two rows was run against this cluster's live Prometheus and Loki before commit. Both datasource variables are pinned and hidden: the tenant Loki datasource carries the X-Scope-OrgID header that is the log tenancy boundary (§5.3); metrics have no per-tenant datasource and are scoped by the namespace label instead (§5.2).",
+  "description": "USE-method resource usage for the jdwillmsen tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2), plus Minecraft-Bedrock- and backup-pipeline-specific panels. Every panel here was checked against this cluster's live Prometheus (original set 2026-08-25; uptime/version/CronJob/PVC/network/restart/log-rate additions 2026-08-31 — server_version label, kube_cronjob_status_last_successful_time, kubelet_volume_stats_*, and container_network_* all confirmed producing real values for this namespace). Server performance and agent answer/command panels added 2026-09-11, after minecraft-server-agent 0.11.0 shipped the metrics package that had been merged but never tagged — until then the agent exported only mc_agent_connected and mc_agent_reconnects_total, so !ping could report TPS in chat while Prometheus held no TPS series at all. Every query in those two rows was run against this cluster's live Prometheus and Loki before commit. Both datasource variables are pinned and hidden: the tenant Loki datasource carries the X-Scope-OrgID header that is the log tenancy boundary (§5.3); metrics have no per-tenant datasource and are scoped by the namespace label instead (§5.2). Server-restart annotation and the CPU-cost-per-tick panel added 2026-09-18, after Bedrock 1.26.51.1 was found to bleed tick rate with process age (a restart resets it), which made decay-since-restart the shape worth reading and left the existing TPS panels unable to show what TPS had fallen from. Both queries were run against this cluster's live Prometheus before commit. The annotation deliberately uses kube_pod_container_status_restarts_total rather than container_start_time_seconds: cadvisor publishes a fresh series per container instance instead of moving the old one's value, so changes() over a start-time series never fires and the annotation would have been silently dead.",
   "tags": [
     "jdwillmsen",
     "tenant",
@@ -28,6 +28,18 @@
         "enable": false,
         "hide": false,
         "iconColor": "blue"
+      },
+      {
+        "name": "Server restarts",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "expr": "increase(kube_pod_container_status_restarts_total{namespace=~\"$namespace\", container=~\".*minecraft-bedrock\"}[5m]) > 0",
+        "titleFormat": "server restart",
+        "enable": true,
+        "hide": false,
+        "iconColor": "orange"
       }
     ]
   },
@@ -1021,6 +1033,54 @@
       ]
     },
     {
+      "id": 70,
+      "type": "timeseries",
+      "title": "CPU cost per tick",
+      "description": "Container CPU divided by ticks actually served, against the 50 ms budget a 20 TPS server has. Leads the TPS panel: during the 1.26.51.1 regression this rose from 27.8 to 40 ms/tick while TPS was still pinned at 20.00, because the server had headroom right up until it did not. Crossing 50 ms is where tick rate starts falling.\n\nTotal container CPU, so it includes the LevelDB compaction thread and is a trend line rather than pure main-thread work. Read the shape, not the absolute value -- and ignore it for a few minutes after a restart, when compaction inflates it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", container=~\".*minecraft-bedrock\"}[10m])) / max(mc_agent_server_tps{job=\"jdwillmsen-minecraft-fwb-prd-server-agent-metrics\"}) * 1000",
+          "refId": "A",
+          "legendFormat": "CPU ms per tick"
+        }
+      ]
+    },
+    {
       "id": 14,
       "type": "row",
       "title": "Backup & ops pipeline",
@@ -1028,7 +1088,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 63
       }
     },
     {
@@ -1044,7 +1104,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 57
+        "y": 64
       },
       "fieldConfig": {
         "defaults": {
@@ -1089,7 +1149,7 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 57
+        "y": 64
       },
       "fieldConfig": {
         "defaults": {
@@ -1130,7 +1190,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 57
+        "y": 64
       },
       "fieldConfig": {
         "defaults": {
@@ -1185,7 +1245,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 61
+        "y": 68
       },
       "options": {
         "orientation": "horizontal",
@@ -1223,7 +1283,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 61
+        "y": 68
       },
       "fieldConfig": {
         "defaults": {
@@ -1253,7 +1313,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 68
+        "y": 75
       },
       "fieldConfig": {
         "defaults": {
@@ -1287,7 +1347,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 68
+        "y": 75
       },
       "fieldConfig": {
         "defaults": {
@@ -1329,7 +1389,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 75
+        "y": 82
       }
     },
     {
@@ -1345,7 +1405,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 76
+        "y": 83
       },
       "targets": [
         {
@@ -1367,7 +1427,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 100
+        "y": 107
       },
       "options": {
         "orientation": "horizontal",
@@ -1413,7 +1473,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 76
+        "y": 83
       },
       "options": {
         "orientation": "horizontal",
@@ -1454,7 +1514,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 76
+        "y": 83
       },
       "options": {
         "orientation": "horizontal",
@@ -1495,7 +1555,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 84
+        "y": 91
       },
       "options": {
         "dedupStrategy": "exact",
@@ -1523,7 +1583,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 84
+        "y": 91
       },
       "targets": [
         {
@@ -1545,7 +1605,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 92
+        "y": 99
       },
       "fieldConfig": {
         "defaults": {
@@ -1575,7 +1635,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 92
+        "y": 99
       },
       "fieldConfig": {
         "defaults": {
@@ -1600,7 +1660,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 107
+        "y": 114
       }
     },
     {
@@ -1615,7 +1675,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 108
+        "y": 115
       },
       "fieldConfig": {
         "defaults": {
@@ -1644,7 +1704,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 108
+        "y": 115
       },
       "fieldConfig": {
         "defaults": {
@@ -1690,7 +1750,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 108
+        "y": 115
       },
       "fieldConfig": {
         "defaults": {
@@ -1718,7 +1778,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 108
+        "y": 115
       },
       "fieldConfig": {
         "defaults": {
@@ -1747,7 +1807,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 112
+        "y": 119
       },
       "fieldConfig": {
         "defaults": {
@@ -1782,7 +1842,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 112
+        "y": 119
       },
       "options": {
         "orientation": "horizontal",
@@ -1822,7 +1882,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 120
+        "y": 127
       },
       "options": {
         "orientation": "horizontal",
@@ -1863,7 +1923,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 120
+        "y": 127
       },
       "fieldConfig": {
         "defaults": {
@@ -1893,7 +1953,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 120
+        "y": 127
       },
       "options": {
         "showTime": true,
@@ -1919,7 +1979,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 127
+        "y": 134
       },
       "targets": [
         {
