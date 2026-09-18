@@ -1338,14 +1338,14 @@
       "id": 71,
       "type": "stat",
       "title": "Entities in the world",
-      "description": "Every actor record the nightly census found, across all three dimensions. This is stored entities, not ticking ones: a cold chunk's mob pile counts here and costs the server nothing until someone walks into it.",
+      "description": "Entities the nightly census decoded out of the world save, including the ones whose owning chunk named no dimension — they are real entities that could not be placed, not records that failed to read. This is stored entities, not ticking ones: a cold chunk's mob pile counts here and costs the server nothing until someone walks into it.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
+        "w": 5,
         "x": 0,
         "y": 76
       },
@@ -1374,8 +1374,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 6,
+        "w": 5,
+        "x": 5,
         "y": 76
       },
       "fieldConfig": {
@@ -1419,8 +1419,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 12,
+        "w": 5,
+        "x": 10,
         "y": 76
       },
       "fieldConfig": {
@@ -1465,15 +1465,15 @@
       "id": 74,
       "type": "stat",
       "title": "Entities that never despawn",
-      "description": "Name-tagged and otherwise persistence-flagged mobs. Each one holds a slot in its region's spawn cap permanently, so this number only ever goes up on its own — it is the part of the cap pressure below that no amount of waiting clears.",
+      "description": "Entities carrying Bedrock's persistence flag, which is what stops the game despawning them. Each one holds a slot in its region's spawn cap permanently, so this only ever falls when something is killed — it is the part of the cap pressure below that no amount of waiting clears. Name-tagged mobs are counted separately by the census and are not a strict subset of this.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 18,
+        "w": 5,
+        "x": 15,
         "y": 76
       },
       "fieldConfig": {
@@ -1486,6 +1486,59 @@
       "targets": [
         {
           "expr": "sum(mc_census_persistent_entities{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 79,
+      "type": "stat",
+      "title": "Census published",
+      "description": "Whether the exporter has been given a payload at all. The ConfigMap it serves is mounted optional, so a census that has never run and a census whose publish path broke both arrive as an empty mount — without this gauge the whole row would read as \"No data\", which looks the same as a quiet world. JdwillmsenMinecraftCensusNeverReported pages on this after a cycle has passed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 76
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "never",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "yes",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "max(mc_census_reported{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\"})",
           "refId": "A"
         }
       ]
@@ -1529,8 +1582,8 @@
     {
       "id": 76,
       "type": "timeseries",
-      "title": "Regions at their spawn cap",
-      "description": "Population-control regions, 144 blocks square, whose count for a category has reached Bedrock's cap for it. A region at its cap stops spawning that category entirely, which in game reads as \"nothing spawns near my base\".",
+      "title": "Regions at their spawn cap, by category",
+      "description": "Population-control regions, 144 blocks square, whose count for a category has reached Bedrock's cap for it. A region at its cap stops spawning that category entirely, which in game reads as \"nothing spawns near my base\". Split by category rather than summed across them: one cell can be capped for monsters and have room for animals, and adding those together would count the region twice.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1550,9 +1603,9 @@
       },
       "targets": [
         {
-          "expr": "sum by (dimension) (mc_census_regions{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\", status=\"capped\"})",
+          "expr": "sum by (dimension, category) (mc_census_regions{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\", status=\"capped\"})",
           "refId": "A",
-          "legendFormat": "{{dimension}}"
+          "legendFormat": "{{dimension}} / {{category}}"
         }
       ]
     },
@@ -1560,7 +1613,7 @@
       "id": 77,
       "type": "bargauge",
       "title": "Largest entity types",
-      "description": "The top of the census's own ranking, which is bounded at 20 series by the job rather than by this panel. A type climbing here between nights is the shape a leak takes — chest minecarts going 2,483 to 4,122 in three days is the one that prompted the census.",
+      "description": "The ten largest of the twenty types the census ranks; the rest of the ranking, and the per-region detail, stay in the printed report. A type climbing here between nights is the shape a leak takes — chest minecarts going 2,483 to 4,122 in three days is the one that prompted the census.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1594,8 +1647,8 @@
     {
       "id": 78,
       "type": "timeseries",
-      "title": "Records the scan could not use",
-      "description": "Actor records that did not decode into a usable entity. The job already refuses to publish a report when this passes its ratio limit, so a rising line that has not yet tripped it is the early warning that a Bedrock update moved the save format under us.",
+      "title": "Share of records the scan could not use",
+      "description": "Actor records that did not decode into a usable entity, as a share of the records read. The job refuses to publish a report at all past 5%, so this is the early warning that a Bedrock update moved the save format under us — drawn as a ratio because the raw count against a five-figure total is a flat line on the axis until the moment it is not.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1608,21 +1661,33 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "min": 0
+          "unit": "percentunit",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.02
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          }
         },
         "overrides": []
       },
       "targets": [
         {
-          "expr": "sum(mc_census_scan_unusable_records{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\"})",
+          "expr": "sum(mc_census_scan_unusable_records{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\"}) / sum(mc_census_scan_records{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\"})",
           "refId": "A",
           "legendFormat": "unusable"
-        },
-        {
-          "expr": "sum(mc_census_scan_records{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\"})",
-          "refId": "B",
-          "legendFormat": "records read"
         }
       ]
     },
