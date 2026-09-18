@@ -1,7 +1,7 @@
 {
   "title": "jdwillmsen / Tenant Overview",
   "uid": "jdwillmsen-tenant-overview",
-  "description": "USE-method resource usage for the jdwillmsen tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2), plus Minecraft-Bedrock- and backup-pipeline-specific panels. Every panel here was checked against this cluster's live Prometheus (original set 2026-08-25; uptime/version/CronJob/PVC/network/restart/log-rate additions 2026-08-31 — server_version label, kube_cronjob_status_last_successful_time, kubelet_volume_stats_*, and container_network_* all confirmed producing real values for this namespace). Server performance and agent answer/command panels added 2026-09-11, after minecraft-server-agent 0.11.0 shipped the metrics package that had been merged but never tagged — until then the agent exported only mc_agent_connected and mc_agent_reconnects_total, so !ping could report TPS in chat while Prometheus held no TPS series at all. Every query in those two rows was run against this cluster's live Prometheus and Loki before commit. Both datasource variables are pinned and hidden: the tenant Loki datasource carries the X-Scope-OrgID header that is the log tenancy boundary (§5.3); metrics have no per-tenant datasource and are scoped by the namespace label instead (§5.2).",
+  "description": "USE-method resource usage for the jdwillmsen tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2), plus Minecraft-Bedrock- and backup-pipeline-specific panels. Every panel here was checked against this cluster's live Prometheus (original set 2026-08-25; uptime/version/CronJob/PVC/network/restart/log-rate additions 2026-08-31 — server_version label, kube_cronjob_status_last_successful_time, kubelet_volume_stats_*, and container_network_* all confirmed producing real values for this namespace). Server performance and agent answer/command panels added 2026-09-11, after minecraft-server-agent 0.11.0 shipped the metrics package that had been merged but never tagged — until then the agent exported only mc_agent_connected and mc_agent_reconnects_total, so !ping could report TPS in chat while Prometheus held no TPS series at all. Every query in those two rows was run against this cluster's live Prometheus and Loki before commit. Both datasource variables are pinned and hidden: the tenant Loki datasource carries the X-Scope-OrgID header that is the log tenancy boundary (§5.3); metrics have no per-tenant datasource and are scoped by the namespace label instead (§5.2). World population panels added 2026-09-18, once minecraft-server-agent 0.17.0 gave the nightly census a -metrics-file to write and the chart grew a publisher and an exporter for it; every query in that row was run against this cluster's live Prometheus against a real census run before commit.",
   "tags": [
     "jdwillmsen",
     "tenant",
@@ -1322,6 +1322,311 @@
       ]
     },
     {
+      "id": 70,
+      "type": "row",
+      "title": "World population",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 75
+      },
+      "panels": []
+    },
+    {
+      "id": 71,
+      "type": "stat",
+      "title": "Entities in the world",
+      "description": "Every actor record the nightly census found, across all three dimensions. This is stored entities, not ticking ones: a cold chunk's mob pile counts here and costs the server nothing until someone walks into it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 76
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(mc_census_entities{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 72,
+      "type": "stat",
+      "title": "Census age",
+      "description": "How old the world these counts were read from is, not how long ago the job ran. The census takes a fresh snapshot when the server grants a save hold and falls back to the newest backup archive when it cannot, so a reading can legitimately be a day old — and a graph cannot say so on its own. Past 48h the counts are no longer describing the live world.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 76
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dtdurations",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 86400
+              },
+              {
+                "color": "red",
+                "value": 172800
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "time() - max(mc_census_world_taken_at_timestamp_seconds{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 73,
+      "type": "stat",
+      "title": "Census source",
+      "description": "Snapshot means the world was copied out of the running server minutes before the scan. Archive means the save hold was refused or the server was down, and these numbers came from last night's backup instead.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 76
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "archive",
+                  "color": "yellow",
+                  "index": 0
+                },
+                "1": {
+                  "text": "snapshot",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "max(mc_census_world_from_snapshot{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 74,
+      "type": "stat",
+      "title": "Entities that never despawn",
+      "description": "Name-tagged and otherwise persistence-flagged mobs. Each one holds a slot in its region's spawn cap permanently, so this number only ever goes up on its own — it is the part of the cap pressure below that no amount of waiting clears.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 76
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(mc_census_persistent_entities{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 75,
+      "type": "timeseries",
+      "title": "Entities by dimension",
+      "description": "The question this row exists for: is world load growing? A flat line across a week of tick-rate decay says the server binary regressed rather than the world outgrowing its budget — which is exactly the call that had to be made by hand from evicted job logs in September 2026.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 80
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "mc_census_entities{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\"}",
+          "refId": "A",
+          "legendFormat": "{{dimension}}"
+        }
+      ]
+    },
+    {
+      "id": 76,
+      "type": "timeseries",
+      "title": "Regions at their spawn cap",
+      "description": "Population-control regions, 144 blocks square, whose count for a category has reached Bedrock's cap for it. A region at its cap stops spawning that category entirely, which in game reads as \"nothing spawns near my base\".",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 80
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (dimension) (mc_census_regions{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\", status=\"capped\"})",
+          "refId": "A",
+          "legendFormat": "{{dimension}}"
+        }
+      ]
+    },
+    {
+      "id": 77,
+      "type": "bargauge",
+      "title": "Largest entity types",
+      "description": "The top of the census's own ranking, which is bounded at 20 series by the job rather than by this panel. A type climbing here between nights is the shape a leak takes — chest minecarts going 2,483 to 4,122 in three days is the one that prompted the census.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 88
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "topk(10, mc_census_entity_type{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\"})",
+          "refId": "A",
+          "legendFormat": "{{identifier}} ({{dimension}})",
+          "instant": true
+        }
+      ],
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 78,
+      "type": "timeseries",
+      "title": "Records the scan could not use",
+      "description": "Actor records that did not decode into a usable entity. The job already refuses to publish a report when this passes its ratio limit, so a rising line that has not yet tripped it is the early warning that a Bedrock update moved the save format under us.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 88
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(mc_census_scan_unusable_records{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\"})",
+          "refId": "A",
+          "legendFormat": "unusable"
+        },
+        {
+          "expr": "sum(mc_census_scan_records{job=\"jdwillmsen-minecraft-fwb-prd-census-exporter\"})",
+          "refId": "B",
+          "legendFormat": "records read"
+        }
+      ]
+    },
+    {
       "id": 18,
       "type": "row",
       "title": "Logs",
@@ -1329,7 +1634,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 75
+        "y": 95
       }
     },
     {
@@ -1345,7 +1650,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 76
+        "y": 96
       },
       "targets": [
         {
@@ -1367,7 +1672,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 100
+        "y": 120
       },
       "options": {
         "orientation": "horizontal",
@@ -1413,7 +1718,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 76
+        "y": 96
       },
       "options": {
         "orientation": "horizontal",
@@ -1454,7 +1759,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 76
+        "y": 96
       },
       "options": {
         "orientation": "horizontal",
@@ -1495,7 +1800,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 84
+        "y": 104
       },
       "options": {
         "dedupStrategy": "exact",
@@ -1523,7 +1828,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 84
+        "y": 104
       },
       "targets": [
         {
@@ -1545,7 +1850,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 92
+        "y": 112
       },
       "fieldConfig": {
         "defaults": {
@@ -1575,7 +1880,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 92
+        "y": 112
       },
       "fieldConfig": {
         "defaults": {
@@ -1600,7 +1905,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 107
+        "y": 127
       }
     },
     {
@@ -1615,7 +1920,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 108
+        "y": 128
       },
       "fieldConfig": {
         "defaults": {
@@ -1644,7 +1949,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 108
+        "y": 128
       },
       "fieldConfig": {
         "defaults": {
@@ -1690,7 +1995,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 108
+        "y": 128
       },
       "fieldConfig": {
         "defaults": {
@@ -1718,7 +2023,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 108
+        "y": 128
       },
       "fieldConfig": {
         "defaults": {
@@ -1747,7 +2052,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 112
+        "y": 132
       },
       "fieldConfig": {
         "defaults": {
@@ -1782,7 +2087,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 112
+        "y": 132
       },
       "options": {
         "orientation": "horizontal",
@@ -1822,7 +2127,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 120
+        "y": 140
       },
       "options": {
         "orientation": "horizontal",
@@ -1863,7 +2168,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 120
+        "y": 140
       },
       "fieldConfig": {
         "defaults": {
@@ -1893,7 +2198,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 120
+        "y": 140
       },
       "options": {
         "showTime": true,
@@ -1919,7 +2224,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 127
+        "y": 147
       },
       "targets": [
         {
