@@ -1,7 +1,7 @@
 {
   "title": "jdwillmsen / Tenant Overview",
   "uid": "jdwillmsen-tenant-overview",
-  "description": "USE-method resource usage for the jdwillmsen tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2), plus Minecraft-Bedrock- and backup-pipeline-specific panels. Every panel here was checked against this cluster's live Prometheus (original set 2026-08-25; uptime/version/CronJob/PVC/network/restart/log-rate additions 2026-08-31 — server_version label, kube_cronjob_status_last_successful_time, kubelet_volume_stats_*, and container_network_* all confirmed producing real values for this namespace). Server performance and agent answer/command panels added 2026-09-11, after minecraft-server-agent 0.11.0 shipped the metrics package that had been merged but never tagged — until then the agent exported only mc_agent_connected and mc_agent_reconnects_total, so !ping could report TPS in chat while Prometheus held no TPS series at all. Every query in those two rows was run against this cluster's live Prometheus and Loki before commit. Both datasource variables are pinned and hidden: the tenant Loki datasource carries the X-Scope-OrgID header that is the log tenancy boundary (§5.3); metrics have no per-tenant datasource and are scoped by the namespace label instead (§5.2). World population panels added 2026-09-18, once minecraft-server-agent 0.17.0 gave the nightly census a -metrics-file to write and the chart grew a publisher and an exporter for it; every query in that row was run against this cluster's live Prometheus against a real census run before commit. A \"Can players join\" row was added 2026-09-19, reading the join probe that minecraft-server-agent 0.18.0 introduced; its queries were run against this cluster's live Prometheus, including against a deliberately refused handshake.",
+  "description": "USE-method resource usage for the jdwillmsen tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2), plus Minecraft-Bedrock- and backup-pipeline-specific panels. Every panel here was checked against this cluster's live Prometheus (original set 2026-08-25; uptime/version/CronJob/PVC/network/restart/log-rate additions 2026-08-31 — server_version label, kube_cronjob_status_last_successful_time, kubelet_volume_stats_*, and container_network_* all confirmed producing real values for this namespace). Server performance and agent answer/command panels added 2026-09-11, after minecraft-server-agent 0.11.0 shipped the metrics package that had been merged but never tagged — until then the agent exported only mc_agent_connected and mc_agent_reconnects_total, so !ping could report TPS in chat while Prometheus held no TPS series at all. Every query in those two rows was run against this cluster's live Prometheus and Loki before commit. Both datasource variables are pinned and hidden: the tenant Loki datasource carries the X-Scope-OrgID header that is the log tenancy boundary (§5.3); metrics have no per-tenant datasource and are scoped by the namespace label instead (§5.2). World population panels added 2026-09-18, once minecraft-server-agent 0.17.0 gave the nightly census a -metrics-file to write and the chart grew a publisher and an exporter for it; every query in that row was run against this cluster's live Prometheus against a real census run before commit. A \"Can players join\" row was added 2026-09-19, reading the join probe that minecraft-server-agent 0.18.0 introduced; its queries were run against this cluster's live Prometheus, including against a deliberately refused handshake. Per-tick cost, process age and a server-restart annotation were added 2026-09-19 for the tick-decay investigation; both queries were run against this cluster's live Prometheus first.",
   "tags": [
     "jdwillmsen",
     "tenant",
@@ -28,6 +28,18 @@
         "enable": false,
         "hide": false,
         "iconColor": "blue"
+      },
+      {
+        "name": "Server restarts",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "expr": "changes(container_start_time_seconds{namespace=~\"$namespace\", container=\"jdwillmsen-minecraft-fwb-prd-minecraft-bedrock\"}[5m]) > 0",
+        "titleFormat": "server restarted",
+        "enable": true,
+        "hide": false,
+        "iconColor": "orange"
       }
     ]
   },
@@ -1021,6 +1033,110 @@
       ]
     },
     {
+      "id": 57,
+      "type": "timeseries",
+      "title": "Cost of one tick",
+      "description": "Container CPU milliseconds per tick: the work the server is doing, before that work is enough to cost tick rate. 50 ms is the whole budget at 20 TPS. This climbs across a process lifetime on 1.26.51.1 — about 30 ms four hours after a restart and 45 ms at twenty-two, measured at matched player count — which is the decay in JDWLABS-576 made visible before it reaches the players.\n\nTotal container CPU divided by ticks, so it includes the LevelDB compaction thread; it is a comparison against itself over time, not an absolute main-loop measurement.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 40
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", container=\"jdwillmsen-minecraft-fwb-prd-minecraft-bedrock\"}[10m])) / max(mc_agent_server_tps{job=\"jdwillmsen-minecraft-fwb-prd-server-agent-metrics\"}) * 1000",
+          "refId": "A",
+          "legendFormat": "ms per tick"
+        }
+      ]
+    },
+    {
+      "id": 58,
+      "type": "timeseries",
+      "title": "Time since the server process restarted",
+      "description": "The sawtooth this is drawn for: memory and per-tick cost both track process age on this version, and a restart resets them. Read the two panels above against this one — a high number at the top of a sawtooth is normal, the same number at the bottom is not.\n\nThe nightly restart at 09:40 UTC is what bounds this line, so a tooth that keeps climbing past a day means the restart did not happen.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 90000
+              },
+              {
+                "color": "red",
+                "value": 172800
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "time() - max(container_start_time_seconds{namespace=~\"$namespace\", container=\"jdwillmsen-minecraft-fwb-prd-minecraft-bedrock\"})",
+          "refId": "A",
+          "legendFormat": "process age"
+        }
+      ]
+    },
+    {
       "id": 80,
       "type": "row",
       "title": "Can players join",
@@ -1029,7 +1145,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 63
       },
       "panels": []
     },
@@ -1046,7 +1162,7 @@
         "h": 4,
         "w": 5,
         "x": 0,
-        "y": 57
+        "y": 64
       },
       "fieldConfig": {
         "defaults": {
@@ -1099,7 +1215,7 @@
         "h": 4,
         "w": 5,
         "x": 5,
-        "y": 57
+        "y": 64
       },
       "fieldConfig": {
         "defaults": {
@@ -1162,7 +1278,7 @@
         "h": 4,
         "w": 5,
         "x": 10,
-        "y": 57
+        "y": 64
       },
       "fieldConfig": {
         "defaults": {
@@ -1225,7 +1341,7 @@
         "h": 4,
         "w": 4,
         "x": 15,
-        "y": 57
+        "y": 64
       },
       "fieldConfig": {
         "defaults": {
@@ -1270,7 +1386,7 @@
         "h": 4,
         "w": 5,
         "x": 19,
-        "y": 57
+        "y": 64
       },
       "fieldConfig": {
         "defaults": {
@@ -1315,7 +1431,7 @@
         "h": 8,
         "w": 16,
         "x": 0,
-        "y": 61
+        "y": 68
       },
       "fieldConfig": {
         "defaults": {
@@ -1351,7 +1467,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 61
+        "y": 68
       },
       "fieldConfig": {
         "defaults": {
@@ -1376,7 +1492,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 69
+        "y": 76
       }
     },
     {
@@ -1392,7 +1508,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 70
+        "y": 77
       },
       "fieldConfig": {
         "defaults": {
@@ -1437,7 +1553,7 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 70
+        "y": 77
       },
       "fieldConfig": {
         "defaults": {
@@ -1478,7 +1594,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 70
+        "y": 77
       },
       "fieldConfig": {
         "defaults": {
@@ -1533,7 +1649,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 74
+        "y": 81
       },
       "options": {
         "orientation": "horizontal",
@@ -1571,7 +1687,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 74
+        "y": 81
       },
       "fieldConfig": {
         "defaults": {
@@ -1601,7 +1717,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 81
+        "y": 88
       },
       "fieldConfig": {
         "defaults": {
@@ -1635,7 +1751,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 81
+        "y": 88
       },
       "fieldConfig": {
         "defaults": {
@@ -1678,7 +1794,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 88
+        "y": 95
       },
       "panels": []
     },
@@ -1695,7 +1811,7 @@
         "h": 4,
         "w": 5,
         "x": 0,
-        "y": 89
+        "y": 96
       },
       "fieldConfig": {
         "defaults": {
@@ -1724,7 +1840,7 @@
         "h": 4,
         "w": 5,
         "x": 5,
-        "y": 89
+        "y": 96
       },
       "fieldConfig": {
         "defaults": {
@@ -1769,7 +1885,7 @@
         "h": 4,
         "w": 5,
         "x": 10,
-        "y": 89
+        "y": 96
       },
       "fieldConfig": {
         "defaults": {
@@ -1822,7 +1938,7 @@
         "h": 4,
         "w": 5,
         "x": 15,
-        "y": 89
+        "y": 96
       },
       "fieldConfig": {
         "defaults": {
@@ -1851,7 +1967,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 89
+        "y": 96
       },
       "fieldConfig": {
         "defaults": {
@@ -1904,7 +2020,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 93
+        "y": 100
       },
       "fieldConfig": {
         "defaults": {
@@ -1940,7 +2056,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 93
+        "y": 100
       },
       "fieldConfig": {
         "defaults": {
@@ -1970,7 +2086,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 101
+        "y": 108
       },
       "fieldConfig": {
         "defaults": {
@@ -2005,7 +2121,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 101
+        "y": 108
       },
       "fieldConfig": {
         "defaults": {
@@ -2047,7 +2163,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 108
+        "y": 115
       }
     },
     {
@@ -2063,7 +2179,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 109
+        "y": 116
       },
       "targets": [
         {
@@ -2085,7 +2201,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 133
+        "y": 140
       },
       "options": {
         "orientation": "horizontal",
@@ -2131,7 +2247,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 109
+        "y": 116
       },
       "options": {
         "orientation": "horizontal",
@@ -2172,7 +2288,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 109
+        "y": 116
       },
       "options": {
         "orientation": "horizontal",
@@ -2213,7 +2329,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 117
+        "y": 124
       },
       "options": {
         "dedupStrategy": "exact",
@@ -2241,7 +2357,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 117
+        "y": 124
       },
       "targets": [
         {
@@ -2263,7 +2379,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 125
+        "y": 132
       },
       "fieldConfig": {
         "defaults": {
@@ -2293,7 +2409,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 125
+        "y": 132
       },
       "fieldConfig": {
         "defaults": {
@@ -2318,7 +2434,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 140
+        "y": 147
       }
     },
     {
@@ -2333,7 +2449,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 141
+        "y": 148
       },
       "fieldConfig": {
         "defaults": {
@@ -2362,7 +2478,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 141
+        "y": 148
       },
       "fieldConfig": {
         "defaults": {
@@ -2408,7 +2524,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 141
+        "y": 148
       },
       "fieldConfig": {
         "defaults": {
@@ -2436,7 +2552,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 141
+        "y": 148
       },
       "fieldConfig": {
         "defaults": {
@@ -2465,7 +2581,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 145
+        "y": 152
       },
       "fieldConfig": {
         "defaults": {
@@ -2500,7 +2616,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 145
+        "y": 152
       },
       "options": {
         "orientation": "horizontal",
@@ -2540,7 +2656,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 153
+        "y": 160
       },
       "options": {
         "orientation": "horizontal",
@@ -2581,7 +2697,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 153
+        "y": 160
       },
       "fieldConfig": {
         "defaults": {
@@ -2611,7 +2727,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 153
+        "y": 160
       },
       "options": {
         "showTime": true,
@@ -2637,7 +2753,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 160
+        "y": 167
       },
       "targets": [
         {
