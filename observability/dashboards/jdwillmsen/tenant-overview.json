@@ -1,7 +1,7 @@
 {
   "title": "jdwillmsen / Tenant Overview",
   "uid": "jdwillmsen-tenant-overview",
-  "description": "USE-method resource usage for the jdwillmsen tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2), plus Minecraft-Bedrock- and backup-pipeline-specific panels. Every panel here was checked against this cluster's live Prometheus (original set 2026-08-25; uptime/version/CronJob/PVC/network/restart/log-rate additions 2026-08-31 — server_version label, kube_cronjob_status_last_successful_time, kubelet_volume_stats_*, and container_network_* all confirmed producing real values for this namespace). Server performance and agent answer/command panels added 2026-09-11, after minecraft-server-agent 0.11.0 shipped the metrics package that had been merged but never tagged — until then the agent exported only mc_agent_connected and mc_agent_reconnects_total, so !ping could report TPS in chat while Prometheus held no TPS series at all. Every query in those two rows was run against this cluster's live Prometheus and Loki before commit. Both datasource variables are pinned and hidden: the tenant Loki datasource carries the X-Scope-OrgID header that is the log tenancy boundary (§5.3); metrics have no per-tenant datasource and are scoped by the namespace label instead (§5.2). World population panels added 2026-09-18, once minecraft-server-agent 0.17.0 gave the nightly census a -metrics-file to write and the chart grew a publisher and an exporter for it; every query in that row was run against this cluster's live Prometheus against a real census run before commit.",
+  "description": "USE-method resource usage for the jdwillmsen tenant, scoped by the platform.jdwlabs.io/tenant namespace label (label-based metric tenancy — see docs/observability/DASHBOARDS-AND-MULTITENANCY.md §5.2), plus Minecraft-Bedrock- and backup-pipeline-specific panels. Every panel here was checked against this cluster's live Prometheus (original set 2026-08-25; uptime/version/CronJob/PVC/network/restart/log-rate additions 2026-08-31 — server_version label, kube_cronjob_status_last_successful_time, kubelet_volume_stats_*, and container_network_* all confirmed producing real values for this namespace). Server performance and agent answer/command panels added 2026-09-11, after minecraft-server-agent 0.11.0 shipped the metrics package that had been merged but never tagged — until then the agent exported only mc_agent_connected and mc_agent_reconnects_total, so !ping could report TPS in chat while Prometheus held no TPS series at all. Every query in those two rows was run against this cluster's live Prometheus and Loki before commit. Both datasource variables are pinned and hidden: the tenant Loki datasource carries the X-Scope-OrgID header that is the log tenancy boundary (§5.3); metrics have no per-tenant datasource and are scoped by the namespace label instead (§5.2). World population panels added 2026-09-18, once minecraft-server-agent 0.17.0 gave the nightly census a -metrics-file to write and the chart grew a publisher and an exporter for it; every query in that row was run against this cluster's live Prometheus against a real census run before commit. A \"Can players join\" row was added 2026-09-19, reading the join probe that minecraft-server-agent 0.18.0 introduced; its queries were run against this cluster's live Prometheus, including against a deliberately refused handshake.",
   "tags": [
     "jdwillmsen",
     "tenant",
@@ -1021,6 +1021,354 @@
       ]
     },
     {
+      "id": 80,
+      "type": "row",
+      "title": "Can players join",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
+      "panels": []
+    },
+    {
+      "id": 81,
+      "type": "stat",
+      "title": "Joinable",
+      "description": "Whether a client could start a session at the last probe, once a minute. This is the panel the 2026-09-15 outage needed and did not have: every other check on this dashboard was green throughout it while nobody could get in.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 0,
+        "y": 57
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "no",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "yes",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "max(mc_joinprobe_joinable{job=\"jdwillmsen-minecraft-fwb-prd-join-probe\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 82,
+      "type": "stat",
+      "title": "How far the probe got",
+      "description": "0 nothing answered, 1 answered the server-list ping, 2 answered and refused the session, 3 completed the handshake. Stage 1 is where every check that passed through the September outage stopped looking.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 5,
+        "y": 57
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "unreachable",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "ping only",
+                  "color": "orange",
+                  "index": 1
+                },
+                "2": {
+                  "text": "refused",
+                  "color": "red",
+                  "index": 2
+                },
+                "3": {
+                  "text": "handshake",
+                  "color": "green",
+                  "index": 3
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "max(mc_joinprobe_stage{job=\"jdwillmsen-minecraft-fwb-prd-join-probe\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 83,
+      "type": "stat",
+      "title": "Why it was refused",
+      "description": "The server's own reason, when it refused. 2 is the version skew that locked everyone out in September: the server older than the client asking. Reads 'not refused' whenever the last probe was not turned away.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 10,
+        "y": 57
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "-1": {
+                  "text": "not refused",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "client too old",
+                  "color": "orange",
+                  "index": 1
+                },
+                "2": {
+                  "text": "server too old",
+                  "color": "red",
+                  "index": 2
+                },
+                "7": {
+                  "text": "server full",
+                  "color": "orange",
+                  "index": 3
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "max(mc_joinprobe_play_status{job=\"jdwillmsen-minecraft-fwb-prd-join-probe\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 84,
+      "type": "stat",
+      "title": "Since a join last worked",
+      "description": "Age of the last completed handshake. A few minutes is a restart; longer is the alert's territory.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 15,
+        "y": 57
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dtdurations",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 600
+              },
+              {
+                "color": "red",
+                "value": 1800
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "time() - max(mc_joinprobe_last_joinable_timestamp_seconds{job=\"jdwillmsen-minecraft-fwb-prd-join-probe\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 85,
+      "type": "stat",
+      "title": "Since a real account joined",
+      "description": "The agent recycles its own Bedrock session on a schedule, so this is the age of the last time a real Microsoft account authenticated and reached spawn — the half the probe cannot prove, because it stops before credentials. Reads as very old while the recycle is switched off.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 19,
+        "y": 57
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dtdurations",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 9000
+              },
+              {
+                "color": "red",
+                "value": 21600
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "time() - max(mc_agent_session_established_timestamp_seconds{job=\"jdwillmsen-minecraft-fwb-prd-server-agent-metrics\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 86,
+      "type": "timeseries",
+      "title": "Join attempts, by how far they got",
+      "description": "Every probe attempt counted by the stage it reached. A band at 'refused' is a server turning clients away while answering everything else normally, which is the failure this row exists to make visible.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 61
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 20,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (stage) (increase(mc_joinprobe_attempts_total{job=\"jdwillmsen-minecraft-fwb-prd-join-probe\"}[10m]))",
+          "refId": "A",
+          "legendFormat": "{{stage}}"
+        }
+      ]
+    },
+    {
+      "id": 87,
+      "type": "timeseries",
+      "title": "Handshake round trip",
+      "description": "Ping plus handshake against the in-cluster Service. It is not what a player over the LAN sees, but a climb here is the server taking longer to answer a join.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 61
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "mc_joinprobe_duration_seconds{job=\"jdwillmsen-minecraft-fwb-prd-join-probe\"}",
+          "refId": "A",
+          "legendFormat": "probe"
+        }
+      ]
+    },
+    {
       "id": 14,
       "type": "row",
       "title": "Backup & ops pipeline",
@@ -1028,7 +1376,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 69
       }
     },
     {
@@ -1044,7 +1392,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 57
+        "y": 70
       },
       "fieldConfig": {
         "defaults": {
@@ -1089,7 +1437,7 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 57
+        "y": 70
       },
       "fieldConfig": {
         "defaults": {
@@ -1130,7 +1478,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 57
+        "y": 70
       },
       "fieldConfig": {
         "defaults": {
@@ -1185,7 +1533,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 61
+        "y": 74
       },
       "options": {
         "orientation": "horizontal",
@@ -1223,7 +1571,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 61
+        "y": 74
       },
       "fieldConfig": {
         "defaults": {
@@ -1253,7 +1601,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 68
+        "y": 81
       },
       "fieldConfig": {
         "defaults": {
@@ -1287,7 +1635,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 68
+        "y": 81
       },
       "fieldConfig": {
         "defaults": {
@@ -1330,7 +1678,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 75
+        "y": 88
       },
       "panels": []
     },
@@ -1347,7 +1695,7 @@
         "h": 4,
         "w": 5,
         "x": 0,
-        "y": 76
+        "y": 89
       },
       "fieldConfig": {
         "defaults": {
@@ -1376,7 +1724,7 @@
         "h": 4,
         "w": 5,
         "x": 5,
-        "y": 76
+        "y": 89
       },
       "fieldConfig": {
         "defaults": {
@@ -1421,7 +1769,7 @@
         "h": 4,
         "w": 5,
         "x": 10,
-        "y": 76
+        "y": 89
       },
       "fieldConfig": {
         "defaults": {
@@ -1474,7 +1822,7 @@
         "h": 4,
         "w": 5,
         "x": 15,
-        "y": 76
+        "y": 89
       },
       "fieldConfig": {
         "defaults": {
@@ -1503,7 +1851,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 76
+        "y": 89
       },
       "fieldConfig": {
         "defaults": {
@@ -1556,7 +1904,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 80
+        "y": 93
       },
       "fieldConfig": {
         "defaults": {
@@ -1592,7 +1940,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 80
+        "y": 93
       },
       "fieldConfig": {
         "defaults": {
@@ -1622,7 +1970,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 88
+        "y": 101
       },
       "fieldConfig": {
         "defaults": {
@@ -1657,7 +2005,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 88
+        "y": 101
       },
       "fieldConfig": {
         "defaults": {
@@ -1699,7 +2047,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 95
+        "y": 108
       }
     },
     {
@@ -1715,7 +2063,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 96
+        "y": 109
       },
       "targets": [
         {
@@ -1737,7 +2085,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 120
+        "y": 133
       },
       "options": {
         "orientation": "horizontal",
@@ -1783,7 +2131,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 96
+        "y": 109
       },
       "options": {
         "orientation": "horizontal",
@@ -1824,7 +2172,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 96
+        "y": 109
       },
       "options": {
         "orientation": "horizontal",
@@ -1865,7 +2213,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 104
+        "y": 117
       },
       "options": {
         "dedupStrategy": "exact",
@@ -1893,7 +2241,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 104
+        "y": 117
       },
       "targets": [
         {
@@ -1915,7 +2263,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 112
+        "y": 125
       },
       "fieldConfig": {
         "defaults": {
@@ -1945,7 +2293,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 112
+        "y": 125
       },
       "fieldConfig": {
         "defaults": {
@@ -1970,7 +2318,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 127
+        "y": 140
       }
     },
     {
@@ -1985,7 +2333,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 128
+        "y": 141
       },
       "fieldConfig": {
         "defaults": {
@@ -2014,7 +2362,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 128
+        "y": 141
       },
       "fieldConfig": {
         "defaults": {
@@ -2060,7 +2408,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 128
+        "y": 141
       },
       "fieldConfig": {
         "defaults": {
@@ -2088,7 +2436,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 128
+        "y": 141
       },
       "fieldConfig": {
         "defaults": {
@@ -2117,7 +2465,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 132
+        "y": 145
       },
       "fieldConfig": {
         "defaults": {
@@ -2152,7 +2500,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 132
+        "y": 145
       },
       "options": {
         "orientation": "horizontal",
@@ -2192,7 +2540,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 140
+        "y": 153
       },
       "options": {
         "orientation": "horizontal",
@@ -2233,7 +2581,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 140
+        "y": 153
       },
       "fieldConfig": {
         "defaults": {
@@ -2263,7 +2611,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 140
+        "y": 153
       },
       "options": {
         "showTime": true,
@@ -2289,7 +2637,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 147
+        "y": 160
       },
       "targets": [
         {
