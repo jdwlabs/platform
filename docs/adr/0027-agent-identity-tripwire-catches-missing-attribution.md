@@ -214,3 +214,36 @@ follow-up work, not done here.
 left §2 inaccurate about installation scope. Its analysis of what the control
 *cannot* prove (§4 above) survives intact and is still the section to read
 before relying on this check for anything.
+
+## Amendment (2026-09-21) — any well-formed trailer counts, whatever its domain
+
+Appended after this record landed. Nothing above is amended; where §5 and
+the consequences describe the trailer as matching `@anthropic.com`, read them
+as history.
+
+**Decision.** Both readers of the trailer — `agent-identity /
+co-author-check` in all four repos and `tools/audit-admin-bypass.py` — now
+count any line matching
+`^Co-Authored-By:[ \t]*\S.*<[^<>@\s]+@[^<>@\s]+>\s*$` (case-insensitive) as
+agent attribution. The anchor to line start stays, so a trailer quoted
+mid-sentence still does not count. Nothing else in the check changed: the
+fail-closed reads, the `web-flow` exemption and the truncation guards are as
+§3 and §5 describe.
+
+**Why.** The AI-SRE relay runs a self-hosted open-weight model, which has no
+vendor email domain to put in a trailer, so under the old pattern its commits
+could never be attributed and a bot-opened PR carrying only its work failed
+clause 2 with no way to go green. The domain was never buying anything in
+return: §4 already records that the trailer is unauthenticated,
+self-asserted text, so `@anthropic.com` proved only that someone typed it.
+
+**What it costs.** A `Co-Authored-By` trailer crediting a human co-author now
+reads as agent attribution. On the gate that can only mark a commit
+*attributed*, never fail a pull request — the same one-directional error
+the consequences above accept for a trailer quoted at line start. In the
+audit tool it adds a false positive to the agent-authored count, which that
+tool's docstring records.
+
+**Also closed.** §5 left the audit tool's pattern unanchored, with the prose
+false positive this record fixed in the workflow. It is now anchored and
+shares the workflow's pattern exactly.
