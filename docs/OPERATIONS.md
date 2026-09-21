@@ -753,6 +753,29 @@ Every `Handle()` increments exactly one of two counters, so their sum is
 | `ai_sre_relay_investigations_run_total` | Alerts investigated |
 | `ai_sre_relay_repeats_skipped_total` | Refires deduplicated against an open ticket |
 | `ai_sre_relay_repo_rejections_total` | Remediations discarded at the repository allowlist |
+| `ai_sre_relay_path_rejections_total` | Remediations aimed at a file nothing reconciles: outside the path globs, on the denylist, a release not listed in its `tenant.yaml`, or a file not on `main` |
+| `ai_sre_relay_content_rejections_total` | Remediations whose body was a `kind: Secret` manifest or a placeholder credential |
+| `ai_sre_relay_unverified_rejections_total` | Remediations that could not quote a live read from the investigation showing the defect |
+
+The last three are refusals the relay makes in code before it writes anything.
+Treat any remediation PR as a claim to check, never as a fix to trust:
+
+- It edits exactly one existing file under
+  `tenants/<t>/services/<release>/` that the release's `tenant.yaml` entry
+  actually reads. It never creates files.
+- It never contains a Secret or a credential value. A missing Secret is fixed
+  by seeding Vault behind the existing ExternalSecret, never by committing one.
+- Its body carries a **Live-state verification** section: the Holmes read it
+  cites and the output it quoted. The relay has checked that the quote really
+  appears in that read. It has not checked that the quote shows what the PR
+  claims. Compare the claim with the quote, and with the cluster, before you
+  approve.
+
+The guard table and the runbook for a dropped remediation are in the relay's
+README (`apps/backend/ai-sre-relay/README.md` in `jdwlabs/apps`). These
+refusals only exist in the relay version that is actually deployed. Check the
+image in `tenants/platform/services/ai-sre-relay/postInstall/ai-sre-relay.yaml`
+before assuming a guard was in force.
 
 Diagnosing a quiet relay — the three states look identical from Discord, and
 these queries separate them:
