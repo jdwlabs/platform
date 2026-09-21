@@ -97,13 +97,16 @@ flag as zero would exempt every path an owner-gated ruleset protects. It makes
 this audit stricter than the rules on some paths, never blinder.
 
 A PR counts as agent-authored when any of its commits carries a
-`Co-Authored-By: ... <noreply@anthropic.com>` trailer — the same signal
-ADR 0018 §3 names for the not-yet-built `agent-identity / co-author-check`.
-This is a heuristic in both directions: a session told to omit the trailer
-passes through unnoticed (false negative, same limitation ADR 0018 §3
-already documents), and a human-authored PR that merges the base branch
-mid-flight can pull in another commit's trailer and be misclassified (false
-positive) — this tool does not attempt to exclude base-reachable commits.
+`Co-Authored-By: <name> <email>` trailer at the start of a line — the same
+signal, matched by the same pattern, as `agent-identity / co-author-check`.
+The address domain is not inspected: a self-hosted model has no vendor
+domain, and a self-asserted trailer proves nothing about who wrote the
+commit whatever domain it names. This is a heuristic in both directions: a
+session told to omit the trailer passes through unnoticed (false negative,
+same limitation ADR 0018 §3 already documents); a trailer crediting a human
+co-author reads as agent attribution, and a human-authored PR that merges the
+base branch mid-flight can pull in another commit's trailer (false positives)
+— this tool does not attempt to exclude base-reachable commits.
 
 Usage:
     python3 tools/audit-admin-bypass.py [--since YYYY-MM-DD] [--list]
@@ -132,7 +135,9 @@ from pathlib import Path
 
 REPOS = ["apps", "platform", "infrastructure", "deployments"]
 TARGET_REF = "refs/heads/main"
-AGENT_TRAILER = re.compile(r"Co-Authored-By:.*<[^>]*@anthropic\.com>", re.IGNORECASE)
+AGENT_TRAILER = re.compile(
+    r"^Co-Authored-By:[ \t]*\S.*<[^<>@\s]+@[^<>@\s]+>\s*$", re.IGNORECASE | re.MULTILINE
+)
 
 HOLDS_RELPATH = "tools/admin-bypass-holds.yaml"
 

@@ -46,8 +46,25 @@ class IsAgentAuthoredTests(unittest.TestCase):
         pr = _pr("a perfectly ordinary human commit")
         self.assertFalse(audit.is_agent_authored(pr))
 
-    def test_co_authored_by_a_human_does_not_match(self):
+    def test_self_hosted_model_without_vendor_domain_matches(self):
+        pr = _pr("some commit\n\nCo-Authored-By: gpt-oss-120b <ai-sre@jdwlabs.local>")
+        self.assertTrue(audit.is_agent_authored(pr))
+
+    def test_co_authored_by_a_human_also_matches(self):
+        # Accepted cost of not filtering on domain: trailer text cannot tell
+        # an agent from a person, so a human co-author reads as attribution.
         pr = _pr("Co-Authored-By: Jake Willmsen <jdwillmsen@gmail.com>")
+        self.assertTrue(audit.is_agent_authored(pr))
+
+    def test_trailer_quoted_mid_line_does_not_match(self):
+        pr = _pr(
+            "docs: explain the check\n\n"
+            "Commits need a Co-Authored-By: Claude <noreply@anthropic.com> trailer."
+        )
+        self.assertFalse(audit.is_agent_authored(pr))
+
+    def test_trailer_without_an_email_does_not_match(self):
+        pr = _pr("Co-Authored-By: Claude\nCo-Authored-By: Claude <noreply>")
         self.assertFalse(audit.is_agent_authored(pr))
 
     def test_no_commits_is_not_agent_authored(self):
