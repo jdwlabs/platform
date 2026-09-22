@@ -25,6 +25,18 @@ spec:
       name: '{{ .Values.name }}-{{ "{{" }} .name {{ "}}" }}'
       annotations:
         argocd.argoproj.io/sync-wave: '{{ "{{" }} .syncWave | default "0" | toString {{ "}}" }}'
+        # Diff against a server-side dry-run apply instead of the client-side
+        # merge, which does not apply CRD schema defaults. A sparse HTTPRoute
+        # render — no rule matches, no backendRef weight, no parentRef
+        # group/kind — therefore read as drift against the defaulted live
+        # object, and the fix for that was to ignore those paths. But under
+        # RespectIgnoreDifferences an ignored path is stripped from the
+        # manifest before it is applied too, so a route could declare a path
+        # match or a backend weight, diff clean, sync green, and route
+        # nothing. Server-side diff resolves the same defaults the apiserver
+        # does, so the sparse render is Synced with no HTTPRoute ignores at
+        # all and a real matches or weight change converges live.
+        argocd.argoproj.io/compare-options: ServerSideDiff=true
     spec:
       project: tenant-{{ .Values.name }}
       ignoreDifferences:
@@ -57,15 +69,6 @@ spec:
           kind: Deployment
           jqPathExpressions:
             - .spec.template.metadata.annotations."checksum/secret"
-        - group: gateway.networking.k8s.io
-          kind: HTTPRoute
-          jqPathExpressions:
-            - .spec.parentRefs[]?.group
-            - .spec.parentRefs[]?.kind
-            - .spec.rules[]?.backendRefs[]?.group
-            - .spec.rules[]?.backendRefs[]?.kind
-            - .spec.rules[]?.backendRefs[]?.weight
-            - .spec.rules[]?.matches
       syncPolicy:
         automated:
           prune: true
