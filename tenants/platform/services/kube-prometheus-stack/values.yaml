@@ -69,13 +69,34 @@ prometheus:
     # Request 1536Mi: steady-state RSS runs ~1.5Gi live, so a 1Gi request
     # under-declared by ~500Mi and the scheduler placed other pods into memory
     # Prometheus was already using.
+    #
+    # The limit also bounds page cache, which is what rule evaluation actually
+    # runs on: the 3d/30d apiserver burn-rate windows re-read mmapped chunks
+    # every minute. At 2Gi only ~580Mi of cache remained beside ~1.45Gi RSS,
+    # so those groups read Longhorn at 67-144 MB/s and overran their 60s
+    # interval 4-8x while CPU sat under 0.1 core. Request tracks RSS plus a
+    # small cache floor; the limit gives the hot chunk set room to stay cached.
     resources:
       requests:
-        memory: 1536Mi
+        memory: 2Gi
         cpu: 250m
       limits:
-        memory: 2Gi
+        memory: 4Gi
         cpu: "1"
+    # The operator's default liveness probe (3s timeout, 6 x 5s) restarted
+    # Prometheus while its HTTP handler stalled behind heavy disk reads, and
+    # each restart dropped the warm cache and replayed the WAL, making the next
+    # evaluations slower still. `containers` is the operator's supported way to
+    # patch its generated container; path and port restate the operator's own.
+    containers:
+      - name: prometheus
+        livenessProbe:
+          httpGet:
+            path: /-/healthy
+            port: http-web
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 6
 
 kubelet:
   serviceMonitor:
@@ -152,6 +173,22 @@ alertmanager:
               storage: 2Gi
     configMaps:
       - alertmanager-templates
+
+# Overrides the chart default (restated first, since Helm replaces lists) to
+# also drop apiserver histograms that no rule, alert or dashboard reads. They
+# were ~82k of ~352k head series; every one shares the page cache that the
+# burn-rate rules need. apiserver_request_duration_seconds_bucket stays: the
+# golden-signals dashboard takes its p99. apiserver_request_sli_* stays: the
+# burn-rate and availability rules are built on it.
+kubeApiServer:
+  serviceMonitor:
+    metricRelabelings:
+      - sourceLabels: [__name__, le]
+        action: drop
+        regex: '(etcd_request|apiserver_request_slo|apiserver_request_sli|apiserver_request)_duration_seconds_bucket;(0\.15|0\.2|0\.3|0\.35|0\.4|0\.45|0\.6|0\.7|0\.8|0\.9|1\.25|1\.5|1\.75|2|3|3\.5|4|4\.5|6|7|8|9|15|20|40|45|50)(\.0)?'
+      - sourceLabels: [__name__]
+        action: drop
+        regex: 'apiserver_(request_body_size_bytes|watch_list_duration_seconds|response_sizes|watch_cache_read_wait_seconds|watch_events_sizes)_bucket|etcd_request_duration_seconds_bucket'
 
 # kube-prometheus-stack owns these going forward
 kubeStateMetrics:
