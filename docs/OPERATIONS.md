@@ -240,8 +240,15 @@ serves reads.
 
 **Manual backup trigger:**
 
+Two CronJobs dump to the same Drive remote, each covering a different cluster —
+`postgres-backup` dumps the prd cluster to `gdrive:postgres-backups`, and
+`litellm-db-backup` dumps the LiteLLM gateway cluster to
+`gdrive:postgres-backups/litellm`. The non-prd cluster is deliberately not
+backed up; it holds nothing that cannot be recreated.
+
 ```bash
 kubectl -n database create job --from=cronjob/postgres-backup postgres-backup-manual-$(date +%s)
+kubectl -n ai-sre create job --from=cronjob/litellm-db-backup litellm-db-backup-manual-$(date +%s)
 ```
 
 **Restore from SQL dump (`.sql.gz`):**
@@ -368,6 +375,52 @@ rest is CLI.
 
     A completed job with no `shared Google Drive client_id` NOTICE is the
     finished state.
+
+### 3.2 Draining a node that hosts a single-instance CNPG cluster
+
+`platform-postgresql-cluster-non` and `platform-litellm-db-cluster` both run at
+`instances: 1` on purpose. A single-instance CNPG cluster has no standby to
+promote, so its `<cluster>-primary` PodDisruptionBudget reports **0 allowed
+disruptions permanently** — not transiently. `kubectl drain` retries the
+eviction until its `--timeout` expires, then fails, leaving the pod running and
+the node half-drained:
+
+```
+error when evicting pods/"platform-litellm-db-cluster-1" -n "ai-sre":
+  Cannot evict pod as it would violate the pod's disruption budget.
+```
+
+Waiting longer does not help. Delete the pod directly instead — a delete is not
+an eviction, so it is not checked against the PDB, and the grace period still
+gives Postgres a clean checkpoint and shutdown, so no crash recovery is needed
+on the way back up.
+
+```bash
+# 0. See what will block before starting. drain-check reports these as
+#    `pdbAtZero` — it models placement, not eviction pacing, so a node can be
+#    "drainable" here and still hang on a PDB. See
+#    docs/memory-efficiency/07-drain-feasibility.md.
+platformctl cluster drain-check
+
+# 1. Drain everything that CAN move. Expect failures on the single-instance
+#    clusters and on the Longhorn instance-managers, which are also PDB-bound.
+kubectl drain <node> --ignore-daemonsets --delete-emptydir-data --force --timeout=360s
+
+# 2. Shut the stragglers down gracefully. The node stays cordoned from step 1,
+#    so they go Pending rather than rescheduling onto a node about to reboot.
+kubectl delete pod -n ai-sre platform-litellm-db-cluster-1 --grace-period=60
+kubectl delete pod -n database platform-postgresql-cluster-non-3 --grace-period=60
+
+# 3. Confirm they are gone before touching the host.
+kubectl get pods -A --field-selector spec.nodeName=<node> | grep -v Completed
+```
+
+Multi-instance clusters need none of this: `platform-postgresql-cluster-prd`
+has replicas, so CNPG fails the primary over by itself and the drain evicts it
+without complaint.
+
+After the host returns, `kubectl uncordon <node>`, then confirm each cluster
+reports `1/1 Running` again and that `platform-vault-*` still has quorum.
 
 ## 4. TLS certs
 

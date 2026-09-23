@@ -1,0 +1,131 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: litellm-db-backup
+  namespace: ai-sre
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  # Same 6h interval as the database namespace's postgres-backup, offset by
+  # half an hour so the two jobs do not refresh the same Drive token at the
+  # same moment. The interval itself is load-bearing: the generic
+  # CronJobHasNotSucceededRecently rule fires at 24h, which its own comment
+  # sizes as four times the slowest CronJob in this repo. Scheduling this one
+  # less often than every 6h would need a dedicated rule instead.
+  schedule: "30 */6 * * *"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # failedJobsHistoryLimit only prunes old Jobs when a *new* failure pushes
+      # the count over the limit, so one old failed Job would otherwise linger
+      # forever and keep kube_job_failed pinned at 1.
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: OnFailure
+          # 999 is the postgres account baked into the postgres image. fsGroup
+          # is what makes the shared backup volume writable by the dump
+          # container and readable by the upload container after it.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: dump
+              image: postgres:17@sha256:f4c66b820c6f974249089d3d16d86a3698eae11e8746eb6644b2271031e91232
+              # Requests only, no limits: pod QoS is computed across init
+              # containers too, so an unbounded one here drops the whole backup
+              # pod to BestEffort. A memory ceiling is the wrong lever anyway --
+              # pg_dumpall's footprint scales with the largest table it streams,
+              # and an OOM kill silently costs a backup rather than capping
+              # anything worth capping.
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: platform-litellm-db-cluster-superuser
+                      key: password
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  pg_dumpall \
+                    -h platform-litellm-db-cluster-rw.ai-sre.svc \
+                    -U postgres \
+                    --clean --if-exists \
+                  | gzip > /backup/litellm-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
+              # The dump streams straight to the backup volume and the password
+              # arrives by environment, so the image's own filesystem stays
+              # read-only.
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - mountPath: /backup
+                  name: backup
+          containers:
+            - name: upload
+              image: rclone/rclone:1.74.4@sha256:c61954aaa32328a5486715dd063a81c7879f5195ad3505cd362deddd509dc4a1
+              # rclone streams in fixed-size chunks, so unlike pg_dumpall its
+              # footprint does not scale with dump size and a ceiling here
+              # cannot turn a large dump into a lost backup.
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 256Mi
+              env:
+                # rclone rewrites its config in place whenever it refreshes the
+                # Drive access token, and the secret mount is read-only. Copying
+                # it to a scratch path keeps the write target valid while the
+                # rest of the filesystem stays sealed; the default location is
+                # under a home directory this uid does not have.
+                - name: RCLONE_CONFIG
+                  value: /tmp/rclone.conf
+              # Its own subdirectory, so this delete cannot reach the prd dumps
+              # in the parent. The sibling job's delete is recursive and does
+              # reach in here, but applies the identical 7d rule, so either job
+              # expiring these files produces the same result.
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  cp /rclone-config/rclone.conf "$RCLONE_CONFIG"
+                  rclone copy /backup gdrive:postgres-backups/litellm
+                  rclone delete gdrive:postgres-backups/litellm --min-age 7d || true
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - mountPath: /backup
+                  name: backup
+                - mountPath: /rclone-config
+                  name: rclone-config
+                  readOnly: true
+                - mountPath: /tmp
+                  name: tmp
+          volumes:
+            - name: backup
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
+            - name: rclone-config
+              secret:
+                secretName: rclone-gdrive

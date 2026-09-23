@@ -454,6 +454,16 @@ services:
     postInstall: false
     syncWave: 4
 
+  # Wave 5, not 4: the dump target is the litellm-db cluster created in wave 4.
+  - name: litellm-db-backup
+    chart: ""
+    repo: ""
+    revision: ""
+    namespace: ai-sre
+    rawManifests: true
+    postInstall: false
+    syncWave: 5
+
   # Wave 5: AI-SRE LiteLLM gateway (depends on litellm-db wave 4).
   # Vendored chart: upstream hardcodes a purged bitnami image in the db-ready
   # init container — see helm-charts/litellm-helm/README.md.
