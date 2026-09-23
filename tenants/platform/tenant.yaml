@@ -107,7 +107,7 @@ services:
   - name: argo-cd
     chart: argo-cd
     repo: https://argoproj.github.io/argo-helm
-    revision: 10.8.0
+    revision: 10.9.2
     namespace: argocd
     postInstall: true
     syncWave: 0
@@ -129,7 +129,7 @@ services:
   - name: cilium
     chart: cilium
     repo: https://helm.cilium.io
-    revision: 1.20.1
+    revision: 1.20.2
     namespace: kube-system
     postInstall: true
     syncWave: 1
@@ -137,7 +137,7 @@ services:
   - name: cert-manager
     chart: cert-manager
     repo: https://charts.jetstack.io
-    revision: v1.21.1
+    revision: v1.21.2
     namespace: cert-manager
     postInstall: true
     syncWave: 1
@@ -163,7 +163,7 @@ services:
   - name: nginx-gateway-fabric
     chart: nginx-gateway-fabric
     repo: ghcr.io/nginx/charts
-    revision: 2.7.0
+    revision: 2.7.2
     namespace: nginx-gateway
     postInstall: true
     syncWave: 1
@@ -225,7 +225,7 @@ services:
   - name: external-secrets
     chart: external-secrets
     repo: https://charts.external-secrets.io
-    revision: 2.10.0
+    revision: 2.11.0
     namespace: external-secrets
     postInstall: true
     syncWave: 2
@@ -257,7 +257,7 @@ services:
   - name: monitoring
     chart: k8s-monitoring
     repo: https://grafana.github.io/helm-charts
-    revision: 4.5.0
+    revision: 4.5.2
     namespace: monitoring
     postInstall: false
     syncWave: 2
@@ -265,7 +265,7 @@ services:
   - name: grafana
     chart: grafana
     repo: https://grafana-community.github.io/helm-charts
-    revision: 13.2.1
+    revision: 13.2.5
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -375,7 +375,7 @@ services:
   - name: reloader
     chart: reloader
     repo: https://stakater.github.io/stakater-charts
-    revision: 2.2.16
+    revision: 2.2.17
     namespace: reloader
     postInstall: false
     syncWave: 2
@@ -470,7 +470,7 @@ services:
   - name: holmes
     chart: holmes
     repo: https://robusta-charts.storage.googleapis.com
-    revision: 0.40.0
+    revision: 0.42.0
     namespace: ai-sre
     postInstall: true
     syncWave: 5
