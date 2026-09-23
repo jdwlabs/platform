@@ -34,3 +34,15 @@ notVendored:
     No consumer in this cluster. NGINX Gateway Fabric disables its
     BackendTLSPolicy controller at startup as a result; adopting the kind is a
     decision for the bundle upgrade, not a side effect of this pin.
+  listenersets.gateway.networking.k8s.io: >-
+    No consumer in this cluster: nothing here shares listeners across Gateways,
+    and NGINX Gateway Fabric does not reconcile the kind.
+  xbackends.gateway.networking.x-k8s.io: >-
+    Experimental x-k8s.io kind with no consumer here; its API can change
+    between minors, so adopting it is a decision of its own.
+  xbackendtrafficpolicies.gateway.networking.x-k8s.io: >-
+    Experimental x-k8s.io kind with no consumer here; traffic policy in this
+    cluster is set on the routes themselves.
+  xmeshes.gateway.networking.x-k8s.io: >-
+    Experimental x-k8s.io kind for mesh conformance; this cluster runs no
+    service mesh.
