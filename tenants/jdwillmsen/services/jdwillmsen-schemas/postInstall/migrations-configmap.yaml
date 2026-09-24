@@ -399,3 +399,53 @@ data:
         token      TEXT        NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+  V8__minecraft_presence.sql: |
+    -- Runtime deviations from each actor's presence default.
+    --
+    -- The default lives in Helm values and git stays the source of truth for
+    -- it, so this table holds only the exceptions: one row per actor at most,
+    -- and no row means the default applies. Storing every actor's desired
+    -- state instead would give git and the database two answers to the same
+    -- question, and clearing an override would have to know what to restore.
+    --
+    -- actor_id is the registry slug (agent, afk-bot-1), not an XUID, and not a
+    -- foreign key to minecraft.players: the agent's own account is not a
+    -- tracked player, and an actor must be parkable before it has ever joined.
+    --
+    -- version exists only to reject a write based on a stale read. It is not
+    -- a history -- a removed override takes its count with it, and the next
+    -- one starts again at 1 -- because every change is already recorded in
+    -- the audit log with its source and reason.
+    CREATE TABLE IF NOT EXISTS minecraft.presence_overrides
+    (
+        actor_id  TEXT        NOT NULL PRIMARY KEY,
+        state     TEXT        NOT NULL CHECK (state IN ('present', 'parked')),
+        -- Null means until someone clears it, which is what the parked-long
+        -- alert watches for.
+        until     TIMESTAMPTZ,
+        wake_on   JSONB,
+        reason    TEXT        NOT NULL,
+        set_by    TEXT        NOT NULL,
+        set_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+        version   BIGINT      NOT NULL
+    );
+
+    -- What each actor last reported about itself.
+    --
+    -- A separate table because it has a different writer and lifetime than an
+    -- override: the actor overwrites its own row on every poll, whether or not
+    -- anyone has overridden it, and the row outlives every override. Comparing
+    -- observed_state here with the effective state is how the alerts tell a
+    -- deliberate park from an actor that fell over.
+    --
+    -- Both tables fall under V2's default privileges for app, as every table
+    -- since V3 has.
+    CREATE TABLE IF NOT EXISTS minecraft.presence_status
+    (
+        actor_id        TEXT        NOT NULL PRIMARY KEY,
+        connected       BOOLEAN     NOT NULL,
+        observed_state  TEXT        NOT NULL CHECK (observed_state IN ('present', 'parked')),
+        last_seen       TIMESTAMPTZ NOT NULL,
+        process_version TEXT        NOT NULL DEFAULT ''
+    );
