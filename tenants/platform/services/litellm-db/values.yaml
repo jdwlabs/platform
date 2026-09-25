@@ -4,6 +4,20 @@ type: postgresql
 mode: standalone
 
 cluster:
+  # Explicit and deliberate, like postgresql-cluster-non: nothing depends on
+  # the LiteLLM gateway surviving a single node going away. A host power cycle
+  # cost roughly ten minutes of AI-SRE alert investigation and the cluster
+  # returned by itself. Two replicas would add ~512Mi of requests, two more
+  # Longhorn volumes, a place in the three-way `required` anti-affinity
+  # budgeting docs/memory-efficiency/06 and 07 work through, and HA alerting
+  # built before they would be observable at all — standing cost against a rare
+  # short window. The risk actually worth money here was the absence of any
+  # backup, which litellm-db-backup now covers; replication would not have
+  # helped there, since it copies a bad DROP as faithfully as a good write.
+  #
+  # Consequence to know before draining a node: with one instance the CNPG
+  # `-primary` PodDisruptionBudget sits at 0 allowed disruptions permanently,
+  # so eviction never succeeds. See the drain procedure in docs/OPERATIONS.md.
   instances: 1
   storage:
     size: 5Gi
