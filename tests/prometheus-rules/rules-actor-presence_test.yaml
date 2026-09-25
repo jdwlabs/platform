@@ -1,0 +1,569 @@
+# Unit tests for JdwillmsenMinecraftAfkBotsDegraded.
+#
+# Parking takes an AFK bot out of the world at runtime without touching its
+# Deployment, so "the bot is not in the world" stopped being a fault on its
+# own. The bot rule now pages on a bot wanted in the world and not there, from
+# the agent's presence series, and keeps a Deployment branch for what those
+# series cannot report: every presence series gone, because the agent is down
+# or its presence store is not ready.
+#
+# Rule files are extracted from the PrometheusRule manifests under tenants/ by
+# run.sh, since promtool reads bare rule groups and not the CRD wrapper.
+rule_files:
+  - rules/jdwillmsen-tenant-alerts.yaml
+evaluation_interval: 1m
+tests:
+  # Parked on purpose: the bot leaves the world a minute after its desired
+  # state flips, and its pod keeps running. Under the old rule a runtime
+  # switch did not exist; this is what it has to stay quiet for.
+  - interval: 1m
+    name: a parked bot never pages
+    input_series:
+      - series: 'mc_presence_desired{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '1+0x59 0+0x300'
+      - series: 'mc_presence_observed{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '1+0x60 0+0x300'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x360'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x360'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x360'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x360'
+    alert_rule_test:
+      - eval_time: 95m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 6h
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+
+
+  # Wanted and absent, with the pod running — the bot cannot join. Pages on
+  # the rule's thirty-minute window for that bot only; the agent being out of
+  # the world at the same time is its own rule's business, not this one's.
+  - interval: 1m
+    name: a bot desired present but absent pages after thirty minutes
+    input_series:
+      - series: 'mc_presence_desired{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '1+0x200'
+      - series: 'mc_presence_observed{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '1+0x60 0+0x140'
+      - series: 'mc_presence_desired{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-2"}'
+        values: '1+0x200'
+      - series: 'mc_presence_observed{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-2"}'
+        values: '1+0x200'
+      - series: 'mc_presence_desired{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="agent"}'
+        values: '1+0x200'
+      - series: 'mc_presence_observed{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="agent"}'
+        values: '1+0x60 0+0x140'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x200'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x200'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x360'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x360'
+    alert_rule_test:
+      # Twenty-nine minutes out: inside the window a server restart and the
+      # bot's own backoff are allowed.
+      - eval_time: 89m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 92m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An AFK bot that should be in the world is not"
+              description: >-
+                AFK bot afk-bot-1 should be in the world and has been out of it for most
+                of the last thirty minutes. A parked bot never raises this; check `tools/mc presence ls`
+                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+                the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+
+  # The shape the old Deployment-level rule was documented as blind to: the
+  # pod runs, the bot joins, and the session ends a minute later, over and
+  # over. Every short session would reset a `for:` on `== 0`.
+  - interval: 1m
+    name: a bot that keeps dropping straight after joining still pages
+    input_series:
+      - series: 'mc_presence_desired{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-2"}'
+        values: '1+0x120'
+      - series: 'mc_presence_observed{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-2"}'
+        values: '1+0x60 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x120'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x120'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x360'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x360'
+    alert_rule_test:
+      - eval_time: 115m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-2
+            exp_annotations:
+              summary: "An AFK bot that should be in the world is not"
+              description: >-
+                AFK bot afk-bot-2 should be in the world and has been out of it for most
+                of the last thirty minutes. A parked bot never raises this; check `tools/mc presence ls`
+                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+                the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+
+  # The agent is down, so no presence series exist at all, and a bot pod will
+  # not start. The Deployment branch is the only thing that can still see
+  # it, and it pages on the same thirty minutes the old rule did.
+  - interval: 1m
+    name: with no presence series a bot pod that will not run still pages
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x60 0+0x140'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x200'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x200'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x200'
+    alert_rule_test:
+      - eval_time: 89m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 92m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              deployment: jdwillmsen-minecraft-fwb-prd-afk-bot
+            exp_annotations:
+              summary: "An AFK bot that should be in the world is not"
+              description: >-
+                Deployment jdwillmsen-minecraft-fwb-prd-afk-bot has had no available replica for
+                most of the last thirty minutes. A parked bot never raises this; check `tools/mc presence ls`
+                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+                the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+
+  # A bot pod that dies stops reporting, and the agent ages its last report
+  # out after sixty seconds, so observed reads 0 a minute after the pod goes.
+  # The presence branch pages for that actor, and the Deployment branch stays
+  # quiet for a bot whose presence series exist: one fault, one page.
+  - interval: 1m
+    name: a dead bot pod pages once, on the presence branch
+    input_series:
+      - series: 'mc_presence_desired{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '1+0x200'
+      - series: 'mc_presence_observed{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '1+0x61 0+0x139'
+      - series: 'mc_presence_desired{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-2"}'
+        values: '1+0x200'
+      - series: 'mc_presence_observed{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-2"}'
+        values: '1+0x200'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x60 0+0x140'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x200'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x360'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x360'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 92m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An AFK bot that should be in the world is not"
+              description: >-
+                AFK bot afk-bot-1 should be in the world and has been out of it for most
+                of the last thirty minutes. A parked bot never raises this; check `tools/mc presence ls`
+                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+                the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 3h
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An AFK bot that should be in the world is not"
+              description: >-
+                AFK bot afk-bot-1 should be in the world and has been out of it for most
+                of the last thirty minutes. A parked bot never raises this; check `tools/mc presence ls`
+                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+                the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+
+  # The same for bot 2, whose Deployment carries a suffix: the Deployment
+  # branch stands down through the afk-bot-N mapping rather than the special
+  # case for bot 1, so a break in that mapping would page twice here.
+  - interval: 1m
+    name: a dead afk-bot-2 pod pages once, on the presence branch
+    input_series:
+      - series: 'mc_presence_desired{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '1+0x200'
+      - series: 'mc_presence_observed{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '1+0x200'
+      - series: 'mc_presence_desired{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-2"}'
+        values: '1+0x200'
+      - series: 'mc_presence_observed{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-2"}'
+        values: '1+0x61 0+0x139'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x360'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x200'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x60 0+0x140'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x360'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 92m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-2
+            exp_annotations:
+              summary: "An AFK bot that should be in the world is not"
+              description: >-
+                AFK bot afk-bot-2 should be in the world and has been out of it for most
+                of the last thirty minutes. A parked bot never raises this; check `tools/mc presence ls`
+                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+                the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 3h
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-2
+            exp_annotations:
+              summary: "An AFK bot that should be in the world is not"
+              description: >-
+                AFK bot afk-bot-2 should be in the world and has been out of it for most
+                of the last thirty minutes. A parked bot never raises this; check `tools/mc presence ls`
+                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+                the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+
+  # replicas: 0 in git is the documented maintenance switch, and it leaves the
+  # bot's desired state at present, so the presence branch sees a bot wanted
+  # and absent. Asking for no replica is not a replica going missing, and
+  # scaling back up must not page on the minutes spent at zero either: the
+  # pod is available three minutes after the scale-up and the bot joins a
+  # minute later.
+  - interval: 1m
+    name: a bot Deployment scaled to zero in git and back never pages
+    input_series:
+      - series: 'mc_presence_desired{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-2"}'
+        values: '1+0x360'
+      - series: 'mc_presence_observed{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-2"}'
+        values: '1+0x60 0+0x73 1+0x226'
+      - series: 'mc_presence_desired{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '1+0x360'
+      - series: 'mc_presence_observed{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '1+0x360'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x60 0+0x72 1+0x227'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x59 0+0x70 1+0x230'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x360'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x360'
+    alert_rule_test:
+      - eval_time: 95m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 125m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 140m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 146m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 150m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 165m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 6h
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+
+
+  # The same maintenance with the agent down, so only the Deployment branch
+  # can see it.
+  - interval: 1m
+    name: with no presence series a bot Deployment scaled to zero and back never pages
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x60 0+0x72 1+0x227'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x59 0+0x70 1+0x230'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x360'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x360'
+    alert_rule_test:
+      - eval_time: 95m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 125m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 140m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 146m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 150m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 165m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 6h
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+
+
+  # Scaling a bot that is already paging to zero is how an operator takes it
+  # out for maintenance: the page clears on the next evaluation, as parking
+  # does, instead of draining out of a thirty-minute average.
+  - interval: 1m
+    name: scaling a paging bot to zero in git clears the page at once
+    input_series:
+      - series: 'mc_presence_desired{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '1+0x200'
+      - series: 'mc_presence_observed{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '1+0x60 0+0x140'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x100 0+0x100'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x99 0+0x101'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x200'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x200'
+    alert_rule_test:
+      - eval_time: 99m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An AFK bot that should be in the world is not"
+              description: >-
+                AFK bot afk-bot-1 should be in the world and has been out of it for most
+                of the last thirty minutes. A parked bot never raises this; check `tools/mc presence ls`
+                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+                the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 100m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 110m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts: []
+
+
+  # A leader handover is not seamless. The leader stepping down resets its
+  # presence gauges, which ends their series with a stale marker, and the next
+  # one exports nothing until it has taken the lock, run a tick and been
+  # scraped. Here the old leader's last sample is at 100m and the new leader's
+  # first at 103m, the longest gap the three-minute bridge covers: the alert
+  # must stay firing straight through it rather than resolve and re-fire, and
+  # the Deployment branch must not step in while the pod is still running.
+  - interval: 1m
+    name: a leader handover with a gap mid-outage keeps one alert firing
+    input_series:
+      - series: 'mc_presence_desired{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '1+0x100 stale'
+      - series: 'mc_presence_observed{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '1+0x60 0+0x39 stale'
+      - series: 'mc_presence_desired{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-7c9d0e1f86-fghij",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '_x103 1+0x30'
+      - series: 'mc_presence_observed{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-7c9d0e1f86-fghij",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '_x103 0+0x30'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x133'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot",job="kube-state-metrics"}'
+        values: '1+0x133'
+      - series: 'kube_deployment_status_replicas_available{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x133'
+      - series: 'kube_deployment_spec_replicas{namespace="jdwillmsen-prd",deployment="jdwillmsen-minecraft-fwb-prd-afk-bot-2",job="kube-state-metrics"}'
+        values: '1+0x133'
+    alert_rule_test:
+      - eval_time: 92m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An AFK bot that should be in the world is not"
+              description: >-
+                AFK bot afk-bot-1 should be in the world and has been out of it for most
+                of the last thirty minutes. A parked bot never raises this; check `tools/mc presence ls`
+                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+                the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 100m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An AFK bot that should be in the world is not"
+              description: >-
+                AFK bot afk-bot-1 should be in the world and has been out of it for most
+                of the last thirty minutes. A parked bot never raises this; check `tools/mc presence ls`
+                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+                the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 102m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An AFK bot that should be in the world is not"
+              description: >-
+                AFK bot afk-bot-1 should be in the world and has been out of it for most
+                of the last thirty minutes. A parked bot never raises this; check `tools/mc presence ls`
+                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+                the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 103m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An AFK bot that should be in the world is not"
+              description: >-
+                AFK bot afk-bot-1 should be in the world and has been out of it for most
+                of the last thirty minutes. A parked bot never raises this; check `tools/mc presence ls`
+                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+                the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 105m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An AFK bot that should be in the world is not"
+              description: >-
+                AFK bot afk-bot-1 should be in the world and has been out of it for most
+                of the last thirty minutes. A parked bot never raises this; check `tools/mc presence ls`
+                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+                the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 120m
+        alertname: JdwillmsenMinecraftAfkBotsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An AFK bot that should be in the world is not"
+              description: >-
+                AFK bot afk-bot-1 should be in the world and has been out of it for most
+                of the last thirty minutes. A parked bot never raises this; check `tools/mc presence ls`
+                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+                the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
