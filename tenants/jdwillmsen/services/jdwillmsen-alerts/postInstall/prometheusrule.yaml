@@ -577,32 +577,124 @@ spec:
               world is intact.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
-        # sum() rather than count(... > 0): with both bots down the count form
-        # matches nothing and the alert goes silent at exactly the moment it
-        # matters most — an empty vector fires no comparison. The sum exists
-        # as long as the Deployments do, and both Deployments disappearing is
-        # ArgoCD-drift territory, not this rule's.
+        # Two branches, each a question the other cannot answer.
+        #
+        # The presence branch is the one that knows intent: per actor, it
+        # accumulates the minutes a bot was wanted in the world and was not
+        # there, so a bot parked on purpose never raises it and a bot that
+        # joins for a moment and drops again (the shape a protocol-schema
+        # change the 0.2.0 spoof cannot bridge leaves behind) still does,
+        # instead of resetting a `for:` clock on every short session. Over half
+        # of thirty minutes plus a fifteen-minute hold is thirty minutes for a
+        # clean drop, the same window as before: a server restart disconnects
+        # both bots by design and their own backoff has them back well inside
+        # it. actor!="agent" rather than a list of bot ids, so a bot added to
+        # the chart's actor list is covered without touching this rule. A bot
+        # pod that dies is caught here too: the agent ages a bot's last status
+        # report out after sixty seconds, so its observed state reads 0 a
+        # minute after the pod goes.
+        #
+        # replicas: 0 in git is the maintenance switch and leaves the bot's
+        # desired state at present, so the presence branch would otherwise see
+        # a bot wanted and absent. Minutes at zero replicas count as nothing
+        # owed, like parked minutes, so scaling back up does not page on the
+        # time spent down; the outer guard clears a page at once on scaling
+        # down, as a park does. Deployments are named by the chart's valuesKey,
+        # not by actor id: bot runs as <release>-afk-bot and bot2 as
+        # <release>-afk-bot-2. The rule relies on the actor ids afk-bot-1 and
+        # afk-bot-2 following that convention, afk-bot-1 for the unsuffixed
+        # Deployment and afk-bot-N for the one suffixed -N. A rename that breaks
+        # the mapping fails loud, paging on a scale-down, never silent.
+        #
+        # Every presence selector reads last_over_time over three minutes, for
+        # the same leader-handover reason as JdwillmsenMinecraftAgentDisconnected
+        # below: the old leader's series end with a stale marker and the new
+        # one's appear only after it has taken the lock, run a tick and been
+        # scraped. A gap of up to three minutes is bridged and one alert keeps
+        # firing; a longer one resolves and re-fires, it does not go silent.
+        #
+        # The Deployment branch covers the case with no presence series for a
+        # bot at all: the agent is down, no leader has taken the lock, presence
+        # is switched off, or its store is not ready because the presence
+        # tables are not migrated. kube-state-metrics still sees a bot pod that
+        # will not run. It stands down for any bot whose presence series exist,
+        # since the presence branch already pages on a dead pod a minute later
+        # and one fault should raise one page; a parked bot's pod is then not
+        # this rule's concern either. Minutes at zero spec replicas count as
+        # nothing owed here as well, and parking never changes replica counts,
+        # so parking cannot trip this branch.
         #
         # Warning, not critical: the bots keep the mob farm ticking and the
         # chat log flowing, but nothing player-facing breaks while they are
-        # down. 30m so a server restart (which disconnects both, by design,
-        # roughly hourly when a version bump lands) never pages — their own
-        # backoff reconnects them well inside that.
+        # down.
         - alert: JdwillmsenMinecraftAfkBotsDegraded
-          expr: sum(kube_deployment_status_replicas_available{namespace="jdwillmsen-prd", deployment=~"jdwillmsen-minecraft-fwb-prd-afk-bot(-2)?"}) < 2
-          for: 30m
+          expr: |
+            (
+              avg_over_time(
+                (
+                  (
+                    max by (namespace, actor) (last_over_time(mc_presence_desired{namespace="jdwillmsen-prd", actor!="agent"}[3m]))
+                    unless on (namespace, actor)
+                    label_replace(
+                      label_replace(
+                        max by (namespace, deployment) (kube_deployment_spec_replicas{namespace="jdwillmsen-prd", deployment=~"jdwillmsen-minecraft-fwb-prd-afk-bot(-.+)?"}) == 0,
+                        "actor", "afk-bot-1", "deployment", "jdwillmsen-minecraft-fwb-prd-afk-bot"
+                      ),
+                      "actor", "afk-bot-$1", "deployment", "jdwillmsen-minecraft-fwb-prd-afk-bot-(.+)"
+                    )
+                    or
+                    max by (namespace, actor) (last_over_time(mc_presence_desired{namespace="jdwillmsen-prd", actor!="agent"}[3m])) * 0
+                  )
+                  * on (namespace, actor)
+                  (1 - max by (namespace, actor) (last_over_time(mc_presence_observed{namespace="jdwillmsen-prd", actor!="agent"}[3m])))
+                )[30m:1m]
+              ) > 0.5
+              and on (namespace, actor)
+              max by (namespace, actor) (last_over_time(mc_presence_desired{namespace="jdwillmsen-prd", actor!="agent"}[3m])) == 1
+              unless on (namespace, actor)
+              label_replace(
+                label_replace(
+                  max by (namespace, deployment) (kube_deployment_spec_replicas{namespace="jdwillmsen-prd", deployment=~"jdwillmsen-minecraft-fwb-prd-afk-bot(-.+)?"}) == 0,
+                  "actor", "afk-bot-1", "deployment", "jdwillmsen-minecraft-fwb-prd-afk-bot"
+                ),
+                "actor", "afk-bot-$1", "deployment", "jdwillmsen-minecraft-fwb-prd-afk-bot-(.+)"
+              )
+            )
+            or
+            (
+              avg_over_time(
+                (
+                  (1 - clamp_max(max by (namespace, deployment) (kube_deployment_status_replicas_available{namespace="jdwillmsen-prd", deployment=~"jdwillmsen-minecraft-fwb-prd-afk-bot(-.+)?"}), 1))
+                  * on (namespace, deployment)
+                  clamp_max(max by (namespace, deployment) (kube_deployment_spec_replicas{namespace="jdwillmsen-prd", deployment=~"jdwillmsen-minecraft-fwb-prd-afk-bot(-.+)?"}), 1)
+                )[30m:1m]
+              ) > 0.5
+              and on (namespace, deployment)
+              max by (namespace, deployment) (kube_deployment_spec_replicas{namespace="jdwillmsen-prd", deployment=~"jdwillmsen-minecraft-fwb-prd-afk-bot(-.+)?"}) > 0
+              unless on (namespace, deployment)
+              label_replace(
+                label_replace(
+                  max by (namespace, actor) (last_over_time(mc_presence_desired{namespace="jdwillmsen-prd", actor!="agent"}[3m])),
+                  "deployment", "jdwillmsen-minecraft-fwb-prd-$1", "actor", "(afk-bot-.+)"
+                ),
+                "deployment", "jdwillmsen-minecraft-fwb-prd-afk-bot", "actor", "afk-bot-1"
+              )
+            )
+          for: 15m
           labels:
             severity: warning
             tenant: jdwillmsen
             namespace: jdwillmsen-prd
           annotations:
-            summary: "Fewer than two AFK bots are running"
+            summary: "An AFK bot that should be in the world is not"
             description: >-
-              At least one AFK bot Deployment has had no available replica for 30 minutes. The mob farm stops ticking
-              and chat capture pauses with bot 1. Deployment-level, so this is a pod that will not run — not a bot that
-              runs but cannot join the server; that shape (a protocol-schema change the 0.2.0 spoof cannot bridge) shows
-              as protocol_spoofed log lines followed by short session_lasted_ms reconnect events instead, with this
-              rule quiet. Check both bot pods and their logs in jdwillmsen-prd.
+              {{ if $labels.actor }}AFK bot {{ $labels.actor }} should be in the world and has been out of it for most
+              of the last thirty minutes{{ else }}Deployment {{ $labels.deployment }} has had no available replica for
+              most of the last thirty minutes{{ end }}. A parked bot never raises this; check `tools/mc presence ls`
+              if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
+              pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
+              protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
+              the bot pods and their logs in jdwillmsen-prd.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
         # jdwillmsen-minecraft-fwb-prd-server-agent has published mc_agent_connected
