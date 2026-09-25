@@ -829,10 +829,45 @@ spec:
             summary: "No connection signal exists for the Minecraft chat agent"
             description: >-
               mc_agent_connected has not been scraped from jdwillmsen-prd for fifteen minutes. The agent may be
-              connected fine, but nothing can now tell you if it is not — JdwillmsenMinecraftAgentDisconnected reads
-              this series and is silent while it is missing. Check the jdwillmsen-minecraft-fwb-prd-server-agent
-              Deployment, its pod, and its ServiceMonitor in jdwillmsen-prd. If the agent is being retired
-              deliberately, delete these rules in the same change.
+              connected fine, but nothing can now tell you if it is not — its presence series come from the same pod,
+              and JdwillmsenMinecraftAgentDisconnected falls back to this series once they are gone, so it is silent
+              while this one is missing. Check the jdwillmsen-minecraft-fwb-prd-server-agent Deployment, its pod, and
+              its ServiceMonitor in jdwillmsen-prd. If the agent is being retired deliberately, delete these rules in
+              the same change.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # A park with no expiry is the one runtime override nothing brings back
+        # on its own: no timer, and a bot's park carries no wake trigger unless
+        # someone set one. Git stays the baseline only while overrides stay
+        # deviations, so one that outlives a day is either forgotten or has
+        # become the new baseline and belongs in the chart's actor defaults.
+        # Moving it there does not clear it: the override sits on top of any
+        # default and outlives the change, so it still needs unparking once the
+        # new default has synced, or this keeps warning.
+        # The gauge exists only for overrides without `until`, which is every
+        # case this rule is about, and it only ever grows, so `for:` has no
+        # jitter to smooth; it is a short hold on a warning with no reason to
+        # hurry.
+        #
+        # The gauge is leader-only, so it reads last_over_time over three
+        # minutes for the same handover reason as the presence rules above: a
+        # gap of up to three minutes keeps one warning firing, a longer one
+        # resolves and re-fires after the hold. The cost is that clearing the
+        # override, which deletes the series, resolves the warning up to three
+        # minutes late rather than at once.
+        - alert: JdwillmsenMinecraftActorParkedLong
+          expr: max by (namespace, actor) (last_over_time(mc_presence_override_age_seconds{namespace="jdwillmsen-prd"}[3m])) > 86400
+          for: 5m
+          labels:
+            severity: warning
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+          annotations:
+            summary: "An actor has held a runtime override with no expiry for over a day"
+            description: >-
+              {{ $labels.actor }} has had a presence override with no `until` for {{ $value | humanizeDuration }}.
+              Nothing clears it on its own. If it is still wanted, make it the actor's default in the minecraft-fwb
+              chart values; otherwise clear it with `tools/mc presence unpark {{ $labels.actor }}`.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
         # The world only grows, and a full datadir kills the server harder

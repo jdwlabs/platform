@@ -127,10 +127,11 @@ tests:
               summary: "No connection signal exists for the Minecraft chat agent"
               description: >-
                 mc_agent_connected has not been scraped from jdwillmsen-prd for fifteen minutes. The agent may be
-                connected fine, but nothing can now tell you if it is not — JdwillmsenMinecraftAgentDisconnected reads
-                this series and is silent while it is missing. Check the jdwillmsen-minecraft-fwb-prd-server-agent
-                Deployment, its pod, and its ServiceMonitor in jdwillmsen-prd. If the agent is being retired
-                deliberately, delete these rules in the same change.
+                connected fine, but nothing can now tell you if it is not — its presence series come from the same pod,
+                and JdwillmsenMinecraftAgentDisconnected falls back to this series once they are gone, so it is silent
+                while this one is missing. Check the jdwillmsen-minecraft-fwb-prd-server-agent Deployment, its pod, and
+                its ServiceMonitor in jdwillmsen-prd. If the agent is being retired deliberately, delete these rules in
+                the same change.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
       - eval_time: 3h
         alertname: JdwillmsenMinecraftAgentDisconnected
