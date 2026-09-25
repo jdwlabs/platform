@@ -1,4 +1,5 @@
-# Unit tests for JdwillmsenMinecraftAfkBotsDegraded.
+# Unit tests for JdwillmsenMinecraftAfkBotsDegraded and
+# JdwillmsenMinecraftActorParkedLong.
 #
 # Parking takes an AFK bot out of the world at runtime without touching its
 # Deployment, so "the bot is not in the world" stopped being a fault on its
@@ -566,4 +567,146 @@ tests:
                 pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
                 protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
                 the bot pods and their logs in jdwillmsen-prd.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # An override with no `until` crosses a day: warn, and name the actor.
+  - interval: 1m
+    name: an override older than a day warns
+    input_series:
+      - series: 'mc_presence_override_age_seconds{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '86000+60x30'
+    alert_rule_test:
+      # Past 86400 at 7m, so still inside the five-minute hold at 11m.
+      - eval_time: 11m
+        alertname: JdwillmsenMinecraftActorParkedLong
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: JdwillmsenMinecraftActorParkedLong
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An actor has held a runtime override with no expiry for over a day"
+              description: >-
+                afk-bot-1 has had a presence override with no `until` for 1d 0h 5m 20s.
+                Nothing clears it on its own. If it is still wanted, make it the actor's default in the minecraft-fwb
+                chart values; otherwise clear it with `tools/mc presence unpark afk-bot-1`.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # Clearing the override deletes the gauge, which ends its series with a
+  # stale marker, and the warning resolves once the three-minute handover
+  # bridge has run out: the last sample is at 20m, so 22m still fires and 23m
+  # does not. An override with an `until` never has the series at all.
+  - interval: 1m
+    name: clearing a day-old override resolves the warning
+    input_series:
+      - series: 'mc_presence_override_age_seconds{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '90000+60x20 stale'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: JdwillmsenMinecraftActorParkedLong
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An actor has held a runtime override with no expiry for over a day"
+              description: >-
+                afk-bot-1 has had a presence override with no `until` for 1d 1h 15m 0s.
+                Nothing clears it on its own. If it is still wanted, make it the actor's default in the minecraft-fwb
+                chart values; otherwise clear it with `tools/mc presence unpark afk-bot-1`.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 22m
+        alertname: JdwillmsenMinecraftActorParkedLong
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An actor has held a runtime override with no expiry for over a day"
+              description: >-
+                afk-bot-1 has had a presence override with no `until` for 1d 1h 20m 0s.
+                Nothing clears it on its own. If it is still wanted, make it the actor's default in the minecraft-fwb
+                chart values; otherwise clear it with `tools/mc presence unpark afk-bot-1`.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 23m
+        alertname: JdwillmsenMinecraftActorParkedLong
+        exp_alerts: []
+
+  # An override younger than a day is ordinary use.
+  - interval: 1m
+    name: an override younger than a day stays quiet
+    input_series:
+      - series: 'mc_presence_override_age_seconds{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="agent"}'
+        values: '3600+60x60'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: JdwillmsenMinecraftActorParkedLong
+        exp_alerts: []
+
+  # The gauge is leader-only, so a handover ends the old leader's series with
+  # a stale marker and the new leader's starts a tick and a scrape later,
+  # carrying on from the same age. Old last sample at 20m, new first at 23m,
+  # the longest gap the bridge covers: the warning must still be firing at
+  # 23m, where a gap that had resolved it would be back in its five-minute
+  # hold.
+  - interval: 1m
+    name: a leader handover keeps a day-old override warning
+    input_series:
+      - series: 'mc_presence_override_age_seconds{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '86000+60x20 stale'
+      - series: 'mc_presence_override_age_seconds{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-7c9d0e1f86-fghij",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",actor="afk-bot-1"}'
+        values: '_x23 87380+60x20'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: JdwillmsenMinecraftActorParkedLong
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An actor has held a runtime override with no expiry for over a day"
+              description: >-
+                afk-bot-1 has had a presence override with no `until` for 1d 0h 13m 20s.
+                Nothing clears it on its own. If it is still wanted, make it the actor's default in the minecraft-fwb
+                chart values; otherwise clear it with `tools/mc presence unpark afk-bot-1`.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 22m
+        alertname: JdwillmsenMinecraftActorParkedLong
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An actor has held a runtime override with no expiry for over a day"
+              description: >-
+                afk-bot-1 has had a presence override with no `until` for 1d 0h 13m 20s.
+                Nothing clears it on its own. If it is still wanted, make it the actor's default in the minecraft-fwb
+                chart values; otherwise clear it with `tools/mc presence unpark afk-bot-1`.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 23m
+        alertname: JdwillmsenMinecraftActorParkedLong
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              actor: afk-bot-1
+            exp_annotations:
+              summary: "An actor has held a runtime override with no expiry for over a day"
+              description: >-
+                afk-bot-1 has had a presence override with no `until` for 1d 0h 16m 20s.
+                Nothing clears it on its own. If it is still wanted, make it the actor's default in the minecraft-fwb
+                chart values; otherwise clear it with `tools/mc presence unpark afk-bot-1`.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
