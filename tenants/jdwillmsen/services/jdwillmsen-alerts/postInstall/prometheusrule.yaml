@@ -625,9 +625,77 @@ spec:
         # Only a human signing into that Microsoft account in a browser and
         # clearing the security challenge fixes it; once that happens the
         # agent's existing retry loop does the rest unattended.
+        #
+        # The agent can now be parked on purpose, out of the world while it
+        # keeps monitoring. mc_agent_connected is still exported and reads 0 for
+        # as long as it is parked, so a missing session is only a fault while
+        # its desired state is present. The window lives in the expression, not
+        # in `for:`: the shortfall series is 1 for each minute the agent was
+        # wanted and absent, so a session that connects for a moment and drops
+        # again still accumulates towards the threshold instead of resetting a
+        # `for:` clock, and minutes it spent parked count as nothing owed. Over
+        # half of ten minutes plus a five-minute hold is ten minutes for a clean
+        # drop, the same window as before. Parking it clears the alert
+        # immediately, because the current desired state must also read 1.
+        #
+        # Only desired comes from presence; whether the agent is in the world
+        # comes from mc_agent_connected, not mc_presence_observed. The presence
+        # loop returns before exporting when its store errors or is not ready,
+        # so its gauges freeze at their last values while the series live on:
+        # frozen at desired=1 observed=1, a presence-only rule would sit silent
+        # through a real outage, and the fallback below would stand down for it
+        # because the series still exist. The session gauge is set by the
+        # session itself and does not freeze with the presence loop.
+        #
+        # The presence series are exported by the leader only, and a handover is
+        # not seamless: the leader stepping down resets its gauges, which ends
+        # their series with a stale marker, and the next one exports nothing
+        # until it has taken the lock, run a tick and been scraped. Both
+        # selectors therefore read last_over_time over three minutes. As long
+        # as the new leader's first sample lands within three minutes of the old
+        # one's last, the gap is bridged, and max by drops pod and instance, so
+        # one alert keeps firing across the handover instead of resolving and
+        # re-firing under a new pod name. A gap longer than three minutes is not
+        # bridged: the alert resolves, then re-fires at least five minutes after
+        # the new series appear, once the hold has run again. The fallback does
+        # not cover that gap, because the Deployment is Recreate and
+        # mc_agent_connected disappears with the old pod along with presence. A
+        # park still clears the alert at once, because its desired=0 sample
+        # replaces the old value on the same series. The cost: if a handover
+        # coincides with a park, the old leader's last desired=1 can win the max
+        # for up to three minutes.
+        #
+        # While no presence series exists (no leader has taken the lock yet,
+        # presence is switched off, or its store is not ready because the
+        # presence tables are not migrated), the rule falls back to
+        # mc_agent_connected alone, on the same ten-minute average, so that
+        # case still pages on a clean drop and on a session that keeps
+        # flapping. That fallback cannot tell a parked agent from a lost
+        # session, since mc_agent_connected reads 0 for both: an agent parked
+        # for more than ten minutes whose presence series then vanish pages
+        # about eight minutes later (the three-minute bridge, then the
+        # five-minute hold), and with presence switched off a parked default
+        # pages like any disconnect.
         - alert: JdwillmsenMinecraftAgentDisconnected
-          expr: mc_agent_connected{namespace="jdwillmsen-prd"} == 0
-          for: 10m
+          expr: |
+            (
+              avg_over_time(
+                (
+                  max by (namespace, actor) (last_over_time(mc_presence_desired{namespace="jdwillmsen-prd", actor="agent"}[3m]))
+                  * on (namespace) group_left()
+                  (1 - max by (namespace) (last_over_time(mc_agent_connected{namespace="jdwillmsen-prd"}[3m])))
+                )[10m:1m]
+              ) > 0.5
+              and on (namespace, actor)
+              max by (namespace, actor) (last_over_time(mc_presence_desired{namespace="jdwillmsen-prd", actor="agent"}[3m])) == 1
+            )
+            or
+            (
+              avg_over_time((1 - max by (namespace) (mc_agent_connected{namespace="jdwillmsen-prd"}))[10m:1m]) > 0.5
+              unless on (namespace)
+              max by (namespace) (last_over_time(mc_presence_desired{namespace="jdwillmsen-prd", actor="agent"}[3m]))
+            )
+          for: 5m
           labels:
             severity: critical
             tenant: jdwillmsen
@@ -635,12 +703,13 @@ spec:
           annotations:
             summary: "Minecraft chat agent has lost its Bedrock session"
             description: >-
-              mc_agent_connected has read 0 in jdwillmsen-prd for ten minutes straight. The agent reconnects on its
-              own inside a couple of minutes for an ordinary server restart or protocol bump, so ten minutes down
-              means its own retry loop has been failing the whole time, not merely retrying. The known cause is Xbox
-              Live placing the account in an abuse-mode hold after repeated login attempts, which the agent cannot
-              clear itself: sign into the Microsoft account behind jdwillmsen-minecraft-fwb-prd-server-agent in a
-              browser and complete the security challenge, and the agent's existing retry loop will log it back in
+              The chat agent should be in the world and has been out of it for most of the last ten minutes.{{ if $labels.actor }}
+              A parked agent never raises this; check `tools/mc presence ls` first if you did not expect it to be
+              present.{{ end }} The agent reconnects on its own inside a couple of minutes for an ordinary server restart or protocol bump,
+              so this long out means its own retry loop has been failing, not merely retrying. The known cause is
+              Xbox Live placing the account in an abuse-mode hold after repeated login attempts, which the agent
+              cannot clear itself: sign into the Microsoft account behind jdwillmsen-minecraft-fwb-prd-server-agent in
+              a browser and complete the security challenge, and the agent's existing retry loop will log it back in
               without anything further.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
