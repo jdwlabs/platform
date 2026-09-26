@@ -84,14 +84,13 @@ tests:
             exp_annotations:
               summary: "An AFK bot that should be in the world is not"
               description: >-
-                AFK bot afk-bot-1 should be in the world and has been out of it for most
-                of the last thirty minutes. If JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its
-                presence store and may be reading the bot as out, so fix the store first. A parked bot never raises
-                this; check `tools/mc presence ls`
-                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
-                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
-                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
-                the bot pods and their logs in jdwillmsen-prd.
+                AFK bot afk-bot-1 should be in the world and has been out of it for most of the last thirty minutes. If
+                JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its presence store and may be
+                reading the bot as out, so fix the store first. A parked bot never raises this; check
+                `tools/mc presence ls` if you did not expect it to be present. The mob farm stops ticking around a
+                missing bot and chat capture pauses with bot 1. Short sessions that end in reconnect events after
+                protocol_spoofed log lines mean a protocol-schema change the spoof cannot bridge; a pod that will not
+                start is a Deployment problem. Check the bot pods and their logs in jdwillmsen-prd.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
 
@@ -125,14 +124,13 @@ tests:
             exp_annotations:
               summary: "An AFK bot that should be in the world is not"
               description: >-
-                AFK bot afk-bot-2 should be in the world and has been out of it for most
-                of the last thirty minutes. If JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its
-                presence store and may be reading the bot as out, so fix the store first. A parked bot never raises
-                this; check `tools/mc presence ls`
-                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
-                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
-                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
-                the bot pods and their logs in jdwillmsen-prd.
+                AFK bot afk-bot-2 should be in the world and has been out of it for most of the last thirty minutes. If
+                JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its presence store and may be
+                reading the bot as out, so fix the store first. A parked bot never raises this; check
+                `tools/mc presence ls` if you did not expect it to be present. The mob farm stops ticking around a
+                missing bot and chat capture pauses with bot 1. Short sessions that end in reconnect events after
+                protocol_spoofed log lines mean a protocol-schema change the spoof cannot bridge; a pod that will not
+                start is a Deployment problem. Check the bot pods and their logs in jdwillmsen-prd.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
 
@@ -212,14 +210,13 @@ tests:
             exp_annotations:
               summary: "An AFK bot that should be in the world is not"
               description: >-
-                AFK bot afk-bot-1 should be in the world and has been out of it for most
-                of the last thirty minutes. If JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its
-                presence store and may be reading the bot as out, so fix the store first. A parked bot never raises
-                this; check `tools/mc presence ls`
-                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
-                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
-                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
-                the bot pods and their logs in jdwillmsen-prd.
+                AFK bot afk-bot-1 should be in the world and has been out of it for most of the last thirty minutes. If
+                JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its presence store and may be
+                reading the bot as out, so fix the store first. A parked bot never raises this; check
+                `tools/mc presence ls` if you did not expect it to be present. The mob farm stops ticking around a
+                missing bot and chat capture pauses with bot 1. Short sessions that end in reconnect events after
+                protocol_spoofed log lines mean a protocol-schema change the spoof cannot bridge; a pod that will not
+                start is a Deployment problem. Check the bot pods and their logs in jdwillmsen-prd.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
       - eval_time: 3h
         alertname: JdwillmsenMinecraftAfkBotsDegraded
@@ -232,14 +229,13 @@ tests:
             exp_annotations:
               summary: "An AFK bot that should be in the world is not"
               description: >-
-                AFK bot afk-bot-1 should be in the world and has been out of it for most
-                of the last thirty minutes. If JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its
-                presence store and may be reading the bot as out, so fix the store first. A parked bot never raises
-                this; check `tools/mc presence ls`
-                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
-                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
-                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
-                the bot pods and their logs in jdwillmsen-prd.
+                AFK bot afk-bot-1 should be in the world and has been out of it for most of the last thirty minutes. If
+                JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its presence store and may be
+                reading the bot as out, so fix the store first. A parked bot never raises this; check
+                `tools/mc presence ls` if you did not expect it to be present. The mob farm stops ticking around a
+                missing bot and chat capture pauses with bot 1. Short sessions that end in reconnect events after
+                protocol_spoofed log lines mean a protocol-schema change the spoof cannot bridge; a pod that will not
+                start is a Deployment problem. Check the bot pods and their logs in jdwillmsen-prd.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
 
@@ -280,14 +276,13 @@ tests:
             exp_annotations:
               summary: "An AFK bot that should be in the world is not"
               description: >-
-                AFK bot afk-bot-2 should be in the world and has been out of it for most
-                of the last thirty minutes. If JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its
-                presence store and may be reading the bot as out, so fix the store first. A parked bot never raises
-                this; check `tools/mc presence ls`
-                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
-                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
-                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
-                the bot pods and their logs in jdwillmsen-prd.
+                AFK bot afk-bot-2 should be in the world and has been out of it for most of the last thirty minutes. If
+                JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its presence store and may be
+                reading the bot as out, so fix the store first. A parked bot never raises this; check
+                `tools/mc presence ls` if you did not expect it to be present. The mob farm stops ticking around a
+                missing bot and chat capture pauses with bot 1. Short sessions that end in reconnect events after
+                protocol_spoofed log lines mean a protocol-schema change the spoof cannot bridge; a pod that will not
+                start is a Deployment problem. Check the bot pods and their logs in jdwillmsen-prd.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
       - eval_time: 3h
         alertname: JdwillmsenMinecraftAfkBotsDegraded
@@ -300,14 +295,13 @@ tests:
             exp_annotations:
               summary: "An AFK bot that should be in the world is not"
               description: >-
-                AFK bot afk-bot-2 should be in the world and has been out of it for most
-                of the last thirty minutes. If JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its
-                presence store and may be reading the bot as out, so fix the store first. A parked bot never raises
-                this; check `tools/mc presence ls`
-                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
-                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
-                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
-                the bot pods and their logs in jdwillmsen-prd.
+                AFK bot afk-bot-2 should be in the world and has been out of it for most of the last thirty minutes. If
+                JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its presence store and may be
+                reading the bot as out, so fix the store first. A parked bot never raises this; check
+                `tools/mc presence ls` if you did not expect it to be present. The mob farm stops ticking around a
+                missing bot and chat capture pauses with bot 1. Short sessions that end in reconnect events after
+                protocol_spoofed log lines mean a protocol-schema change the spoof cannot bridge; a pod that will not
+                start is a Deployment problem. Check the bot pods and their logs in jdwillmsen-prd.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
 
@@ -427,14 +421,13 @@ tests:
             exp_annotations:
               summary: "An AFK bot that should be in the world is not"
               description: >-
-                AFK bot afk-bot-1 should be in the world and has been out of it for most
-                of the last thirty minutes. If JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its
-                presence store and may be reading the bot as out, so fix the store first. A parked bot never raises
-                this; check `tools/mc presence ls`
-                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
-                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
-                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
-                the bot pods and their logs in jdwillmsen-prd.
+                AFK bot afk-bot-1 should be in the world and has been out of it for most of the last thirty minutes. If
+                JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its presence store and may be
+                reading the bot as out, so fix the store first. A parked bot never raises this; check
+                `tools/mc presence ls` if you did not expect it to be present. The mob farm stops ticking around a
+                missing bot and chat capture pauses with bot 1. Short sessions that end in reconnect events after
+                protocol_spoofed log lines mean a protocol-schema change the spoof cannot bridge; a pod that will not
+                start is a Deployment problem. Check the bot pods and their logs in jdwillmsen-prd.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
       - eval_time: 100m
         alertname: JdwillmsenMinecraftAfkBotsDegraded
@@ -485,14 +478,13 @@ tests:
             exp_annotations:
               summary: "An AFK bot that should be in the world is not"
               description: >-
-                AFK bot afk-bot-1 should be in the world and has been out of it for most
-                of the last thirty minutes. If JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its
-                presence store and may be reading the bot as out, so fix the store first. A parked bot never raises
-                this; check `tools/mc presence ls`
-                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
-                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
-                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
-                the bot pods and their logs in jdwillmsen-prd.
+                AFK bot afk-bot-1 should be in the world and has been out of it for most of the last thirty minutes. If
+                JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its presence store and may be
+                reading the bot as out, so fix the store first. A parked bot never raises this; check
+                `tools/mc presence ls` if you did not expect it to be present. The mob farm stops ticking around a
+                missing bot and chat capture pauses with bot 1. Short sessions that end in reconnect events after
+                protocol_spoofed log lines mean a protocol-schema change the spoof cannot bridge; a pod that will not
+                start is a Deployment problem. Check the bot pods and their logs in jdwillmsen-prd.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
       - eval_time: 100m
         alertname: JdwillmsenMinecraftAfkBotsDegraded
@@ -505,14 +497,13 @@ tests:
             exp_annotations:
               summary: "An AFK bot that should be in the world is not"
               description: >-
-                AFK bot afk-bot-1 should be in the world and has been out of it for most
-                of the last thirty minutes. If JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its
-                presence store and may be reading the bot as out, so fix the store first. A parked bot never raises
-                this; check `tools/mc presence ls`
-                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
-                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
-                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
-                the bot pods and their logs in jdwillmsen-prd.
+                AFK bot afk-bot-1 should be in the world and has been out of it for most of the last thirty minutes. If
+                JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its presence store and may be
+                reading the bot as out, so fix the store first. A parked bot never raises this; check
+                `tools/mc presence ls` if you did not expect it to be present. The mob farm stops ticking around a
+                missing bot and chat capture pauses with bot 1. Short sessions that end in reconnect events after
+                protocol_spoofed log lines mean a protocol-schema change the spoof cannot bridge; a pod that will not
+                start is a Deployment problem. Check the bot pods and their logs in jdwillmsen-prd.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
       - eval_time: 102m
         alertname: JdwillmsenMinecraftAfkBotsDegraded
@@ -525,14 +516,13 @@ tests:
             exp_annotations:
               summary: "An AFK bot that should be in the world is not"
               description: >-
-                AFK bot afk-bot-1 should be in the world and has been out of it for most
-                of the last thirty minutes. If JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its
-                presence store and may be reading the bot as out, so fix the store first. A parked bot never raises
-                this; check `tools/mc presence ls`
-                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
-                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
-                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
-                the bot pods and their logs in jdwillmsen-prd.
+                AFK bot afk-bot-1 should be in the world and has been out of it for most of the last thirty minutes. If
+                JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its presence store and may be
+                reading the bot as out, so fix the store first. A parked bot never raises this; check
+                `tools/mc presence ls` if you did not expect it to be present. The mob farm stops ticking around a
+                missing bot and chat capture pauses with bot 1. Short sessions that end in reconnect events after
+                protocol_spoofed log lines mean a protocol-schema change the spoof cannot bridge; a pod that will not
+                start is a Deployment problem. Check the bot pods and their logs in jdwillmsen-prd.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
       - eval_time: 103m
         alertname: JdwillmsenMinecraftAfkBotsDegraded
@@ -545,14 +535,13 @@ tests:
             exp_annotations:
               summary: "An AFK bot that should be in the world is not"
               description: >-
-                AFK bot afk-bot-1 should be in the world and has been out of it for most
-                of the last thirty minutes. If JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its
-                presence store and may be reading the bot as out, so fix the store first. A parked bot never raises
-                this; check `tools/mc presence ls`
-                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
-                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
-                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
-                the bot pods and their logs in jdwillmsen-prd.
+                AFK bot afk-bot-1 should be in the world and has been out of it for most of the last thirty minutes. If
+                JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its presence store and may be
+                reading the bot as out, so fix the store first. A parked bot never raises this; check
+                `tools/mc presence ls` if you did not expect it to be present. The mob farm stops ticking around a
+                missing bot and chat capture pauses with bot 1. Short sessions that end in reconnect events after
+                protocol_spoofed log lines mean a protocol-schema change the spoof cannot bridge; a pod that will not
+                start is a Deployment problem. Check the bot pods and their logs in jdwillmsen-prd.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
       - eval_time: 105m
         alertname: JdwillmsenMinecraftAfkBotsDegraded
@@ -565,14 +554,13 @@ tests:
             exp_annotations:
               summary: "An AFK bot that should be in the world is not"
               description: >-
-                AFK bot afk-bot-1 should be in the world and has been out of it for most
-                of the last thirty minutes. If JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its
-                presence store and may be reading the bot as out, so fix the store first. A parked bot never raises
-                this; check `tools/mc presence ls`
-                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
-                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
-                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
-                the bot pods and their logs in jdwillmsen-prd.
+                AFK bot afk-bot-1 should be in the world and has been out of it for most of the last thirty minutes. If
+                JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its presence store and may be
+                reading the bot as out, so fix the store first. A parked bot never raises this; check
+                `tools/mc presence ls` if you did not expect it to be present. The mob farm stops ticking around a
+                missing bot and chat capture pauses with bot 1. Short sessions that end in reconnect events after
+                protocol_spoofed log lines mean a protocol-schema change the spoof cannot bridge; a pod that will not
+                start is a Deployment problem. Check the bot pods and their logs in jdwillmsen-prd.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
       - eval_time: 120m
         alertname: JdwillmsenMinecraftAfkBotsDegraded
@@ -585,14 +573,13 @@ tests:
             exp_annotations:
               summary: "An AFK bot that should be in the world is not"
               description: >-
-                AFK bot afk-bot-1 should be in the world and has been out of it for most
-                of the last thirty minutes. If JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its
-                presence store and may be reading the bot as out, so fix the store first. A parked bot never raises
-                this; check `tools/mc presence ls`
-                if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
-                pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
-                protocol-schema change the spoof cannot bridge; a pod that will not start is a Deployment problem. Check
-                the bot pods and their logs in jdwillmsen-prd.
+                AFK bot afk-bot-1 should be in the world and has been out of it for most of the last thirty minutes. If
+                JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its presence store and may be
+                reading the bot as out, so fix the store first. A parked bot never raises this; check
+                `tools/mc presence ls` if you did not expect it to be present. The mob farm stops ticking around a
+                missing bot and chat capture pauses with bot 1. Short sessions that end in reconnect events after
+                protocol_spoofed log lines mean a protocol-schema change the spoof cannot bridge; a pod that will not
+                start is a Deployment problem. Check the bot pods and their logs in jdwillmsen-prd.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
   # An override with no `until` crosses a day: warn, and name the actor.

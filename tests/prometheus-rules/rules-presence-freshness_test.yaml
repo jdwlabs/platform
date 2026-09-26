@@ -2,9 +2,11 @@
 #
 # The presence leader stamps mc_presence_tick_success_timestamp_seconds on
 # every tick that read both its overrides and the actor statuses, seeds it at
-# 0 when it takes the lock, and withdraws it when it steps down. A store the
-# loop cannot read leaves desired and override age frozen and no longer moves
-# parks, expiries or wakes, while every per-actor series still looks alive.
+# 0 when it takes the lock, and withdraws it when it steps down. Every
+# per-actor series still looks alive through a store outage. A failed override
+# read freezes parks, expiries and wakes and holds desired; a failed status
+# read still evaluates, expires and kicks but reads every bot as out. Either
+# way only the stamp stops moving, and that is all these tests feed the rule.
 #
 # promtool starts its clock at the epoch, so a stamp is written here as the
 # number of seconds since the test began, which is what time() returns.
@@ -53,12 +55,14 @@ tests:
             exp_annotations:
               summary: "The chat agent's presence loop cannot read its store"
               description: >-
-                The presence leader has not completed a tick that read both its overrides and the actor statuses
-                for over five minutes, so parks, expiries and wakes are stuck where they were. An unreadable status
-                table reads every bot as out of the world, so JdwillmsenMinecraftAfkBotsDegraded may page as a
-                consequence for bots that are fine. Check the leader agent's logs for presence_tick_skipped and
-                presence_status_read_failed, then the Postgres cluster behind it; presence_store_unready means its
-                presence tables are not migrated.
+                The presence leader has not completed a tick that read both its overrides and the actor statuses for
+                over five minutes. Its log says which read fails. presence_tick_skipped is the override read: parks,
+                expiries and wakes are frozen and desired state holds its last value. presence_status_read_failed is the
+                status read: the loop still evaluates, expires and kicks, but reads every bot as out of the world, so
+                JdwillmsenMinecraftAfkBotsDegraded may page for bots that are fine. Either way, check the Postgres
+                cluster behind it. store_open_failed at startup means Postgres was unreachable when the agent started
+                and it runs without a store for the life of the process, so this never clears on its own: restart the
+                agent pod once Postgres is back. presence_store_unready means its presence tables are not migrated.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
 
@@ -83,12 +87,14 @@ tests:
             exp_annotations:
               summary: "The chat agent's presence loop cannot read its store"
               description: >-
-                The presence leader has not completed a tick that read both its overrides and the actor statuses
-                for over five minutes, so parks, expiries and wakes are stuck where they were. An unreadable status
-                table reads every bot as out of the world, so JdwillmsenMinecraftAfkBotsDegraded may page as a
-                consequence for bots that are fine. Check the leader agent's logs for presence_tick_skipped and
-                presence_status_read_failed, then the Postgres cluster behind it; presence_store_unready means its
-                presence tables are not migrated.
+                The presence leader has not completed a tick that read both its overrides and the actor statuses for
+                over five minutes. Its log says which read fails. presence_tick_skipped is the override read: parks,
+                expiries and wakes are frozen and desired state holds its last value. presence_status_read_failed is the
+                status read: the loop still evaluates, expires and kicks, but reads every bot as out of the world, so
+                JdwillmsenMinecraftAfkBotsDegraded may page for bots that are fine. Either way, check the Postgres
+                cluster behind it. store_open_failed at startup means Postgres was unreachable when the agent started
+                and it runs without a store for the life of the process, so this never clears on its own: restart the
+                agent pod once Postgres is back. presence_store_unready means its presence tables are not migrated.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
 
@@ -153,10 +159,12 @@ tests:
             exp_annotations:
               summary: "The chat agent's presence loop cannot read its store"
               description: >-
-                The presence leader has not completed a tick that read both its overrides and the actor statuses
-                for over five minutes, so parks, expiries and wakes are stuck where they were. An unreadable status
-                table reads every bot as out of the world, so JdwillmsenMinecraftAfkBotsDegraded may page as a
-                consequence for bots that are fine. Check the leader agent's logs for presence_tick_skipped and
-                presence_status_read_failed, then the Postgres cluster behind it; presence_store_unready means its
-                presence tables are not migrated.
+                The presence leader has not completed a tick that read both its overrides and the actor statuses for
+                over five minutes. Its log says which read fails. presence_tick_skipped is the override read: parks,
+                expiries and wakes are frozen and desired state holds its last value. presence_status_read_failed is the
+                status read: the loop still evaluates, expires and kicks, but reads every bot as out of the world, so
+                JdwillmsenMinecraftAfkBotsDegraded may page for bots that are fine. Either way, check the Postgres
+                cluster behind it. store_open_failed at startup means Postgres was unreachable when the agent started
+                and it runs without a store for the life of the process, so this never clears on its own: restart the
+                agent pod once Postgres is back. presence_store_unready means its presence tables are not migrated.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
