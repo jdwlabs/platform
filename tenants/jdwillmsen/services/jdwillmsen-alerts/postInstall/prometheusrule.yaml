@@ -870,6 +870,41 @@ spec:
               chart values; otherwise clear it with `tools/mc presence unpark {{ $labels.actor }}`.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
+        # Every per-actor presence series keeps being exported through a store
+        # outage, so none of them can say the loop has stopped deciding:
+        # desired and the override age hold their last values, and nothing
+        # parks, expires or wakes. The leader stamps a tick that read both the
+        # overrides and the statuses, and seeds the stamp at 0 on taking the
+        # lock, so a leader that has never read the store reads as stale
+        # rather than absent. That includes one whose presence tables are not
+        # migrated, which the rules above read as no presence at all.
+        #
+        # An absent stamp is not this rule's concern: presence switched off,
+        # no leader yet, or the agent gone, and the connection rules already
+        # page on the last. A handover needs no last_over_time bridge: the old
+        # leader's stamp ends, the gap reads as absent, the new leader seeds
+        # 0, and the hold covers the tick or two before its first clean read.
+        # max by drops the pod, so the new leader's stamp is read under the
+        # same alert. The stamp's age only grows between ticks, so `for:` has
+        # no jitter to lose to.
+        - alert: JdwillmsenMinecraftPresenceStale
+          expr: time() - max by (namespace) (mc_presence_tick_success_timestamp_seconds{namespace="jdwillmsen-prd"}) > 300
+          for: 5m
+          labels:
+            severity: warning
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+          annotations:
+            summary: "The chat agent's presence loop cannot read its store"
+            description: >-
+              The presence leader has not completed a tick that read both its overrides and the actor statuses for
+              over five minutes, so parks, expiries and wakes are stuck where they were. An unreadable status table
+              reads every bot as out of the world, so JdwillmsenMinecraftAfkBotsDegraded may page as a consequence
+              for bots that are fine. Check the leader agent's logs for presence_tick_skipped and
+              presence_status_read_failed, then the Postgres cluster behind it; presence_store_unready means its
+              presence tables are not migrated.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
         # The world only grows, and a full datadir kills the server harder
         # than any crash — writes fail, the ext4 read-only latch follows, and
         # recovery needs human volume surgery rather than the volume-recovery
