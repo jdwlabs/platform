@@ -3,7 +3,7 @@ image:
   # Digest is the multi-arch OCI index digest for the tag above, not a
   # per-arch child manifest — the tag stays for readability, the digest is
   # what actually gets resolved.
-  tag: "6.0.1@sha256:51262b555d9e8ac3e1fa197eec41a3f47d05aea5520ac2ccc78a03ffc7d39b3a"
+  tag: "6.1.1@sha256:f2d8070d6416befaa50b9e5f8059dc181c7859b0ab4c0b081de945336e50a2ef"
   pullPolicy: IfNotPresent
 
 replicas: 1
