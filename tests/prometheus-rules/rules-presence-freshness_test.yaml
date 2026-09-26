@@ -1,0 +1,162 @@
+# Unit tests for JdwillmsenMinecraftPresenceStale.
+#
+# The presence leader stamps mc_presence_tick_success_timestamp_seconds on
+# every tick that read both its overrides and the actor statuses, seeds it at
+# 0 when it takes the lock, and withdraws it when it steps down. A store the
+# loop cannot read leaves desired and override age frozen and no longer moves
+# parks, expiries or wakes, while every per-actor series still looks alive.
+#
+# promtool starts its clock at the epoch, so a stamp is written here as the
+# number of seconds since the test began, which is what time() returns.
+#
+# Rule files are extracted from the PrometheusRule manifests under tenants/ by
+# run.sh, since promtool reads bare rule groups and not the CRD wrapper.
+rule_files:
+  - rules/jdwillmsen-tenant-alerts.yaml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    name: a leader stamping every minute stays silent
+    input_series:
+      - series: 'mc_presence_tick_success_timestamp_seconds{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '0+60x180'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: JdwillmsenMinecraftPresenceStale
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: JdwillmsenMinecraftPresenceStale
+        exp_alerts: []
+
+
+  # The store goes away at thirty minutes and the stamp stops there. It is
+  # over five minutes old from 36m, and the hold runs five more.
+  - interval: 1m
+    name: a stamp stuck past five minutes warns after the hold
+    input_series:
+      - series: 'mc_presence_tick_success_timestamp_seconds{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '0+60x30 1800+0x60'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: JdwillmsenMinecraftPresenceStale
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: JdwillmsenMinecraftPresenceStale
+        exp_alerts: []
+      - eval_time: 41m
+        alertname: JdwillmsenMinecraftPresenceStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+            exp_annotations:
+              summary: "The chat agent's presence loop cannot read its store"
+              description: >-
+                The presence leader has not completed a tick that read both its overrides and the actor statuses
+                for over five minutes, so parks, expiries and wakes are stuck where they were. An unreadable status
+                table reads every bot as out of the world, so JdwillmsenMinecraftAfkBotsDegraded may page as a
+                consequence for bots that are fine. Check the leader agent's logs for presence_tick_skipped and
+                presence_status_read_failed, then the Postgres cluster behind it; presence_store_unready means its
+                presence tables are not migrated.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+
+  # A leader whose first tick could not read the store exports the seed, 0,
+  # which is stale from the first scrape.
+  - interval: 1m
+    name: a leader that never ticked cleanly warns after the hold
+    input_series:
+      - series: 'mc_presence_tick_success_timestamp_seconds{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '_x60 0+0x30'
+    alert_rule_test:
+      - eval_time: 64m
+        alertname: JdwillmsenMinecraftPresenceStale
+        exp_alerts: []
+      - eval_time: 65m
+        alertname: JdwillmsenMinecraftPresenceStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+            exp_annotations:
+              summary: "The chat agent's presence loop cannot read its store"
+              description: >-
+                The presence leader has not completed a tick that read both its overrides and the actor statuses
+                for over five minutes, so parks, expiries and wakes are stuck where they were. An unreadable status
+                table reads every bot as out of the world, so JdwillmsenMinecraftAfkBotsDegraded may page as a
+                consequence for bots that are fine. Check the leader agent's logs for presence_tick_skipped and
+                presence_status_read_failed, then the Postgres cluster behind it; presence_store_unready means its
+                presence tables are not migrated.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+
+  # No stamp at all: presence switched off, no leader yet, or the agent gone.
+  # The connectivity rules own a vanished agent; this one has nothing to say.
+  - interval: 1m
+    name: no stamp series stays silent
+    input_series:
+      - series: 'mc_agent_connected{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '1+0x120'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: JdwillmsenMinecraftPresenceStale
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftPresenceStale
+        exp_alerts: []
+
+
+  # Handover: the old leader withdraws its stamp, the new one seeds 0 on
+  # taking the lock and stamps on its first clean tick two minutes later.
+  # The seed is stale for those two minutes, inside the hold, so nothing pages.
+  - interval: 1m
+    name: a handover whose new leader stamps within the hold stays silent
+    input_series:
+      - series: 'mc_presence_tick_success_timestamp_seconds{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '0+60x30 stale'
+      - series: 'mc_presence_tick_success_timestamp_seconds{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-7c9d0e1f86-fghij",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '_x32 0 0 2040+60x60'
+    alert_rule_test:
+      - eval_time: 33m
+        alertname: JdwillmsenMinecraftPresenceStale
+        exp_alerts: []
+      - eval_time: 38m
+        alertname: JdwillmsenMinecraftPresenceStale
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: JdwillmsenMinecraftPresenceStale
+        exp_alerts: []
+
+
+  # The same handover onto a leader that cannot read the store either: the
+  # seed never moves, and it warns once the hold has run.
+  - interval: 1m
+    name: a handover whose new leader never stamps warns after the hold
+    input_series:
+      - series: 'mc_presence_tick_success_timestamp_seconds{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '0+60x30 stale'
+      - series: 'mc_presence_tick_success_timestamp_seconds{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-server-agent-7c9d0e1f86-fghij",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '_x32 0+0x30'
+    alert_rule_test:
+      - eval_time: 36m
+        alertname: JdwillmsenMinecraftPresenceStale
+        exp_alerts: []
+      - eval_time: 37m
+        alertname: JdwillmsenMinecraftPresenceStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+            exp_annotations:
+              summary: "The chat agent's presence loop cannot read its store"
+              description: >-
+                The presence leader has not completed a tick that read both its overrides and the actor statuses
+                for over five minutes, so parks, expiries and wakes are stuck where they were. An unreadable status
+                table reads every bot as out of the world, so JdwillmsenMinecraftAfkBotsDegraded may page as a
+                consequence for bots that are fine. Check the leader agent's logs for presence_tick_skipped and
+                presence_status_read_failed, then the Postgres cluster behind it; presence_store_unready means its
+                presence tables are not migrated.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
