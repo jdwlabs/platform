@@ -613,6 +613,16 @@ spec:
         # scraped. A gap of up to three minutes is bridged and one alert keeps
         # firing; a longer one resolves and re-fires, it does not go silent.
         #
+        # A presence store the agent cannot read can page here as well. The
+        # loop keeps refreshing observed through a store outage while desired
+        # holds its last value, so a bot that drops meanwhile is still caught,
+        # but a status table it cannot read turns every bot's observed to 0,
+        # and a store down for thirty minutes then pages for bots that are
+        # fine. That page is kept rather than suppressed: from these series a
+        # store outage and a real bot outage look the same, and a store down
+        # that long is worth a page anyway. JdwillmsenMinecraftPresenceStale
+        # names the store as the cause, and the description points there.
+        #
         # The Deployment branch covers the case with no presence series for a
         # bot at all: the agent is down, no leader has taken the lock, presence
         # is switched off, or its store is not ready because the presence
@@ -689,7 +699,8 @@ spec:
             summary: "An AFK bot that should be in the world is not"
             description: >-
               {{ if $labels.actor }}AFK bot {{ $labels.actor }} should be in the world and has been out of it for most
-              of the last thirty minutes{{ else }}Deployment {{ $labels.deployment }} has had no available replica for
+              of the last thirty minutes. If JdwillmsenMinecraftPresenceStale is firing too, the agent cannot read its
+              presence store and may be reading the bot as out, so fix the store first{{ else }}Deployment {{ $labels.deployment }} has had no available replica for
               most of the last thirty minutes{{ end }}. A parked bot never raises this; check `tools/mc presence ls`
               if you did not expect it to be present. The mob farm stops ticking around a missing bot and chat capture
               pauses with bot 1. Short sessions that end in reconnect events after protocol_spoofed log lines mean a
@@ -731,13 +742,15 @@ spec:
         # immediately, because the current desired state must also read 1.
         #
         # Only desired comes from presence; whether the agent is in the world
-        # comes from mc_agent_connected, not mc_presence_observed. The presence
-        # loop returns before exporting when its store errors or is not ready,
-        # so its gauges freeze at their last values while the series live on:
-        # frozen at desired=1 observed=1, a presence-only rule would sit silent
-        # through a real outage, and the fallback below would stand down for it
-        # because the series still exist. The session gauge is set by the
-        # session itself and does not freeze with the presence loop.
+        # comes from mc_agent_connected, not mc_presence_observed. When the
+        # presence store is not ready the loop exports nothing, so its gauges
+        # freeze at their last values while the series live on: frozen at
+        # desired=1 observed=1, a presence-only rule would sit silent through a
+        # real outage, and the fallback below would stand down for it because
+        # the series still exist. When the override read fails, observed keeps
+        # refreshing while desired and the override age hold, which is enough
+        # for the bots but not a reason to trade a gauge the session sets
+        # itself for one that depends on the presence loop at all.
         #
         # The presence series are exported by the leader only, and a handover is
         # not seamless: the leader stepping down resets its gauges, which ends
