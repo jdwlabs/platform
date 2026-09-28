@@ -1,0 +1,61 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: vllm-inference-rules
+  namespace: monitoring
+spec:
+  groups:
+    - name: vllm-inference
+      rules:
+        # Only a warning: this VM backs two consumers that both have a cloud
+        # fallback tier, so a down model server degrades cost and latency
+        # rather than taking anything fully offline. 5m rather than shorter —
+        # long enough to skip a `systemctl restart vllm-server` bounce. It can
+        # also fire briefly during a legitimate `talops vllm apply`, because
+        # vLLM only starts serving /metrics once the model has finished
+        # loading; the 5m for: covers a typical load.
+        - alert: VllmDown
+          expr: up{job="vllm-inference-server"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "vLLM server on 192.168.1.50:8000 is not being scraped"
+            description: "The vllm-inference-server target has been down for 5 minutes. Run `talops vllm status` from a checkout of the infrastructure repo first to check the vllm-server.service unit and the vllm container, before assuming a network or scrape-config fault."
+            runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/docs/vllm-serving.md"
+
+        # vllm_serving_drift carries one series per reason (none, image, args,
+        # not_running, no_record) with exactly one of them at 1, so this alert
+        # is deliberately keyed on reason!="none" rather than listing the
+        # other four — a fifth reason added later is covered without editing
+        # this rule. 15m: the drift check textfile is written on its own
+        # cadence, and a single mid-deploy sample where the running container
+        # has not yet caught up to a fresh apply must not page.
+        - alert: VllmServingDrift
+          expr: vllm_serving_drift{reason!="none"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "vLLM serving config has drifted from its declared spec ({{ $labels.reason }})"
+            description: "The vllm-server.service unit's running state (image, args, or the vllm container) no longer matches what was last declared, reason={{ $labels.reason }}. Run `talops vllm status` from the infrastructure repo to compare it against the declared spec before touching anything."
+            runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/docs/vllm-serving.md"
+
+        # A stale or missing timestamp is treated the same as active drift:
+        # both mean the drift check itself cannot be trusted, whether because
+        # the checker stopped running or because its output was never
+        # written. absent() is required, not just belt-and-braces — a rolled
+        # back first apply of the checker removes the textfile entirely, so
+        # the > comparison alone would never fire and this alert would silently
+        # cover a checker that no longer exists.
+        - alert: VllmDriftCheckStale
+          expr: |
+            (time() - vllm_serving_drift_check_timestamp_seconds > 1200)
+            or absent(vllm_serving_drift_check_timestamp_seconds)
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "vLLM drift check has not reported in over 20 minutes"
+            description: "vllm_serving_drift_check_timestamp_seconds is either older than 20 minutes or missing entirely, so VllmServingDrift can no longer be trusted. Run `talops vllm status` from the infrastructure repo to check the drift-check timer/cron and the textfile collector directory."
+            runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/docs/vllm-serving.md"

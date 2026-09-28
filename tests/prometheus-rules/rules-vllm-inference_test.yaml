@@ -1,0 +1,127 @@
+# Unit tests for the vLLM host scrape/drift alerts.
+#
+# The absent() half of VllmDriftCheckStale exists specifically to survive a
+# rolled-back first apply of the drift checker, which deletes the textfile
+# metric entirely rather than leaving it stale — see rules-vllm-inference.yaml
+# for the full reasoning. "missing timestamp series fires via absent()" below
+# pins exactly that clause: dropping `or absent(...)` from the rule still
+# passes every other check here and in CI, and only this case catches it.
+rule_files:
+  - rules/vllm-inference-rules.yaml
+evaluation_interval: 1m
+tests:
+  # Metric totally absent from the start (checker never ran / textfile
+  # deleted by a rolled-back apply) - absent() must fire, the bare > must not
+  # (there is no series for it to compare against in the first place).
+  - interval: 1m
+    name: missing timestamp series fires via absent()
+    input_series: []
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: VllmDriftCheckStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "vLLM drift check has not reported in over 20 minutes"
+              description: "vllm_serving_drift_check_timestamp_seconds is either older than 20 minutes or missing entirely, so VllmServingDrift can no longer be trusted. Run `talops vllm status` from the infrastructure repo to check the drift-check timer/cron and the textfile collector directory."
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/docs/vllm-serving.md"
+
+  # Timestamp present and tracking real time (kept within 20m) - neither
+  # branch should fire.
+  - interval: 1m
+    name: fresh timestamp stays silent
+    input_series:
+      - series: 'vllm_serving_drift_check_timestamp_seconds{instance="192.168.1.50:9100",job="vllm-inference-node"}'
+        values: '0+60x60'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: VllmDriftCheckStale
+        exp_alerts: []
+
+  # Timestamp present but stale (stopped advancing) - the bare `>` branch
+  # fires, absent() must not (a series still exists for the metric).
+  - interval: 1m
+    name: stale but present timestamp fires via the bare comparison
+    input_series:
+      - series: 'vllm_serving_drift_check_timestamp_seconds{instance="192.168.1.50:9100",job="vllm-inference-node"}'
+        values: '0+0x60'
+    alert_rule_test:
+      - eval_time: 27m
+        alertname: VllmDriftCheckStale
+        exp_alerts:
+          - exp_labels:
+              instance: "192.168.1.50:9100"
+              job: "vllm-inference-node"
+              severity: warning
+            exp_annotations:
+              summary: "vLLM drift check has not reported in over 20 minutes"
+              description: "vllm_serving_drift_check_timestamp_seconds is either older than 20 minutes or missing entirely, so VllmServingDrift can no longer be trusted. Run `talops vllm status` from the infrastructure repo to check the drift-check timer/cron and the textfile collector directory."
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/docs/vllm-serving.md"
+
+  # reason="none" pinned at 1 (paranoid case) must never trip the drift
+  # alert - the label filter excludes it regardless of value.
+  - interval: 1m
+    name: reason=none at 1 never fires drift
+    input_series:
+      - series: 'vllm_serving_drift{reason="none"}'
+        values: '1+0x20'
+      - series: 'vllm_serving_drift{reason="image"}'
+        values: '0+0x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: VllmServingDrift
+        exp_alerts: []
+
+  # An actual drift reason at 1 for the full 15m does fire, keyed on the
+  # label filter reason!="none" rather than an enumerated list.
+  - interval: 1m
+    name: a non-none reason at 1 fires after 15m
+    input_series:
+      - series: 'vllm_serving_drift{reason="none"}'
+        values: '0+0x20'
+      - series: 'vllm_serving_drift{reason="image"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: VllmServingDrift
+        exp_alerts:
+          - exp_labels:
+              reason: "image"
+              severity: warning
+            exp_annotations:
+              summary: "vLLM serving config has drifted from its declared spec (image)"
+              description: "The vllm-server.service unit's running state (image, args, or the vllm container) no longer matches what was last declared, reason=image. Run `talops vllm status` from the infrastructure repo to compare it against the declared spec before touching anything."
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/docs/vllm-serving.md"
+
+  # up{} on the node-exporter job going to 0 must not trip VllmDown - it is
+  # keyed on the server job only.
+  - interval: 1m
+    name: node-exporter job down does not trip VllmDown
+    input_series:
+      - series: 'up{job="vllm-inference-node",instance="192.168.1.50:9100"}'
+        values: '0+0x10'
+      - series: 'up{job="vllm-inference-server",instance="192.168.1.50:8000"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: VllmDown
+        exp_alerts: []
+
+  - interval: 1m
+    name: server job down for 5m trips VllmDown
+    input_series:
+      - series: 'up{job="vllm-inference-server",instance="192.168.1.50:8000"}'
+        values: '0+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: VllmDown
+        exp_alerts:
+          - exp_labels:
+              job: "vllm-inference-server"
+              instance: "192.168.1.50:8000"
+              severity: warning
+            exp_annotations:
+              summary: "vLLM server on 192.168.1.50:8000 is not being scraped"
+              description: "The vllm-inference-server target has been down for 5 minutes. Run `talops vllm status` from a checkout of the infrastructure repo first to check the vllm-server.service unit and the vllm container, before assuming a network or scrape-config fault."
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/docs/vllm-serving.md"
