@@ -1,0 +1,38 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: vllm-inference-node
+  namespace: monitoring
+spec:
+  # The vLLM host is a standalone GPU VM outside the cluster (Terraform's
+  # static address for it, see docs/vllm-serving.md in jdwlabs/infrastructure)
+  # — no kubelet and no Pod, so a ServiceMonitor/PodMonitor selector has
+  # nothing to match and a static target list is the only discovery this
+  # chart supports for it.
+  #
+  # node-exporter's textfile collector is what actually carries the drift
+  # gauges (vllm_serving_info / vllm_serving_drift / the check timestamp)
+  # alongside the ordinary host metrics, so this job is scraped and alerted
+  # on independently of the vLLM process itself: the two consumers below can
+  # degrade to their cloud tiers while node-exporter is still reachable, or
+  # vice versa, and each failure mode needs its own signal.
+  jobName: vllm-inference-node
+  staticConfigs:
+    - targets:
+        - 192.168.1.50:9100
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: vllm-inference-server
+  namespace: monitoring
+spec:
+  # Same out-of-cluster host as vllm-inference-node above, scraped as a
+  # second static target rather than folded into one job: VllmDown keys on
+  # this job name alone, and merging the two would make it fire on
+  # node-exporter going down instead of on the model server itself.
+  jobName: vllm-inference-server
+  staticConfigs:
+    - targets:
+        - 192.168.1.50:8000
+  metricsPath: /metrics
