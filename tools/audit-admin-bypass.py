@@ -87,8 +87,9 @@ which the rest of this audit does not inspect. Only a hold with a reason
 clears it.
 
 The evidence is the PR's changed files matched against the repo's live
-CODEOWNERS, and its latest reviews: every owned file needs an APPROVED
-latest review from one of its owners who is not the PR's author.
+CODEOWNERS, and its reviews: every owned file needs an APPROVED review from
+one of its owners who is not the PR's author, and still standing as that
+reviewer's latest opinionated review (a later comment does not withdraw it).
 `reviewDecision` cannot serve here, because `Baseline` demands one approval
 on every path and REVIEW_REQUIRED does not say which requirement went unmet.
 A PR merged before the gate ruleset was created is not judged against it, and
