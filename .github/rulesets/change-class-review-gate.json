@@ -39,7 +39,13 @@
   "node_id": "RRS_lACqUmVwb3NpdG9yec5HRzfDzgFNK7s",
   "created_at": "2026-08-30T02:15:47.713Z",
   "updated_at": "2026-08-30T02:15:47.731Z",
-  "bypass_actors": [],
+  "bypass_actors": [
+    {
+      "actor_id": null,
+      "actor_type": "OrganizationAdmin",
+      "bypass_mode": "pull_request"
+    }
+  ],
   "_links": {
     "self": {
       "href": "https://api.github.com/repos/jdwlabs/platform/rulesets/21834683"
