@@ -1,6 +1,7 @@
 name: audit-admin-bypass
 
-# Reports agent-authored merges that stepped over a gate, across all four repos.
+# Reports merges that stepped over a gate, across all four repos: agent-authored
+# ones against every gate, and every merge against the change-class owner gate.
 #
 # This job used to pipe `--list` into the step summary and exit 0 unconditionally.
 # A run that found a bypass and a run that found none produced the same green
@@ -23,6 +24,11 @@ name: audit-admin-bypass
 # status check needs no second human to satisfy, so stepping over it is the
 # escape hatch being used against the only gate this org can actually enforce.
 # Sampled over twelve consecutive merges on this repo, exactly one qualifies.
+#
+# It also fails on any merge, agent-authored or not and green or not, that
+# touched a CODEOWNERS path without a code owner's approval. The change-class
+# gate lets an organization admin merge past that requirement as a break-glass
+# (ADR 0030), and a break-glass is only honest if every use of it is seen.
 # A bypass that was a decision rather than a lapse is declared in
 # tools/admin-bypass-holds.yaml with a reason, the same way the promotion drift
 # checker handles a deliberate gap.
@@ -185,10 +191,10 @@ jobs:
           set -uo pipefail
           case "${OUTCOME:-}" in
             clean)
-              echo "0 reportable bypasses — every unapproved merge in the window left its required checks satisfied."
+              echo "0 reportable bypasses — every unapproved merge in the window left its required checks satisfied, and every change-class merge had an owner's approval."
               ;;
             bypassed)
-              echo "::error::An agent-authored PR merged unapproved with a required check unsatisfied — see the report above."
+              echo "::error::A PR merged past a gate — a required check unsatisfied, or a change-class path without a code-owner approval. See the report above."
               echo "Fix the check, or record why the bypass was intended in tools/admin-bypass-holds.yaml"
               echo "so the next reader does not have to rediscover it."
               exit 1

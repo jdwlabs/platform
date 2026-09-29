@@ -1,5 +1,6 @@
-# Merges the admin-bypass audit may see as unapproved-with-an-unsatisfied-check
-# without failing the run.
+# Merges the admin-bypass audit may see as unapproved-with-an-unsatisfied-check,
+# or as a change-class path merged without a code-owner approval, without
+# failing the run.
 #
 # A hold is for a bypass that is a decision, not a lapse — an incident fix that
 # could not wait for a queue, or a merge over a check already known broken for
@@ -7,9 +8,15 @@
 # required check is a bug in the check, and holding it here hides the evidence
 # that would get it fixed.
 #
-# Unapproved merges whose required checks all passed are never listed here.
-# They are the operating mode of a two-seat org and the audit already treats
-# them as routine — a hold would be silencing something that makes no noise.
+# Every use of the change-class gate's organization-admin break-glass belongs
+# here: a merge that touched a CODEOWNERS path without an owner's approval is
+# always reported, however green its checks were. Its reason names the
+# emergency and the follow-up that reviews what landed (ADR 0030).
+#
+# Otherwise, unapproved merges whose required checks all passed are never
+# listed here. They are the operating mode of a two-seat org and the audit
+# already treats them as routine — a hold would be silencing something that
+# makes no noise.
 #
 # A hold is keyed on the repository and the pull-request number:
 #

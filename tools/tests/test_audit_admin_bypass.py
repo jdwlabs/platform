@@ -542,5 +542,295 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(code, 2)
 
 
+
+CODEOWNERS = """\
+# a comment line
+/.github/ @jdwillmsen @jdwlabs-root
+/tools/ @jdwillmsen @jdwlabs-root
+/tenants/*/tenant.yaml @jdwillmsen @jdwlabs-root
+/cli/ @jdwillmsen @jdwlabs-root
+/cli/docs/
+"""
+
+
+class OwnersForTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.RULES = audit.parse_codeowners(CODEOWNERS)
+
+    def test_a_directory_pattern_owns_everything_below_it(self):
+        self.assertEqual(
+            audit.owners_for(".github/rulesets/baseline.json", self.RULES),
+            ("jdwillmsen", "jdwlabs-root"),
+        )
+
+    def test_an_anchored_pattern_does_not_match_deeper_in_the_tree(self):
+        self.assertEqual(audit.owners_for("docs/tools/readme.md", self.RULES), ())
+
+    def test_a_single_star_does_not_cross_a_slash(self):
+        self.assertEqual(
+            audit.owners_for("tenants/jdwlabs/tenant.yaml", self.RULES),
+            ("jdwillmsen", "jdwlabs-root"),
+        )
+        self.assertEqual(
+            audit.owners_for("tenants/jdwlabs/services/x/tenant.yaml", self.RULES), ()
+        )
+
+    def test_the_last_matching_line_wins_even_when_it_names_no_owner(self):
+        # An ownerless line is how CODEOWNERS carves a path back out.
+        self.assertEqual(audit.owners_for("cli/docs/usage.md", self.RULES), ())
+        self.assertEqual(
+            audit.owners_for("cli/cmd/main.go", self.RULES),
+            ("jdwillmsen", "jdwlabs-root"),
+        )
+
+    def test_an_unlisted_path_is_unowned(self):
+        self.assertEqual(audit.owners_for("docs/OPERATIONS.md", self.RULES), ())
+
+    def test_an_unanchored_pattern_matches_at_any_depth(self):
+        rules = audit.parse_codeowners("*.go @jdwillmsen\n")
+        self.assertEqual(audit.owners_for("cli/cmd/main.go", rules), ("jdwillmsen",))
+
+
+CLASS_GATE = {
+    "name": "Change Class Review Gate",
+    "enforcement": "active",
+    "created_at": "2026-08-01T00:00:00Z",
+    "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+    "rules": [
+        {
+            "type": "pull_request",
+            "parameters": {
+                "required_approving_review_count": 0,
+                "require_code_owner_review": True,
+            },
+        }
+    ],
+}
+
+HUMAN_COMMIT = {"messageBody": "a commit with no attribution trailer"}
+
+
+def _class_pr(
+    number,
+    merged_at,
+    files,
+    *,
+    author="jdwillmsen",
+    reviews=(),
+    review="REVIEW_REQUIRED",
+    conclusions=GREEN,
+    commits=(AGENT_COMMIT,),
+):
+    pr = _pr_fixture(number, merged_at, conclusions, review=review)
+    pr["author"] = {"login": author}
+    pr["_files"] = list(files)
+    pr["_reviews"] = [{"author": {"login": a}, "state": s} for a, s in reviews]
+    pr["_commits"] = list(commits)
+    return pr
+
+
+def _fake_gh_class_gated(prs: list[dict], codeowners: str = CODEOWNERS):
+    """A gh_json stand-in for a repo that also carries the change-class gate."""
+    import base64
+
+    fixture_only = ("_conclusions", "_files", "_reviews", "_commits")
+
+    def dispatch(args: list[str], missing_ok: bool = False) -> object:
+        joined = " ".join(args)
+        if joined.endswith("/rulesets"):
+            return [{"id": 1}, {"id": 2}]
+        if joined.endswith("/rulesets/1"):
+            return _full_ruleset(count=1, contexts=("go-lint", "signatures / signatures"))
+        if joined.endswith("/rulesets/2"):
+            return CLASS_GATE
+        if "/contents/" in joined:
+            if joined.endswith("/contents/.github/CODEOWNERS"):
+                return {
+                    "encoding": "base64",
+                    "content": base64.b64encode(codeowners.encode()).decode(),
+                }
+            if missing_ok:
+                return None
+            raise audit.ToolError(f"404 {joined}")
+        if args[0] == "pr" and args[1] == "list":
+            return [{k: v for k, v in pr.items() if k not in fixture_only} for pr in prs]
+        if args[0] == "pr" and args[1] == "view":
+            pr = next(p for p in prs if str(p["number"]) == args[2])
+            return {
+                "commits": pr["_commits"],
+                "files": [{"path": f} for f in pr["_files"]],
+                "changedFiles": len(pr["_files"]),
+                "latestReviews": pr["_reviews"],
+            }
+        if "/check-runs" in joined:
+            sha = joined.split("/commits/")[1].split("/")[0]
+            pr = next(p for p in prs if p["headRefOid"] == sha)
+            return {
+                "check_runs": [
+                    {"name": n, "conclusion": c, "started_at": pr["mergedAt"]}
+                    for n, c in pr["_conclusions"].items()
+                ]
+            }
+        raise AssertionError(f"unexpected gh call: {joined}")
+
+    return dispatch
+
+
+RULESET_EDIT = [".github/rulesets/change-class-review-gate.json"]
+DOCS_EDIT = ["docs/OPERATIONS.md"]
+
+
+class ChangeClassGateTests(unittest.TestCase):
+    """A merge past the owner gate is a finding whether or not its checks are green.
+
+    Green-but-unapproved is routine only because a two-seat org cannot supply
+    a second reviewer for every path. The owner gate is the one place it can,
+    and the organization-admin bypass on it exists for emergencies alone, so
+    each use must surface rather than be absorbed into the routine count.
+    """
+
+    def test_an_unheld_class_gate_bypass_is_reported(self):
+        code, out = _run_main(
+            _fake_gh_class_gated([
+                PEER | {"author": {"login": "jdwillmsen"}, "_files": DOCS_EDIT,
+                        "_reviews": [], "_commits": [AGENT_COMMIT]},
+                _class_pr(299, "2026-08-19T10:00:00Z", RULESET_EDIT),
+            ]),
+            "holds: []\n",
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("REPORTABLE", out)
+        self.assertIn("platform#299", out)
+        self.assertIn("change-class-review-gate", out)
+
+    def test_a_class_gate_bypass_on_a_human_authored_pr_is_reported_too(self):
+        # The break-glass is for the owner's own PRs, which need not carry an
+        # agent trailer; scoping this to agent-authored merges would miss the
+        # very use the bypass was granted for.
+        code, out = _run_main(
+            _fake_gh_class_gated([
+                _class_pr(299, "2026-08-19T10:00:00Z", RULESET_EDIT, commits=(HUMAN_COMMIT,)),
+            ]),
+            "holds: []\n",
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("platform#299", out)
+
+    def test_a_held_class_gate_bypass_is_not_reported(self):
+        code, out = _run_main(
+            _fake_gh_class_gated([
+                _class_pr(299, "2026-08-19T10:00:00Z", RULESET_EDIT),
+            ]),
+            "holds:\n"
+            "  - repo: platform\n"
+            "    pr: 299\n"
+            "    reason: outage fix merged through the break-glass; reviewed after\n",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("Held", out)
+        self.assertNotIn("REPORTABLE", out)
+        self.assertNotIn("STALE HOLDS", out)
+
+    def test_an_owner_approved_class_gate_pr_is_not_reported(self):
+        code, out = _run_main(
+            _fake_gh_class_gated([
+                _class_pr(
+                    299, "2026-08-19T10:00:00Z", RULESET_EDIT,
+                    reviews=[("jdwlabs-root", "APPROVED")], review="APPROVED",
+                ),
+            ]),
+            "holds: []\n",
+        )
+        self.assertEqual(code, 0)
+        self.assertNotIn("REPORTABLE", out)
+
+    def test_the_authors_own_approval_does_not_satisfy_the_gate(self):
+        # GitHub never counts it; a review record claiming otherwise must not
+        # quietly clear the finding.
+        code, out = _run_main(
+            _fake_gh_class_gated([
+                _class_pr(
+                    299, "2026-08-19T10:00:00Z", RULESET_EDIT,
+                    reviews=[("jdwillmsen", "APPROVED")],
+                ),
+            ]),
+            "holds: []\n",
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("platform#299", out)
+
+    def test_a_dismissed_owner_approval_does_not_satisfy_the_gate(self):
+        code, out = _run_main(
+            _fake_gh_class_gated([
+                _class_pr(
+                    299, "2026-08-19T10:00:00Z", RULESET_EDIT,
+                    reviews=[("jdwlabs-root", "DISMISSED")],
+                ),
+            ]),
+            "holds: []\n",
+        )
+        self.assertEqual(code, 1)
+
+    def test_a_non_class_unapproved_green_pr_stays_routine(self):
+        code, out = _run_main(
+            _fake_gh_class_gated([
+                _class_pr(299, "2026-08-19T10:00:00Z", DOCS_EDIT),
+            ]),
+            "holds: []\n",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("routine-unapproved=1", out)
+        self.assertIn("reportable=0", out)
+
+    def test_a_merge_before_the_gate_existed_is_not_judged_against_it(self):
+        # The gate is read live; a PR that merged before the ruleset was
+        # created could not have stepped over it.
+        code, out = _run_main(
+            _fake_gh_class_gated([
+                _class_pr(299, "2026-07-19T10:00:00Z", RULESET_EDIT),
+            ]),
+            "holds: []\n",
+        )
+        self.assertEqual(code, 0)
+        self.assertNotIn("REPORTABLE", out)
+
+    def test_a_truncated_file_list_fails_closed(self):
+        # A file list shorter than the PR's changed-file count may have cut
+        # off the owned path; guessing "not owned" would hide a bypass.
+        gh = _fake_gh_class_gated([
+            _class_pr(299, "2026-08-19T10:00:00Z", DOCS_EDIT),
+        ])
+
+        def truncated(args, missing_ok=False):
+            got = gh(args, missing_ok)
+            if args[0] == "pr" and args[1] == "view":
+                got["changedFiles"] = 300
+            return got
+
+        code, out = _run_main(truncated, "holds: []\n")
+        self.assertEqual(code, 1)
+        self.assertIn("platform#299", out)
+
+    def test_a_gated_repo_without_codeowners_reaches_no_verdict(self):
+        # Without an owners file the gate demands nothing; that is a disabled
+        # control, not a clean result.
+        holds = _write_holds("holds: []\n")
+        with unittest.mock.patch.object(
+            audit, "gh_json",
+            _fake_gh_class_gated([_class_pr(299, "2026-08-19T10:00:00Z", DOCS_EDIT)],
+                                 codeowners=""),
+        ):
+            with unittest.mock.patch.object(
+                audit, "CODEOWNERS_LOCATIONS", ("CODEOWNERS",)
+            ):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        code = audit.main(
+                            ["--repo", "platform", "--holds", str(holds), "--since", "2026-08-01"]
+                        )
+        self.assertEqual(code, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
