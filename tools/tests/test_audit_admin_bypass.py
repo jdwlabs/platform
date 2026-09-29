@@ -587,6 +587,10 @@ class OwnersForTests(unittest.TestCase):
     def test_an_unlisted_path_is_unowned(self):
         self.assertEqual(audit.owners_for("docs/OPERATIONS.md", self.RULES), ())
 
+    def test_an_inline_comment_ends_the_owner_list(self):
+        rules = audit.parse_codeowners("/cli/ @jdwillmsen # owned by ops\n")
+        self.assertEqual(audit.owners_for("cli/cmd/main.go", rules), ("jdwillmsen",))
+
     def test_an_unanchored_pattern_matches_at_any_depth(self):
         rules = audit.parse_codeowners("*.go @jdwillmsen\n")
         self.assertEqual(audit.owners_for("cli/cmd/main.go", rules), ("jdwillmsen",))
@@ -625,7 +629,10 @@ def _class_pr(
     pr = _pr_fixture(number, merged_at, conclusions, review=review)
     pr["author"] = {"login": author}
     pr["_files"] = list(files)
-    pr["_reviews"] = [{"author": {"login": a}, "state": s} for a, s in reviews]
+    pr["_reviews"] = [
+        {"author": {"login": a}, "state": s, "submittedAt": f"2026-08-19T09:{i:02d}:00Z"}
+        for i, (a, s) in enumerate(reviews)
+    ]
     pr["_commits"] = list(commits)
     return pr
 
@@ -661,7 +668,7 @@ def _fake_gh_class_gated(prs: list[dict], codeowners: str = CODEOWNERS):
                 "commits": pr["_commits"],
                 "files": [{"path": f} for f in pr["_files"]],
                 "changedFiles": len(pr["_files"]),
-                "latestReviews": pr["_reviews"],
+                "reviews": pr["_reviews"],
             }
         if "/check-runs" in joined:
             sha = joined.split("/commits/")[1].split("/")[0]
@@ -771,6 +778,36 @@ class ChangeClassGateTests(unittest.TestCase):
             "holds: []\n",
         )
         self.assertEqual(code, 1)
+
+    def test_a_comment_after_an_owner_approval_does_not_withdraw_it(self):
+        code, out = _run_main(
+            _fake_gh_class_gated([
+                _class_pr(
+                    299, "2026-08-19T10:00:00Z", RULESET_EDIT,
+                    reviews=[("jdwlabs-root", "APPROVED"), ("jdwlabs-root", "COMMENTED")],
+                ),
+            ]),
+            "holds: []\n",
+        )
+        self.assertEqual(code, 0)
+        self.assertNotIn("REPORTABLE", out)
+
+    def test_a_dismissal_after_an_owner_approval_withdraws_it(self):
+        code, out = _run_main(
+            _fake_gh_class_gated([
+                _class_pr(
+                    299, "2026-08-19T10:00:00Z", RULESET_EDIT,
+                    reviews=[
+                        ("jdwlabs-root", "APPROVED"),
+                        ("jdwlabs-root", "COMMENTED"),
+                        ("jdwlabs-root", "DISMISSED"),
+                    ],
+                ),
+            ]),
+            "holds: []\n",
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("platform#299", out)
 
     def test_a_non_class_unapproved_green_pr_stays_routine(self):
         code, out = _run_main(

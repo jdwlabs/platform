@@ -158,6 +158,7 @@ import argparse
 import base64
 import binascii
 import json
+import itertools
 import re
 import subprocess
 import sys
@@ -179,6 +180,7 @@ HOLDS_RELPATH = "tools/admin-bypass-holds.yaml"
 # of its bypasses as a finding would report the designed path daily.
 CLASS_GATE_RULESETS = frozenset({"Change Class Review Gate"})
 CLASS_GATE_FINDING = "change-class-review-gate"
+OPINIONATED_REVIEW_STATES = frozenset({"APPROVED", "CHANGES_REQUESTED", "DISMISSED"})
 
 # GitHub's own lookup order; the first file found is the only one it reads.
 CODEOWNERS_LOCATIONS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
@@ -359,8 +361,8 @@ def parse_codeowners(text: str) -> list[tuple[re.Pattern, tuple[str, ...]]]:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        pattern, *owners = line.split()
-        owners = [o for o in owners if not o.startswith("#")]
+        pattern, *rest = line.split()
+        owners = list(itertools.takewhile(lambda o: not o.startswith("#"), rest))
         rules.append(
             (_codeowners_regex(pattern), tuple(o.removeprefix("@") for o in owners))
         )
@@ -422,8 +424,10 @@ def class_gate_findings(
     REVIEW_REQUIRED cannot say which of the two requirements went unmet — and
     only the owner gate's is a finding on its own.
 
-    An approval counts only when it is the reviewer's latest review, is
-    APPROVED, and comes from an owner of the file who did not author the PR.
+    An approval counts only when it is the reviewer's latest opinionated
+    review (a later comment-only review does not withdraw it, a later
+    dismissal or change request does), and comes from an owner of the file who
+    did not author the PR.
     A team or email owner cannot be matched against a reviewer login, so it
     credits nothing and the file stays unapproved: an unverifiable approval
     is reported, never assumed.
@@ -437,11 +441,11 @@ def class_gate_findings(
         ]
 
     author = _login(pr.get("author"))
-    approvers = {
-        _login(review.get("author"))
-        for review in pr.get("latestReviews") or []
-        if review.get("state") == "APPROVED"
-    } - {author, ""}
+    latest: dict[str, str] = {}
+    for review in sorted(pr.get("reviews") or [], key=lambda r: r.get("submittedAt") or ""):
+        if review.get("state") in OPINIONATED_REVIEW_STATES:
+            latest[_login(review.get("author"))] = review["state"]
+    approvers = {login for login, state in latest.items() if state == "APPROVED"} - {author, ""}
 
     unapproved = []
     for path in files:
@@ -653,7 +657,7 @@ def merged_prs_since(
     # comment describes. Slower (one extra round trip per PR) but correct
     # regardless of window size. The class gate's evidence rides on the same
     # call, so judging it costs no extra round trip per PR.
-    fields = "commits,files,changedFiles,latestReviews" if class_gated else "commits"
+    fields = "commits,files,changedFiles,reviews" if class_gated else "commits"
     for pr in prs:
         detail = gh_json(
             ["pr", "view", str(pr["number"]), "--repo", f"jdwlabs/{repo}", "--json", fields]
