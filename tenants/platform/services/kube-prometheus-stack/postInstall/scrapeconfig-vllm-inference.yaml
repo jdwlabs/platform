@@ -13,9 +13,9 @@ spec:
   # node-exporter's textfile collector is what actually carries the drift
   # gauges (vllm_serving_info / vllm_serving_drift / the check timestamp)
   # alongside the ordinary host metrics, so this job is scraped and alerted
-  # on independently of the vLLM process itself: the two consumers below can
-  # degrade to their cloud tiers while node-exporter is still reachable, or
-  # vice versa, and each failure mode needs its own signal.
+  # on independently of the vLLM process itself: the model server can go down
+  # (and its consumers fall back to their cloud tiers) while node-exporter is
+  # still reachable, or vice versa, and each failure mode needs its own signal.
   jobName: vllm-inference-node
   staticConfigs:
     - targets:
