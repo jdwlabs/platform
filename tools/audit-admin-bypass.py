@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Report admin-bypass merges among agent-authored PRs, across all four repos.
+"""Report admin-bypass merges across all four repos.
+
+Agent-authored PRs are judged against every gate; every PR, whoever wrote it,
+is judged against the change-class owner gate.
 
 JDWLABS-181's first success metric is "0 routine admin-bypass merges for
 agent-authored PRs (author != approver enforced natively)" — currently
@@ -70,6 +73,31 @@ combined-status endpoint: this org posts only check runs, so
 array on a commit whose every check succeeded. A tool reading that would
 grade every merge as bypassed.
 
+The change-class gate is the exception to "routine"
+---------------------------------------------------
+
+`platform`'s "Change Class Review Gate" requires a code owner's approval on
+the paths CODEOWNERS lists, and grants the organization-admin role a
+pull_request-mode bypass so the owner can merge their own PR in an emergency
+(ADR 0030). That bypass is a break-glass, and a break-glass nobody sees used
+is the ornamental gate ADR 0026 set out to remove. So a merge that touched an
+owned path without an owner's approval is **always reportable**, whatever its
+checks say and whoever authored it — including PRs with no agent trailer,
+which the rest of this audit does not inspect. Only a hold with a reason
+clears it.
+
+The evidence is the PR's changed files matched against the repo's live
+CODEOWNERS, and its latest reviews: every owned file needs an APPROVED
+latest review from one of its owners who is not the PR's author.
+`reviewDecision` cannot serve here, because `Baseline` demands one approval
+on every path and REVIEW_REQUIRED does not say which requirement went unmet.
+A PR merged before the gate ruleset was created is not judged against it, and
+a file list shorter than the PR's changed-file count is reported as
+unverifiable rather than guessed clean. Known blind spots: CODEOWNERS is read
+as it is today, not as it was at merge time; a rename is judged by its new
+path only; and a team or email owner cannot be matched to a reviewer login,
+so it credits no approval and the merge is reported rather than missed.
+
 What `deployments`' zero does and does not do
 --------------------------------------------
 
@@ -117,7 +145,8 @@ Usage:
 Exit codes:
     0   no reportable bypass — routine unapproved merges may still be counted
     1   at least one reportable bypass, or a stale hold
-    2   the audit could not run (bad input, gh/API failure, unreadable holds)
+    2   the audit could not run (bad input, gh/API failure, unreadable holds,
+        or a change-class gate with no CODEOWNERS rules behind it)
 
 1 and 2 are deliberately distinct. "Found nothing" and "could not look" are
 different statements, and a caller that conflates them reports a clean bill of
@@ -126,12 +155,15 @@ health for a check that never executed.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import json
 import re
 import subprocess
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 REPOS = ["apps", "platform", "infrastructure", "deployments"]
 TARGET_REF = "refs/heads/main"
@@ -140,6 +172,16 @@ AGENT_TRAILER = re.compile(
 )
 
 HOLDS_RELPATH = "tools/admin-bypass-holds.yaml"
+
+# Matched by name rather than by the code-owner flag alone: `deployments`'
+# "PRD Promotion Review Gate" is also owner-gated, but it grants its release
+# bot a deliberate pull_request bypass for every promotion, so treating each
+# of its bypasses as a finding would report the designed path daily.
+CLASS_GATE_RULESETS = frozenset({"Change Class Review Gate"})
+CLASS_GATE_FINDING = "change-class-review-gate"
+
+# GitHub's own lookup order; the first file found is the only one it reads.
+CODEOWNERS_LOCATIONS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
 
 # A check run that GitHub itself accepts as satisfying a required context.
 # `neutral` and `skipped` are successes for this purpose — a path-filtered job
@@ -160,9 +202,12 @@ class ToolError(Exception):
     """A gh/API failure or bad input — distinct from "found some bypasses"."""
 
 
-def gh_json(args: list[str]) -> object:
+def gh_json(args: list[str], missing_ok: bool = False) -> object:
+    """Run gh and parse its JSON. With `missing_ok`, a 404 returns None."""
     result = subprocess.run(["gh", *args], capture_output=True, text=True)
     if result.returncode != 0:
+        if missing_ok and "(HTTP 404)" in result.stderr:
+            return None
         raise ToolError(f"gh {' '.join(args)}\n{result.stderr.strip()}")
     try:
         return json.loads(result.stdout)
@@ -227,16 +272,38 @@ def ruleset_required_contexts(detail: dict, ref: str) -> set[str] | None:
     return contexts
 
 
-def required_gates(repo: str, ref: str = TARGET_REF) -> tuple[int, set[str]]:
-    """Strictest approval count and the union of required contexts covering `ref`.
+class Gates(NamedTuple):
+    reviews: int
+    contexts: set[str]
+    # When the change-class gate came into force on this ref, or None when no
+    # such gate applies. "" means it applies but its creation time is unknown,
+    # which judges every merge against it rather than exempting any.
+    class_gate_since: str | None
 
-    One pass over the repo's rulesets serves both halves. Approvals take the
+
+def class_gate_created_at(detail: dict, ref: str) -> str | None:
+    """`detail`'s creation time if it is an owner-gated change-class ruleset on `ref`."""
+    if detail.get("name") not in CLASS_GATE_RULESETS or not ruleset_applies(detail, ref):
+        return None
+    owner_gated = any(
+        rule["type"] == "pull_request"
+        and rule["parameters"].get("require_code_owner_review")
+        for rule in detail["rules"]
+    )
+    return (detail.get("created_at") or "") if owner_gated else None
+
+
+def required_gates(repo: str, ref: str = TARGET_REF) -> Gates:
+    """Strictest approval count, the union of required contexts, and the class gate.
+
+    One pass over the repo's rulesets serves all three. Approvals take the
     maximum because GitHub enforces the strictest; contexts take the union
     because every applicable ruleset's checks must pass, not just one's.
     """
     rulesets = gh_json(["api", f"repos/jdwlabs/{repo}/rulesets"])
     counts: list[int] = []
     contexts: set[str] = set()
+    class_since: list[str] = []
     for rs in rulesets:
         detail = gh_json(["api", f"repos/jdwlabs/{repo}/rulesets/{rs['id']}"])
         required = ruleset_review_requirement(detail, ref)
@@ -245,9 +312,169 @@ def required_gates(repo: str, ref: str = TARGET_REF) -> tuple[int, set[str]]:
         found = ruleset_required_contexts(detail, ref)
         if found is not None:
             contexts |= found
+        created = class_gate_created_at(detail, ref)
+        if created is not None:
+            class_since.append(created)
     if not counts:
         raise ToolError(f"{repo}: no active pull_request-rule ruleset covers {ref}")
-    return max(counts), contexts
+    return Gates(max(counts), contexts, min(class_since) if class_since else None)
+
+
+def _codeowners_regex(pattern: str) -> re.Pattern:
+    """Translate one CODEOWNERS pattern to a regex over repo-relative paths.
+
+    The gitignore subset GitHub documents: a slash at the start or in the
+    middle anchors to the root, `*` stops at a slash, `**` crosses them, and a
+    pattern that names a directory owns everything beneath it.
+    """
+    anchored = "/" in pattern.rstrip("/")
+    dir_only = pattern.endswith("/")
+    core = pattern.strip("/")
+    out, i = [], 0
+    while i < len(core):
+        if core.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+        elif core.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif core[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif core[i] == "?":
+            out.append("[^/]")
+            i += 1
+        else:
+            out.append(re.escape(core[i]))
+            i += 1
+    prefix = "^" if anchored else "^(?:.*/)?"
+    suffix = "/.*$" if dir_only else "(?:/.*)?$"
+    return re.compile(prefix + "".join(out) + suffix)
+
+
+def parse_codeowners(text: str) -> list[tuple[re.Pattern, tuple[str, ...]]]:
+    """Parse CODEOWNERS into (pattern, owners) rules, in file order."""
+    rules = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        pattern, *owners = line.split()
+        owners = [o for o in owners if not o.startswith("#")]
+        rules.append(
+            (_codeowners_regex(pattern), tuple(o.removeprefix("@") for o in owners))
+        )
+    return rules
+
+
+def owners_for(path: str, rules: list[tuple[re.Pattern, tuple[str, ...]]]) -> tuple[str, ...]:
+    """Owners of `path`: the last matching rule wins, and an ownerless one unowns it."""
+    owners: tuple[str, ...] = ()
+    for regex, rule_owners in rules:
+        if regex.match(path):
+            owners = rule_owners
+    return owners
+
+
+def fetch_codeowners(repo: str) -> list[tuple[re.Pattern, tuple[str, ...]]]:
+    """The owner rules GitHub enforces on `repo`'s default branch.
+
+    Read live, like the rulesets, so a CODEOWNERS change since a PR merged is
+    judged against today's file. A gated repo with no owners file, or one with
+    no rules in it, is a ToolError rather than an empty result: the gate then
+    demands nothing on any path, and "nothing to report" would hide exactly
+    that.
+    """
+    for location in CODEOWNERS_LOCATIONS:
+        payload = gh_json(
+            ["api", f"repos/jdwlabs/{repo}/contents/{location}"], missing_ok=True
+        )
+        if payload is None:
+            continue
+        try:
+            text = base64.b64decode(payload.get("content") or "").decode("utf-8")
+        except (binascii.Error, UnicodeDecodeError) as exc:
+            raise ToolError(f"{repo}: {location} could not be decoded: {exc}") from exc
+        rules = parse_codeowners(text)
+        if not rules:
+            raise ToolError(
+                f"{repo}: {location} has no owner rules, so the change-class gate "
+                f"requires nothing on any path"
+            )
+        return rules
+    raise ToolError(
+        f"{repo}: the change-class gate is active but no CODEOWNERS file exists "
+        f"({', '.join(CODEOWNERS_LOCATIONS)}), so it requires nothing on any path"
+    )
+
+
+def _login(actor: dict | None) -> str:
+    return ((actor or {}).get("login") or "").lower()
+
+
+def class_gate_findings(
+    pr: dict, rules: list[tuple[re.Pattern, tuple[str, ...]]]
+) -> list[str]:
+    """The owner-gate finding for `pr`, or an empty list when the gate was met.
+
+    Judged from the PR's own review record rather than `reviewDecision`. On
+    this repo `Baseline` also demands one approval on every path, so
+    REVIEW_REQUIRED cannot say which of the two requirements went unmet — and
+    only the owner gate's is a finding on its own.
+
+    An approval counts only when it is the reviewer's latest review, is
+    APPROVED, and comes from an owner of the file who did not author the PR.
+    A team or email owner cannot be matched against a reviewer login, so it
+    credits nothing and the file stays unapproved: an unverifiable approval
+    is reported, never assumed.
+    """
+    files = [f.get("path") or "" for f in pr.get("files") or []]
+    changed = pr.get("changedFiles")
+    if isinstance(changed, int) and len(files) < changed:
+        return [
+            f"{CLASS_GATE_FINDING}=UNVERIFIABLE "
+            f"(only {len(files)} of {changed} changed files listed)"
+        ]
+
+    author = _login(pr.get("author"))
+    approvers = {
+        _login(review.get("author"))
+        for review in pr.get("latestReviews") or []
+        if review.get("state") == "APPROVED"
+    } - {author, ""}
+
+    unapproved = []
+    for path in files:
+        owners = {o.lower() for o in owners_for(path, rules)}
+        if owners and not owners & approvers:
+            unapproved.append(path)
+    if not unapproved:
+        return []
+    more = f", +{len(unapproved) - 1} more" if len(unapproved) > 1 else ""
+    return [f"{CLASS_GATE_FINDING}=NO-OWNER-APPROVAL ({unapproved[0]}{more})"]
+
+
+def _instant(timestamp: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def under_class_gate(merged_at: str, gate_since: str | None) -> bool:
+    """Whether a merge at `merged_at` fell under a class gate created at `gate_since`.
+
+    A merge that predates the ruleset cannot have stepped over it, and judging
+    it against a rule read live would report every class-path PR from before
+    the gate existed. An unparseable time on either side judges the merge
+    rather than exempting it.
+    """
+    if gate_since is None:
+        return False
+    merged, since = _instant(merged_at), _instant(gate_since)
+    if merged is None or since is None:
+        return True
+    return merged >= since
 
 
 def latest_check_conclusions(runs: list[dict]) -> dict[str, str | None]:
@@ -401,13 +628,16 @@ def load_holds(holds_file: Path) -> dict[tuple[str, int], str]:
     return holds
 
 
-def merged_prs_since(repo: str, since: date, ref: str = TARGET_REF) -> list[dict]:
+def merged_prs_since(
+    repo: str, since: date, ref: str = TARGET_REF, class_gated: bool = False
+) -> list[dict]:
     prs = gh_json(
         [
             "pr", "list", "--repo", f"jdwlabs/{repo}",
             "--search", f"merged:>={since.isoformat()}", "--state", "merged",
             "--limit", str(LIST_LIMIT),
-            "--json", "number,title,url,mergedAt,reviewDecision,baseRefName,headRefOid",
+            "--json",
+            "number,title,url,mergedAt,reviewDecision,baseRefName,headRefOid,author",
         ]
     )
     if len(prs) == LIST_LIMIT:
@@ -421,12 +651,15 @@ def merged_prs_since(repo: str, since: date, ref: str = TARGET_REF) -> list[dict
     # commits fetched per-PR, one gh call each, rather than in the list call
     # above — that's what avoids the node-budget ceiling LIST_LIMIT's
     # comment describes. Slower (one extra round trip per PR) but correct
-    # regardless of window size.
+    # regardless of window size. The class gate's evidence rides on the same
+    # call, so judging it costs no extra round trip per PR.
+    fields = "commits,files,changedFiles,latestReviews" if class_gated else "commits"
     for pr in prs:
         detail = gh_json(
-            ["pr", "view", str(pr["number"]), "--repo", f"jdwlabs/{repo}", "--json", "commits"]
+            ["pr", "view", str(pr["number"]), "--repo", f"jdwlabs/{repo}", "--json", fields]
         )
-        pr["commits"] = detail["commits"]
+        for field in fields.split(","):
+            pr[field] = detail.get(field)
     return prs
 
 
@@ -455,8 +688,12 @@ def audit(since: date, holds: dict[tuple[str, int], str], repos: list[str]) -> d
     total_agent = 0
 
     for repo in repos:
-        required_reviews, required_contexts = required_gates(repo)
-        prs = merged_prs_since(repo, since)
+        gates = required_gates(repo)
+        required_reviews, required_contexts = gates.reviews, gates.contexts
+        owner_rules = (
+            fetch_codeowners(repo) if gates.class_gate_since is not None else None
+        )
+        prs = merged_prs_since(repo, since, class_gated=owner_rules is not None)
 
         # Check-run state is fetched for *every* merged PR in the window, not
         # only the agent-authored ones, because these are also the peers that
@@ -472,21 +709,36 @@ def audit(since: date, holds: dict[tuple[str, int], str], repos: list[str]) -> d
 
         repo_routine = 0
         repo_reportable = 0
+        repo_class = 0
         repo_unevaluable: set[str] = set()
-        for pr in agent_prs:
+        # Every merged PR is judged against the class gate, not only the
+        # agent-authored ones: its organization-admin bypass exists for the
+        # owner's own emergency merges, which need not carry an agent trailer,
+        # and an audit that skipped them would never see the use it guards.
+        for pr in prs:
             key = (repo, pr["number"])
-            seen.add(key)
-            if required_reviews < 1 or pr["reviewDecision"] == "APPROVED":
-                continue
-            failed, absent = split_required(required_contexts, pr["conclusions"])
-            missed, not_judged = judge_absent(
-                absent, earliest, pr.get("mergedAt") or ""
-            )
-            repo_unevaluable |= set(not_judged)
-            findings = failed + missed
+            agent = is_agent_authored(pr)
+            findings: list[str] = []
+            if owner_rules is not None and under_class_gate(
+                pr.get("mergedAt") or "", gates.class_gate_since
+            ):
+                seen.add(key)
+                findings += class_gate_findings(pr, owner_rules)
+                if findings:
+                    repo_class += 1
+            if agent:
+                seen.add(key)
+                if required_reviews >= 1 and pr["reviewDecision"] != "APPROVED":
+                    failed, absent = split_required(required_contexts, pr["conclusions"])
+                    missed, not_judged = judge_absent(
+                        absent, earliest, pr.get("mergedAt") or ""
+                    )
+                    repo_unevaluable |= set(not_judged)
+                    findings += failed + missed
+                    if not findings:
+                        repo_routine += 1
+                        routine.append((repo, pr))
             if not findings:
-                repo_routine += 1
-                routine.append((repo, pr))
                 continue
             if key in holds:
                 held.add(key)
@@ -502,6 +754,7 @@ def audit(since: date, holds: dict[tuple[str, int], str], repos: list[str]) -> d
             f"required_checks={len(required_contexts)} "
             f"agent-authored={len(agent_prs)} "
             f"routine-unapproved={repo_routine} reportable={repo_reportable}"
+            + (f" class-gate-unapproved={repo_class}" if owner_rules is not None else "")
         )
 
     # A hold covering a PR this window never fetched is simply not evaluated:
@@ -542,7 +795,10 @@ def render(result: dict, since: date, holds: dict[tuple[str, int], str], list_fl
             print(f"  {repo}#{number}  {holds[(repo, number)]}")
 
     if reportable:
-        print("\nREPORTABLE — merged unapproved with a required check unsatisfied:")
+        print(
+            "\nREPORTABLE — merged past a gate (a required check unsatisfied, "
+            "or a change-class path without a code-owner approval):"
+        )
         for repo, pr, unsatisfied in reportable:
             print(f"  {repo}#{pr['number']}  {pr['title']}  {pr['url']}")
             print(f"      unsatisfied: {', '.join(unsatisfied)}")
