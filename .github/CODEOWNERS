@@ -1,6 +1,8 @@
 # Ownership here is a gate, not a notification list: the "Change Class Review
-# Gate" ruleset turns every pattern below into a required code-owner approval
-# that no OrganizationAdmin bypass clears. Deliberately no catch-all — an
+# Gate" ruleset turns every pattern below into a required code-owner approval.
+# An organization admin can merge a pull request past it as a break-glass,
+# and tools/audit-admin-bypass.py reports every such merge until a hold in
+# tools/admin-bypass-holds.yaml records why. Deliberately no catch-all — an
 # unowned path needs only the Baseline approval, which is what makes the gate
 # class-based instead of blanket, and what keeps the set of changes that can
 # deadlock small enough for the reviewers this org actually has.
@@ -10,7 +12,8 @@
 # agent identity can satisfy the Baseline count but never a code-owner gate.
 #
 # Last matching pattern wins. Class definitions and the incident evidence
-# behind each one: docs/adr/0026-review-gates-by-change-class.md
+# behind each one: docs/adr/0026-review-gates-by-change-class.md; the
+# break-glass: docs/adr/0030-change-class-gate-break-glass.md
 
 # Gate integrity and supply chain. Workflows here mint GitHub App tokens, one
 # of them scoped across all four repos; tools/ holds the scripts CI trusts to
