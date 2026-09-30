@@ -20,7 +20,6 @@
       "Bash(kubectl explain *)",
       "Bash(kubectl api-resources*)",
       "Bash(kubectl version*)",
-      "Bash(kubectl apply *)",
       "Bash(helm show *)",
       "Bash(helm template *)",
       "Bash(helm pull *)",
@@ -61,7 +60,18 @@
       "Bash(helm rollback *)",
       "Bash(helm repo add *)",
       "Bash(helm plugin *)",
-      "Bash(helm registry *)"
+      "Bash(helm registry *)",
+      "Bash(kubectl apply *)",
+      "Bash(git push*--force)",
+      "Bash(git push*--force *)",
+      "Bash(git push* -f)",
+      "Bash(git push* -f *)",
+      "Bash(git push* +*)",
+      "Bash(git push* main)",
+      "Bash(git push* main *)",
+      "Bash(git push*:main)",
+      "Bash(git push*:main *)",
+      "Bash(git push*refs/heads/main*)"
     ],
     "deny": []
   }
