@@ -10,7 +10,7 @@
 # agent identity can satisfy the Baseline count but never a code-owner gate.
 #
 # Last matching pattern wins. Class definitions and the incident evidence
-# behind each one: docs/adr/0024-review-gates-by-change-class.md
+# behind each one: docs/adr/0026-review-gates-by-change-class.md
 
 # Gate integrity and supply chain. Workflows here mint GitHub App tokens, one
 # of them scoped across all four repos; tools/ holds the scripts CI trusts to
