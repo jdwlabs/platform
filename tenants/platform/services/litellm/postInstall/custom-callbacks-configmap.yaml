@@ -45,9 +45,9 @@ data:
     from litellm.proxy.proxy_server import UserAPIKeyAuth, DualCache
 
     # Each model_list entry's real backend context window (input + output
-    # tokens combined). sre-investigator-local is the only entry whose
-    # backend (vLLM, max_model_len=32768) hard-rejects an over-limit request
-    # instead of tolerating it -- the cloud entries (OpenRouter, NVIDIA NIM)
+    # tokens combined). sre-investigator-local and pr-reviewer share the one
+    # backend (vLLM, max_model_len=32768) that hard-rejects an over-limit
+    # request instead of tolerating it -- the cloud entries (OpenRouter, NVIDIA NIM)
     # accept far more today, but every entry is covered here so the
     # guarantee holds regardless of what a given provider currently
     # tolerates or how that changes.
@@ -56,6 +56,12 @@ data:
         "sre-investigator-fb1": 131072,
         "sre-investigator-fb2": 131072,
         "sre-investigator-local": 32768,
+        # This hook runs once, against the requested name, before the router
+        # picks a deployment -- so a pr-reviewer call is sized for the local
+        # window even when a fallback ends up serving it.
+        "pr-reviewer": 32768,
+        "pr-reviewer-fb1": 131072,
+        "pr-reviewer-fb2": 131072,
     }
     # Any model_list entry not named above still gets a conservative window
     # -- new entries are safe by default rather than silently uncapped.
