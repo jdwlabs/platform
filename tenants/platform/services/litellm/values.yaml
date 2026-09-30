@@ -40,11 +40,14 @@ redis:
 environmentSecrets:
   - litellm-secrets
 
-# Opt-in for Reloader (installed via the platform GitOps path, not yet live):
-# rolls this Deployment when litellm-secrets above is rotated. Inert until
-# Reloader is installed.
+# Reloader rolls this Deployment when litellm-secrets is rotated or either
+# config map changes. LiteLLM reads config.yaml and custom_callbacks.py only
+# at startup, so without the configmap entry a merged model_list or guardrail
+# edit syncs green in ArgoCD yet stays inert until something else restarts
+# the pod.
 deploymentAnnotations:
   secret.reloader.stakater.com/reload: "litellm-secrets"
+  configmap.reloader.stakater.com/reload: "platform-litellm-config,litellm-custom-callbacks"
 
 proxy_config:
   model_list:
