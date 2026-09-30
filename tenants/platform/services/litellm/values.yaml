@@ -86,6 +86,27 @@ proxy_config:
         model: hosted_vllm/qwen/qwen3-coder-30b-a3b
         api_base: http://192.168.1.50:8000/v1
         max_tokens: 16384
+    # PR review tier, deliberately local-first: OpenRouter's :free quota is
+    # per account, not per model name, so reviews routed there would spend
+    # the same 50 req/day Holmes needs for alert investigations. NIM is its
+    # own quota pool, so it backs the local host before OpenRouter does.
+    # The ultra model is left out: its 433-600s latency outlasts a review.
+    - model_name: pr-reviewer
+      litellm_params:
+        model: hosted_vllm/qwen/qwen3-coder-30b-a3b
+        api_base: http://192.168.1.50:8000/v1
+        # Review comments are short; the rest of the 32k window is the diff.
+        max_tokens: 4096
+    - model_name: pr-reviewer-fb1
+      litellm_params:
+        model: nvidia_nim/nvidia/nemotron-3-super-120b-a12b
+        api_key: os.environ/NVIDIA_NIM_API_KEY
+        max_tokens: 4096
+    - model_name: pr-reviewer-fb2
+      litellm_params:
+        model: openrouter/openai/gpt-oss-120b:free
+        api_key: os.environ/OPENROUTER_API_KEY
+        max_tokens: 4096
   general_settings:
     # LITELLM_MASTER_KEY is injected from the litellm-secrets ESO secret above.
     master_key: os.environ/LITELLM_MASTER_KEY
@@ -97,6 +118,7 @@ proxy_config:
     # before failing an investigation.
     fallbacks:
       - sre-investigator: ["sre-investigator-fb1", "sre-investigator-fb2", "sre-investigator-local"]
+      - pr-reviewer: ["pr-reviewer-fb1", "pr-reviewer-fb2"]
   litellm_settings:
     drop_params: true
     num_retries: 2
