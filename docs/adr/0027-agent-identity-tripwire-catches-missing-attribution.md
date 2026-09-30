@@ -9,7 +9,7 @@ and §4 of
 written forward, per the same convention
 [agent-app-installed-org-wide](0020-agent-app-installed-org-wide.md) used.
 
-Closes JDWLABS-368. The check this record re-scopes ships in
+The check this record re-scopes ships in
 `.github/workflows/agent-identity.yml` in all four repos.
 
 ## 1. Two sections of 0018 disagree, and the implementation followed the wrong one
@@ -38,8 +38,8 @@ review-gate matrix address directly, and which this check never touched.
 ## 2. Why the mis-scope was actively harmful, not merely noisy
 
 Every agent-assisted PR opened under a human identity trips the check as
-written, so its signal is not weak — it is inverted. JDWLABS-368 records
-`platform` PRs #268 and #269 as instances: all content checks green,
+written, so its signal is not weak — it is inverted. `platform` PRs #268
+and #269 are instances: all content checks green,
 `co-author-check` red, nothing wrong with either change.
 
 Both contribution paths are live in this org, and the mis-scope only damages
@@ -48,9 +48,9 @@ one of them:
 - **The App path works and is in routine use.** An installation credential is
   held locally, outside CI, and is what opens `jdwlabs-agent-bot[bot]` pull
   requests today — eight were open across `platform`, `apps`, and
-  `infrastructure` when this record was written. JDWLABS-368's premise that
-  the App is reachable only from inside a workflow run is therefore wrong,
-  and so is any reading of 0018 §4 that treats
+  `infrastructure` when this record was written. The premise that prompted
+  this record — that the App is reachable only from inside a workflow run —
+  is therefore wrong, and so is any reading of 0018 §4 that treats
   `actions/create-github-app-token` as the *only* way the identity can be
   obtained; that step is still unbuilt, and the identity is in use anyway.
 - **The human path is not deprecated, and it is the one that broke.** 0018 §2
@@ -123,7 +123,7 @@ reading a red check or deciding whether to require this one:
   `<app-slug>[bot]@users.noreply.github.com` committer. Clause 1 is forward
   cover for that path, not a control that fires on the current one.
 
-Clause 2 is JDWLABS-368's third deliverable and closes a gap the old shape
+Clause 2 is new with this record and closes a gap the old shape
 left wide open: a PR authored by the App used to pass *unconditionally*, so a
 bot PR with every trailer stripped went green while proving nothing. Identity
 and attribution answer different questions (0023 §4: the App identity says a
@@ -182,7 +182,7 @@ independent of the scoping question:
 ## Consequences
 
 **Clause 2 is enforceable now; promoting the check no longer waits on
-JDWLABS-309.** An earlier draft of this record said the opposite, on the
+the workflow-integrated App token path (0021's follow-up).** An earlier draft of this record said the opposite, on the
 mistaken belief that the App identity was not yet on the push path. It is:
 eight bot-opened PRs were live when this was written, all passing clause 2.
 Adding `agent-identity / co-author-check` to each repo's `Baseline`
@@ -247,3 +247,71 @@ tool's docstring records.
 **Also closed.** §5 left the audit tool's pattern unanchored, with the prose
 false positive this record fixed in the workflow. It is now anchored and
 shares the workflow's pattern exactly.
+
+## Amendment (2026-09-30) — attribution names the model, not only the agent
+
+Appended after this record landed; nothing above is edited. Where §3 and the
+2026-09-21 amendment say "an agent co-author trailer", read "an agent
+co-author trailer and an `Assisted-by` trailer".
+
+**Decision.** Knowing which agent *and which model* made every change is a
+hard requirement (set by the repo owner on 2026-09-30). `Co-Authored-By`
+cannot carry that on its own: its display name is free text, vendors reuse
+one noreply address across every model, and a self-hosted model has no
+vendor at all. Every agent-assisted commit therefore carries a second
+trailer,
+
+```
+Assisted-by: <agent>:<model-id> [tool ...]
+```
+
+— for example `Claude Code:claude-opus-5-5` or `Codex:<model-id>` — naming
+the model that actually ran, never one copied from an example. In
+`agent-identity / co-author-check`, in all four repos, a commit now counts
+as *attributed* only when it carries both a well-formed `Co-Authored-By`
+trailer (the 2026-09-21 pattern, unchanged) and a line matching
+`^Assisted-by:[ \t]*[^:\s][^:]*:\S+([ \t]+\S+)*\s*$` (case-insensitive). Clause 1
+fails an agent-identity commit missing either trailer and names which;
+clause 2 fails an agent-opened pull request where no commit carries both.
+Clause 3 and the truncation guards are untouched.
+
+**The `web-flow` exemption no longer covers the agent's own API commits.**
+§3 exempted every GitHub-signed `web-flow` commit, reasoning that nobody had
+a chance to write a trailer. That holds for a human's web-UI edit or
+update-branch merge, but the contents API and `createCommitOnBranch` — the
+path the App now uses for every commit, because only GitHub-created commits
+carry its identity verifiably — also produce signed `web-flow` commits,
+and there the agent wrote the whole message. The exemption made clause 1
+unreachable on exactly the path it was written as forward cover for. A
+signed `web-flow` commit is now exempt only when none of its author fields
+(GitHub login, git name, git email) matches the agent identity; one authored
+by `jdwlabs-agent-bot[bot]` is checked like any other agent commit. A
+human's web-UI commit stays exempt as before. The remaining edge is an
+update-branch merge the App requests through the API: it would be authored by the
+App with a message GitHub writes, so it would fail clause 1 — the App should
+rebase and re-commit instead.
+
+**Why a second trailer rather than a stricter `Co-Authored-By`.** Encoding
+the model into the co-author name would need a per-vendor naming grammar
+the check then has to parse, and would still leave the self-hosted case
+without a slot. `Assisted-by: <agent>:<model-id>` is one grammar for every
+agent, and leaves `Co-Authored-By` meaning what git hosts already render it
+as. The model id is a single token; any whitespace-separated words after it are
+read as the optional tool list (the Linux kernel's `Assisted-by` convention,
+which Codex's instructions already follow), never as part of the id. An
+empty agent, an empty model id or a missing colon still fails.
+
+**What it costs.** Every agent-opened pull request whose commits carry only
+`Co-Authored-By` goes red the next time the check runs on it — on the day
+this landed, most open `jdwlabs-agent-bot[bot]` pull requests across the four
+repos. The fix is to rewrite those commits with both trailers, not to strip
+anything. The check is still absent from every `Baseline`
+`required_status_checks`, so red blocks nothing by itself.
+
+**What it still cannot do.** Everything in §4 applies to the new trailer
+with the same force: it is self-asserted text, so the check proves a model
+was *named*, not that it was the one that ran, and an agent working under a
+human identity with neither trailer remains invisible. This stays a tripwire
+for the accidental omission. `tools/audit-admin-bypass.py` still counts
+agent authorship from `Co-Authored-By` alone; it reports rather than gates,
+so it is left as is.
