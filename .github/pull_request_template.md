@@ -1,25 +1,27 @@
-## What
+<!--
+Title: type(scope): description — under 70 characters.
+Body is for the reviewer: ~150 words, keep only sections with content, delete
+the rest. No file-by-file lists, restated diff, pasted prompts, logs or
+unticked checkboxes. Every claim must match the final diff.
+-->
 
-<!-- One sentence: what changed and why -->
+## Why
 
-## Type of change
+<!-- 1–3 sentences: the problem, and why this approach. -->
 
-- [ ] `feat` — new feature or capability
-- [ ] `fix` — bug fix
-- [ ] `build` — build system or external dependency change
-- [ ] `chore` — maintenance / config / tooling
-- [ ] `ci` — CI/CD pipeline change
-- [ ] `docs` — documentation only
-- [ ] `perf` — performance improvement
-- [ ] `refactor` — restructure, no behavior change
-- [ ] `revert` — revert a previous commit
-- [ ] `style` — formatting / whitespace (no logic change)
-- [ ] `test` — test additions or updates
+## Needs attention
 
-## Checklist
+<!-- - `path:line` — risky or non-obvious spot, and the feedback you want on it. -->
 
-- [ ] PR title follows conventional commit format: `type(scope): description`
-- [ ] `platformctl tenants validate` passes (if tenant config changed)
-- [ ] `yamllint tenants/ bootstrap/` passes (if YAML changed)
-- [ ] `cd cli && go test ./...` passes (if CLI changed)
-- [ ] No secrets or credentials in diff
+## Risk / rollout
+
+<!-- Only if any: migrations, breaking changes, manual steps (e.g. re-running .github/rulesets/apply.sh after merge). -->
+
+## Verified
+
+<!--
+- `command actually run` — result
+Repo hints: `platformctl tenants validate` — N tenants OK; `cd cli && go test ./...` — ok
+-->
+
+<!-- Closes #N / KEY-123 -->
