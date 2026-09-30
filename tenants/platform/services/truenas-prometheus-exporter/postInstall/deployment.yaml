@@ -47,7 +47,7 @@ spec:
                   key: api_key
             # The appliance presents its stock self-signed certificate
             # (CN=localhost); see cli/internal/truenas/transport.go's
-            # describeDialError and AGENTS.md's TrueNAS volumes section for
+            # describeDialError and docs/PLATFORMCTL.md's TrueNAS volumes section for
             # why platformctl's own tooling makes the same choice.
             - name: TRUENAS_PROMETHEUS_INSECURE_SKIP_TLS_VERIFY
               value: "true"
