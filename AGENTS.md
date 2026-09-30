@@ -117,4 +117,4 @@ Rules that each prevented a real incident:
 
 Repo- and cluster-specific traps (CI not queuing on a conflicted PR, merge vs
 rebase here, `.imageID` vs `.image`): [docs/AGENT-TOOLING-TRAPS.md](docs/AGENT-TOOLING-TRAPS.md).
-Box-wide tool traps: dotfiles docs/agent-tooling-traps.md (loaded via the global instructions).
+Box-wide tool traps: `~/.local/share/chezmoi/docs/agent-tooling-traps.md` (dotfiles).

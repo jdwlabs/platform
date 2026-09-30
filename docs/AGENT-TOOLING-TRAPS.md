@@ -4,7 +4,7 @@ Symptoms in this repo and the cluster it deploys that look like success, or
 like a repo problem, but come from the tooling in front of them. Pointed to
 from the root `AGENTS.md`.
 
-Box-wide tool traps: dotfiles docs/agent-tooling-traps.md (loaded via the global instructions).
+Box-wide tool traps: `~/.local/share/chezmoi/docs/agent-tooling-traps.md` (dotfiles).
 
 | Symptom | Cause | Fix |
 |---|---|---|
