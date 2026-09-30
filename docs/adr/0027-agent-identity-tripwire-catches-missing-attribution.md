@@ -250,7 +250,9 @@ shares the workflow's pattern exactly.
 
 ## Amendment (2026-09-30) — attribution names the model, not only the agent
 
-Appended after this record landed; nothing above is edited. Where §3 and the
+Appended after this record landed. The only edits above it, made in the
+same change, remove ticket IDs; each reference is kept by description or
+pull request number, and no decision or finding changed. Where §3 and the
 2026-09-21 amendment say "an agent co-author trailer", read "an agent
 co-author trailer and an `Assisted-by` trailer".
 
