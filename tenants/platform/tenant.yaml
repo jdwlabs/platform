@@ -351,12 +351,14 @@ services:
 
   # Distributed tracing backend. Single-binary Tempo chart now lives in the
   # grafana-community repo (grafana/helm-charts copy is deprecated).
+  # No postInstall: Tempo has no auth of its own, so it gets no gateway route
+  # and is read only in-cluster, through the Grafana datasource.
   - name: tempo
     chart: tempo
     repo: https://grafana-community.github.io/helm-charts
     revision: 3.0.0
     namespace: monitoring
-    postInstall: true
+    postInstall: false
     syncWave: 2
 
   - name: headlamp
