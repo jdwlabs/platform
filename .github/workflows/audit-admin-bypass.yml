@@ -36,14 +36,15 @@ name: audit-admin-bypass
 # Who finds out is decided by the severity label, via the route tree in this
 # repo's Alertmanager config:
 #
-#   * a finding — someone merged past a required check — goes out as
-#     `severity: warning` with no tenant label, which the route tree sends to
-#     the AI-SRE relay alone. It is a backlog to triage, not a page: the merge
-#     already happened, nothing is on fire, and the alert stands until someone
-#     records a hold or fixes the check. Sending that to Discord daily would
-#     either nag until it is filtered or post a "resolved" line minutes later
-#     when Alertmanager expires the alert, which reads as the finding having
-#     been dealt with when nothing has moved.
+#   * a finding — someone merged past a required check or the change-class
+#     owner gate — goes out as `severity: warning` with no tenant label, which
+#     the route tree sends to the AI-SRE relay alone. It is a backlog to
+#     triage, not a page: the merge already happened, nothing is on fire, and
+#     the alert stands until someone records a hold or fixes the check.
+#     Sending that to Discord daily would either nag until it is filtered or
+#     post a "resolved" line minutes later when Alertmanager expires the
+#     alert, which reads as the finding having been dealt with when nothing
+#     has moved.
 #   * no verdict at all — the audit crashed, could not read a ruleset, or never
 #     ran — goes out as `severity: critical`, reaching Discord as well as the
 #     relay. That is the condition nothing else can report, because a check that
