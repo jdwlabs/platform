@@ -1,0 +1,24 @@
+# Public on purpose: GitHub delivers App webhooks only to a public URL. The
+# route admits exactly one method and path, so the app's other endpoints
+# (/, /api/v1/marketplace_webhooks) are unreachable from outside and the
+# gateway answers everything else with 404. Every admitted request must
+# still carry a valid X-Hub-Signature-256 or PR-Agent answers 403.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: pr-agent
+  namespace: pr-review
+spec:
+  parentRefs:
+    - name: platform-gateway
+      namespace: nginx-gateway
+      sectionName: https
+  hostnames:
+    - pr-agent.jdwlabs.com
+  rules:
+    - matches:
+        - path: {type: Exact, value: /api/v1/github_webhooks}
+          method: POST
+      backendRefs:
+        - name: pr-agent
+          port: 3000

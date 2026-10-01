@@ -1599,3 +1599,90 @@ that node's disk.
    Anything under that path with no matching PV is dead CI scratch. Reclaiming
    it matters beyond tidiness: it is what the re-enable pre-flight in step 1
    above measures free space against.
+
+## PR-Agent advisory reviewer
+
+`pr-agent` (namespace `pr-review`) is a GitHub App that reviews every PR in
+`apps`, `deployments`, `infrastructure` and `platform`. It runs `/review` and
+`/improve` when a PR is opened, reopened or marked ready (drafts included)
+and posts comments only. It never approves: Pull requests write would let
+it, and an App approval counts toward the Baseline ruleset's required
+approvals, so auto-approval is pinned off and the `.pr_agent.toml` files
+that could re-enable it are not read. It has no permission to push and
+registers no check, so CODEOWNERS and the rulesets still gate every merge.
+Its model is LiteLLM's `pr-reviewer` route: the local vLLM first, then
+NVIDIA NIM, then OpenRouter.
+
+**Exposure.** GitHub delivers App webhooks only to a public URL, so
+`pr-agent.jdwlabs.com` is reachable from the internet through the existing
+wildcard DNS and WAN 443 forward. The HTTPRoute admits only
+`POST /api/v1/github_webhooks`; everything else gets a 404 from the gateway.
+PR-Agent answers 403 to a missing or wrong `X-Hub-Signature-256`, and also
+403 to every webhook while no secret is configured, so it fails closed. The
+namespace enforces the default network-policy tier: ingress only from the
+gateway and monitoring, egress only to DNS, internet 443 and LiteLLM on 4000.
+
+**Comment commands are off by design.** The App subscribes to the
+`Pull request` event only. On public repos anyone can comment, and PR-Agent
+runs any `/command` a comment carries, so subscribing to `Issue comment`
+would let strangers spend the GPU and run commands such as `/describe`,
+which rewrites the PR title and body.
+
+### Setup (human terminal only; credentials never pass through an agent)
+
+1. Generate the webhook secret into a file:
+   `umask 077; openssl rand -hex 32 > /dev/shm/pr-agent-webhook-secret`
+2. In the jdwlabs org settings, create a GitHub App:
+   - Webhook URL `https://pr-agent.jdwlabs.com/api/v1/github_webhooks`,
+     webhook secret from the file above
+   - Repository permissions: Contents read, Pull requests read and write,
+     Metadata read. Nothing else: Pull requests write already covers PR
+     conversation comments, so Issues access would only widen what a leaked
+     key can do.
+   - Subscribe to events: **Pull request** only
+   - Installable only on this account
+3. Generate a private key (the `.pem` downloads), note the App ID, and
+   install the App on the four repos only.
+4. Store all three, then destroy the local copies:
+
+   ```bash
+   vault kv put kv/pr-agent app-id=<APP_ID> \
+     private-key=@<downloaded>.pem \
+     webhook-secret=@/dev/shm/pr-agent-webhook-secret
+   shred -u <downloaded>.pem /dev/shm/pr-agent-webhook-secret
+   ```
+
+5. The LiteLLM key comes from `kv/litellm` `pr_reviewer_key` (registered
+   with LiteLLM when the `pr-reviewer` route was added). ESO syncs within an
+   hour; Reloader restarts the pod when the Secret changes.
+
+### Verify
+
+```bash
+kubectl -n pr-review get externalsecret pr-agent   # SecretSynced
+kubectl -n pr-review get pods -l app=pr-agent      # Ready
+# From off-LAN (the router cannot hairpin a LAN client to the WAN IP):
+curl -s -o /dev/null -w '%{http_code}\n' https://pr-agent.jdwlabs.com/                 # 404
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://pr-agent.jdwlabs.com/api/v1/github_webhooks \
+  -H 'X-GitHub-Event: ping' -H 'Content-Type: application/json' -d '{}'               # 403
+```
+
+Then open a test PR and expect a review comment from the App within a few
+minutes. The App's **Advanced → Recent Deliveries** page shows each webhook
+and PR-Agent's response code.
+
+### Disable
+
+- **Immediately:** suspend the App's installation in the org settings.
+  GitHub stops delivering; nothing in the cluster changes.
+- **Permanently:** remove the `pr-agent` service and `pr-review` namespace
+  entries from `tenants/platform/tenant.yaml` via PR, then delete the App.
+
+### Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| Deliveries show 403 `Webhook secret not configured` | `GITHUB__WEBHOOK_SECRET` is empty: `kv/pr-agent` `webhook-secret` is missing or ESO has not synced |
+| Deliveries show 403 `signatures didn't match` | The secret in Vault differs from the one in the App settings; regenerate both from one file |
+| Delivery 200 but no comment | Check pod logs. A LiteLLM 400 from `max_tokens_ceiling_guardrail` means the prompt outgrew the 32k local window; lower `CONFIG__MAX_MODEL_TOKENS`. A 401 means `kv/litellm` `pr_reviewer_key` is not registered with LiteLLM |
+| Deliveries time out | Pod not Ready, or the route did not attach: `kubectl -n pr-review get httproute pr-agent -o yaml` and check `status.parents` |

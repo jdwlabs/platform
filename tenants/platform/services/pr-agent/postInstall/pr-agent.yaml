@@ -1,0 +1,104 @@
+# PR-Agent as a GitHub App: GitHub posts PR events to it through the public
+# gateway and it answers with advisory review comments generated through
+# LiteLLM's local-first pr-reviewer route. It never approves, requests
+# changes or pushes; merge gating stays with CODEOWNERS and the rulesets.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pr-agent
+  namespace: pr-review
+  labels: {app: pr-agent}
+  annotations:
+    secret.reloader.stakater.com/reload: "pr-agent"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 0
+  selector:
+    matchLabels: {app: pr-agent}
+  template:
+    metadata:
+      labels: {app: pr-agent}
+    spec:
+      # Reached from the internet: nothing it runs needs the Kubernetes API.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # The image declares no USER and would otherwise run as root.
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: pr-agent
+          image: docker.io/pragent/pr-agent:0.46.0-github_app@sha256:2ada02688fc59ed0ee917dfd5e0692b2509c80bd816a5f9f3a138d0578244b84
+          ports:
+            # gunicorn_config.py binds 3000 unconditionally in this release.
+            - {name: http, containerPort: 3000}
+          envFrom:
+            - secretRef: {name: pr-agent}
+          env:
+            - {name: GITHUB__DEPLOYMENT_TYPE, value: "app"}
+            - {name: OPENAI__API_BASE, value: "http://platform-litellm.ai-sre.svc.cluster.local:4000/v1"}
+            # The openai/ prefix routes through litellm's OpenAI-compatible
+            # client; LiteLLM owns the fallback chain, so none is set here.
+            - {name: CONFIG__MODEL, value: "openai/pr-reviewer"}
+            - {name: CONFIG__FALLBACK_MODELS, value: "[]"}
+            # LiteLLM's guardrail sizes every pr-reviewer call for the 32k
+            # local window minus its 6000-token margin and refuses, without
+            # falling back, anything that leaves no room to answer. 20000
+            # keeps PR-Agent's diff compression inside that.
+            - {name: CONFIG__CUSTOM_MODEL_MAX_TOKENS, value: "20000"}
+            - {name: CONFIG__MAX_MODEL_TOKENS, value: "20000"}
+            # /describe is left out because it rewrites the PR title and
+            # body, which carry the author's rationale.
+            - {name: GITHUB_APP__PR_COMMANDS, value: '["/review", "/improve"]'}
+            # Agent-authored PRs come from a GitHub App (a Bot sender); the
+            # default skips every one of them, which is most of the work.
+            - {name: GITHUB__IGNORE_BOT_PR, value: "false"}
+            - {name: GITHUB_APP__FEEDBACK_ON_DRAFT_PR, value: "true"}
+            # A GitHub App approval counts toward the Baseline ruleset's
+            # required approvals, so approving stays off here, and the
+            # per-repo and org-wide .pr_agent.toml files that could turn it
+            # back on are not read: this manifest is the only config source.
+            - {name: CONFIG__ENABLE_AUTO_APPROVAL, value: "false"}
+            - {name: CONFIG__USE_REPO_SETTINGS_FILE, value: "false"}
+            - {name: CONFIG__USE_GLOBAL_SETTINGS_FILE, value: "false"}
+            # One worker: the app preloads ~230 MiB and a single replica
+            # serves a few PRs a day.
+            - {name: GUNICORN_WORKERS, value: "1"}
+            - {name: HOME, value: "/tmp"}
+            - {name: TIKTOKEN_CACHE_DIR, value: "/tmp/tiktoken"}
+            - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
+          startupProbe:
+            httpGet: {path: /, port: http}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /, port: http}
+          livenessProbe:
+            httpGet: {path: /, port: http}
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+          # Measured ~434 MiB RSS for master + one worker at idle; the limit
+          # leaves room for a review's diff and model response in flight.
+          resources:
+            requests: {cpu: 50m, memory: 512Mi}
+            limits: {memory: 1Gi}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pr-agent
+  namespace: pr-review
+  labels: {app: pr-agent}
+spec:
+  selector: {app: pr-agent}
+  ports:
+    - {name: http, port: 3000, targetPort: http}
