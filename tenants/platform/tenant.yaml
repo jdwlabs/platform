@@ -78,6 +78,18 @@ namespaces:
   - name: reloader
     quotaTier: platform
     networkPolicy: platform
+  # Internet-facing: GitHub delivers PR webhooks here through the public
+  # gateway, so unlike the rest of this tenant it enforces the default tier
+  # (deny-all plus scoped allows) instead of the platform tier's allow-all.
+  # externalEgress covers api.github.com; LiteLLM is allowed by the service's
+  # own NetworkPolicy because in-cluster ranges are excluded from it. It uses
+  # no database or OTLP, so the default tier's allow for those is dropped.
+  - name: pr-review
+    quotaTier: platform
+    networkPolicy: default
+    enforce: true
+    externalEgress: true
+    noDatabaseMonitoringEgress: true
 
 project:
   elevated: true
@@ -493,6 +505,17 @@ services:
     repo: ""
     revision: ""
     namespace: ai-sre
+    rawManifests: true
+    postInstall: false
+    syncWave: 6
+
+  # Wave 6: PR-Agent advisory reviewer (GitHub App webhook target; calls
+  # litellm wave 5)
+  - name: pr-agent
+    chart: ""
+    repo: ""
+    revision: ""
+    namespace: pr-review
     rawManifests: true
     postInstall: false
     syncWave: 6
