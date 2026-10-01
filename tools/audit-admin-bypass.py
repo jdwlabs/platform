@@ -683,7 +683,8 @@ def parse_since(value: str) -> date:
 
 
 def audit(since: date, holds: dict[tuple[str, int], str], repos: list[str]) -> dict:
-    """Classify every agent-authored merge in the window. Raises ToolError."""
+    """Classify every merge in the window: agent-authored ones against every
+    gate, all of them against the change-class owner gate. Raises ToolError."""
     routine: list[tuple[str, dict]] = []
     reportable: list[tuple[str, dict, list[str]]] = []
     unevaluable: dict[str, set[str]] = {}
