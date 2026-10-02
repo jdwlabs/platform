@@ -55,6 +55,7 @@ data:
         "sre-investigator": 131072,
         "sre-investigator-fb1": 131072,
         "sre-investigator-fb2": 131072,
+        # 32768 must match --max-model-len in infrastructure's serving.yaml.
         "sre-investigator-local": 32768,
         # This hook runs once, against the requested name, before the router
         # picks a deployment -- so a pr-reviewer call is sized for the local
