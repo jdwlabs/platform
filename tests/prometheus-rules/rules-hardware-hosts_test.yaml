@@ -301,3 +301,34 @@ tests:
               summary: "Hypervisor host metrics have stopped reporting entirely"
               description: "No `up` series exists for job pve-node — the ScrapeConfig is gone or Prometheus is not loading it. Host thermal alerting is blind until this is fixed."
               runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/pve-node-exporter-install.md"
+
+  # Two blackbox replicas, one of them unable to reach anything. The host is
+  # not down — the other replica reaches it — so its dead exporter must still
+  # be reported rather than written off as part of a host outage.
+  - interval: 1m
+    name: exporter down is not hidden by one blackbox replica failing its probes
+    input_series:
+      - series: 'up{job="pve-node",instance="192.168.1.200:9100",host="pve1"}'
+        values: '0+0x20'
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22",pod="exporter-a"}'
+        values: '0+0x20'
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22",pod="exporter-b"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: HardwareHostMetricsDown
+        exp_alerts:
+          - exp_labels:
+              job: pve-node
+              instance: "192.168.1.200:9100"
+              host: pve1
+              severity: warning
+            exp_annotations:
+              summary: "Host pve1 is reachable but node-exporter on :9100 is not being scraped"
+              description: >-
+                The pve-node target 192.168.1.200:9100 (pve1) has
+                been down for 15m while the host still answers on :22. No
+                temperature or load history is being recorded for it. Check
+                `systemctl status prometheus-node-exporter` on the host and that
+                it listens on the LAN address. See runbook.
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/pve-node-exporter-install.md"

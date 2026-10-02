@@ -139,6 +139,10 @@ spec:
         # fine but its telemetry has stopped — which costs nothing today and
         # the evidence for the next unexplained power-off.
         #
+        # max across the blackbox replicas: the host counts as down only when
+        # no replica can reach it, the same test HardwareHostUnreachable
+        # applies. One replica with a broken network must not hide this.
+        #
         # It also fires for every host if this scrape config is live before
         # node-exporter has been installed on them. That is why it is not
         # critical: an ordering mistake in a two-repo rollout must not page.
@@ -146,7 +150,7 @@ spec:
           expr: |
             up{job="pve-node"} == 0
             unless on (host)
-            probe_success{target=~".*-mgmt"} == 0
+            max by (host) (probe_success{target=~".*-mgmt"}) == 0
           for: 15m
           labels:
             severity: warning
