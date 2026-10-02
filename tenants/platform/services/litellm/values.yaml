@@ -82,11 +82,14 @@ proxy_config:
     # Requests the neutral alias local-chat, not a model name: the host serves
     # whichever model infrastructure's inference/vllm/serving.yaml selects
     # under it, so a model change there needs no edit to the model name here.
-    # The context window is not decoupled: the guardrail in
+    # The context window is not decoupled. Three places assume 32768 tokens,
+    # which must match serving.yaml's --max-model-len: the guardrail in
     # postInstall/custom-callbacks-configmap.yaml (sre-investigator-local and
-    # pr-reviewer) and pr-reviewer's max_tokens sizing below both assume
-    # 32768 tokens, which must match serving.yaml's --max-model-len. Update
-    # both if that changes.
+    # pr-reviewer), pr-reviewer's max_tokens sizing below, and
+    # CONFIG__CUSTOM_MODEL_MAX_TOKENS / CONFIG__MAX_MODEL_TOKENS in
+    # tenants/platform/services/pr-agent/postInstall/pr-agent.yaml (20000,
+    # the window minus the guardrail's margin). Update all three if that
+    # changes.
     - model_name: sre-investigator-local
       litellm_params:
         model: hosted_vllm/local-chat
