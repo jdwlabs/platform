@@ -87,9 +87,11 @@ proxy_config:
     # postInstall/custom-callbacks-configmap.yaml (sre-investigator-local and
     # pr-reviewer), pr-reviewer's max_tokens sizing below, and
     # CONFIG__CUSTOM_MODEL_MAX_TOKENS / CONFIG__MAX_MODEL_TOKENS in
-    # tenants/platform/services/pr-agent/postInstall/pr-agent.yaml (20000,
-    # the window minus the guardrail's margin). Update all three if that
-    # changes.
+    # tenants/platform/services/pr-agent/postInstall/pr-agent.yaml. Update
+    # all three if that changes. PR-Agent's 20000 is not the window minus
+    # the guardrail's 6000-token margin: it is chosen to fit inside what is
+    # left after that margin and room for the answer, so re-derive it there
+    # rather than computing it from the window.
     - model_name: sre-investigator-local
       litellm_params:
         model: hosted_vllm/local-chat
