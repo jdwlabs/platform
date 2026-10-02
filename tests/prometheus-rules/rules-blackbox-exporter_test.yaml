@@ -1,0 +1,139 @@
+# Unit tests for the probe alerts carried in blackbox-exporter's values.
+#
+# All three probe groups share one metric and are told apart only by the
+# suffix on `target`. That makes the regexes load-bearing in both directions:
+# a load-balancer failure must fire the load-balancer alert and nothing else,
+# and a host or ingress failure must not fire it. Unscoping any one of the
+# selectors still passes promtool's syntax check; these cases are what fail.
+rule_files:
+  - rules/blackbox-exporter-values.yaml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    name: load-balancer address down fires within five minutes and nothing else does
+    input_series:
+      - series: 'probe_success{target="kube-api-lb",instance="192.168.1.199:6443"}'
+        values: '1 1 0 0 0 0 0 0 0 0'
+      - series: 'probe_success{target="gateway-https-lb",instance="https://192.168.1.199/"}'
+        values: '1+0x9'
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22"}'
+        values: '1+0x9'
+      - series: 'probe_success{target="container-prd-ingress",app="container",env="prd"}'
+        values: '1+0x9'
+    alert_rule_test:
+      # Last good probe at 1m, first failed at 2m: still pending at 3m.
+      - eval_time: 3m
+        alertname: LoadBalancerAddressUnreachable
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: LoadBalancerAddressUnreachable
+        exp_alerts:
+          - exp_labels:
+              target: kube-api-lb
+              instance: "192.168.1.199:6443"
+              severity: critical
+            exp_annotations:
+              summary: "Load-balancer address probe kube-api-lb failing"
+              description: >-
+                The probe of 192.168.1.199:6443 (kube-api-lb) on the
+                HAProxy VM has failed for 2m. This address fronts the Kubernetes
+                API, the Talos API and all HTTP(S) ingress; in-cluster workloads
+                keep running but nothing outside the cluster can reach them. Check
+                the VM and its hypervisor (HardwareHostUnreachable) first. See
+                runbook.
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/haproxy-vm-rebuild.md"
+      - eval_time: 9m
+        alertname: HardwareHostUnreachable
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: IngressPathProbeFailed
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: LoadBalancerProbeMissing
+        exp_alerts: []
+
+  - interval: 1m
+    name: a single lost load-balancer probe stays silent
+    input_series:
+      - series: 'probe_success{target="kube-api-lb",instance="192.168.1.199:6443"}'
+        values: '1 1 0 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: LoadBalancerAddressUnreachable
+        exp_alerts: []
+
+  - interval: 1m
+    name: host and ingress probe failures do not fire the load-balancer alert
+    input_series:
+      - series: 'probe_success{target="kube-api-lb",instance="192.168.1.199:6443"}'
+        values: '1+0x12'
+      - series: 'probe_success{target="gateway-https-lb",instance="https://192.168.1.199/"}'
+        values: '1+0x12'
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22"}'
+        values: '0+0x12'
+      - series: 'probe_success{target="container-prd-ingress",app="container",env="prd"}'
+        values: '0+0x12'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: LoadBalancerAddressUnreachable
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: LoadBalancerProbeMissing
+        exp_alerts: []
+
+  # The other two groups still reporting must not mask the -lb group going
+  # missing: each dead-man's-switch covers its own suffix.
+  - interval: 1m
+    name: load-balancer probes vanishing fires their own dead-mans-switch
+    input_series:
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22"}'
+        values: '1+0x12'
+      - series: 'probe_success{target="container-prd-ingress",app="container",env="prd"}'
+        values: '1+0x12'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: LoadBalancerProbeMissing
+        exp_alerts:
+          - exp_labels:
+              target: kube-api-lb
+              severity: critical
+            exp_annotations:
+              summary: "Load-balancer address probe kube-api-lb has stopped reporting"
+              description: "No probe_success series found for kube-api-lb for 10m — the blackbox-exporter deployment or that target's ServiceMonitor may be down. An outage of the address fronting the Kubernetes API and ingress would go unnoticed on this path until it is fixed."
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/haproxy-vm-rebuild.md"
+          - exp_labels:
+              target: gateway-https-lb
+              severity: critical
+            exp_annotations:
+              summary: "Load-balancer address probe gateway-https-lb has stopped reporting"
+              description: "No probe_success series found for gateway-https-lb for 10m — the blackbox-exporter deployment or that target's ServiceMonitor may be down. An outage of the address fronting the Kubernetes API and ingress would go unnoticed on this path until it is fixed."
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/haproxy-vm-rebuild.md"
+      - eval_time: 11m
+        alertname: HardwareHostProbeMissing
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: IngressPathProbeMissing
+        exp_alerts: []
+
+  # absent() over the whole -lb group would stay quiet here, because the HTTPS
+  # probe is still reporting. The API probe disappearing on its own is the
+  # case a group-wide dead-man's-switch cannot see.
+  - interval: 1m
+    name: one load-balancer probe vanishing while the other reports still fires
+    input_series:
+      - series: 'probe_success{target="gateway-https-lb",instance="https://192.168.1.199/"}'
+        values: '1+0x12'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: LoadBalancerProbeMissing
+        exp_alerts:
+          - exp_labels:
+              target: kube-api-lb
+              severity: critical
+            exp_annotations:
+              summary: "Load-balancer address probe kube-api-lb has stopped reporting"
+              description: "No probe_success series found for kube-api-lb for 10m — the blackbox-exporter deployment or that target's ServiceMonitor may be down. An outage of the address fronting the Kubernetes API and ingress would go unnoticed on this path until it is fixed."
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/haproxy-vm-rebuild.md"
+      - eval_time: 11m
+        alertname: LoadBalancerAddressUnreachable
+        exp_alerts: []
