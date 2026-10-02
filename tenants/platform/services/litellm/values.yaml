@@ -79,11 +79,12 @@ proxy_config:
     # Local tier: RTX 5090 VM on pve5 (vllm-inference, static IP outside
     # the DHCP churn). Quota-immune backstop when every cloud pool is
     # rate-limited or dark; sits last as the local-of-last-resort tier.
-    # Qwen3-Coder-30B-A3B (AWQ 4-bit) MoE — stronger tool calling than the
-    # prior gpt-oss-20b, same served endpoint contract.
+    # Requests the neutral alias local-chat, not a model name: the host serves
+    # whichever model infrastructure's inference/vllm/serving.yaml selects
+    # under it, so a model change there needs no edit here.
     - model_name: sre-investigator-local
       litellm_params:
-        model: hosted_vllm/qwen/qwen3-coder-30b-a3b
+        model: hosted_vllm/local-chat
         api_base: http://192.168.1.50:8000/v1
         max_tokens: 16384
     # PR review tier, deliberately local-first: OpenRouter's :free quota is
@@ -93,7 +94,7 @@ proxy_config:
     # The ultra model is left out: its 433-600s latency outlasts a review.
     - model_name: pr-reviewer
       litellm_params:
-        model: hosted_vllm/qwen/qwen3-coder-30b-a3b
+        model: hosted_vllm/local-chat
         api_base: http://192.168.1.50:8000/v1
         # Review comments are short; the rest of the 32k window is the diff.
         max_tokens: 4096
