@@ -540,6 +540,15 @@ spec:
         # size gauge during a rollover, which is the thing the last fixture in
         # the test file exists to prevent.
         #
+        # The baseline is the world's week, whichever exporter pod reported
+        # it. Each pod's gauges are their own series, and on 2026-10-02 the
+        # exporter came back on a new pod after a host froze, so the series
+        # the damaged archive arrived on had no history but the restart: its
+        # own median was the loss itself within a day, and the alert cleared
+        # with the damage still live. max by (backup_job, artifact) joins the
+        # pods into one history before the median is taken; the size and the
+        # guards on the left still match on the full label set.
+        #
         # quantile_over_time weighs samples, not archives, so an archive the
         # exporter holds for days because no backup ran counts for several of
         # them. That unevenness is assumed, and it is protective rather than
@@ -555,7 +564,8 @@ spec:
           expr: |
             (
               backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup", artifact="world"}
-                < quantile_over_time(0.5, backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup", artifact="world"}[7d]) * 0.98
+                < on (backup_job, artifact) group_left
+              quantile_over_time(0.5, max by (backup_job, artifact) (backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup", artifact="world"})[7d:5m]) * 0.98
             )
             and (backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup", artifact="world"} > 0)
             and (backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup", artifact="world"} == 1)
