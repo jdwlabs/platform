@@ -1485,6 +1485,264 @@
       ]
     },
     {
+      "id": 88,
+      "type": "row",
+      "title": "World integrity",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 76
+      }
+    },
+    {
+      "id": 89,
+      "type": "stat",
+      "title": "Chunks lost",
+      "description": "Chunks the map has found missing since an operator last acknowledged the world, including any Bedrock has since generated again from the seed. Anything above zero is data loss; see \"World data loss\" in the minecraft-fwb chart README.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 77
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(mcmap_world_chunks_lost{namespace=\"jdwillmsen-prd\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 90,
+      "type": "stat",
+      "title": "Corruption reported",
+      "description": "Whether the server has logged its world database as corrupt since the server pod started. Read off the server log by the console bridge; a repair afterwards does not make the world whole.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 77
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "No"
+                },
+                "1": {
+                  "text": "Yes"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "max(mc_console_bridge_world_corruption_detected{namespace=\"jdwillmsen-prd\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 91,
+      "type": "stat",
+      "title": "Since the last chunk count",
+      "description": "The map counts the world's chunks after every snapshot, every 15 minutes outside the night's quiet windows. Past two hours the loss alerts may be blind.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 77
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 5400
+              },
+              {
+                "color": "red",
+                "value": 7200
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "time() - max(mcmap_world_census_last_success_timestamp_seconds{namespace=\"jdwillmsen-prd\"} > 0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 92,
+      "type": "stat",
+      "title": "Chunks in the world",
+      "description": "Generated chunks across all three dimensions at the last count. A world that is played in only grows.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 77
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(mcmap_world_chunks{namespace=\"jdwillmsen-prd\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 93,
+      "type": "timeseries",
+      "title": "Chunks lost and missing, by dimension",
+      "description": "Missing is absent at the last count; lost is everything found missing since the last acknowledgement. Missing falling while lost stays up means chunks were generated again, without what was built on them.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 81
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "mcmap_world_chunks_lost{namespace=\"jdwillmsen-prd\"}",
+          "refId": "A",
+          "legendFormat": "lost {{dimension}}"
+        },
+        {
+          "expr": "mcmap_world_chunks_missing{namespace=\"jdwillmsen-prd\"}",
+          "refId": "B",
+          "legendFormat": "missing {{dimension}}"
+        }
+      ]
+    },
+    {
+      "id": 94,
+      "type": "timeseries",
+      "title": "World archive size",
+      "description": "Nightly backup archive size, whichever exporter pod reported it. A drop is what the archive-shrank alert pages on; it lags a chunk loss by up to a day.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 81
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "max by (artifact) (backup_last_artifact_bytes{backup_job=\"jdwillmsen-minecraft-fwb-prd-backup\", artifact=\"world\"})",
+          "refId": "A",
+          "legendFormat": "archive"
+        }
+      ]
+    },
+    {
       "id": 14,
       "type": "row",
       "title": "Backup & ops pipeline",
@@ -1492,7 +1750,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 76
+        "y": 89
       }
     },
     {
@@ -1508,7 +1766,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 77
+        "y": 90
       },
       "fieldConfig": {
         "defaults": {
@@ -1553,7 +1811,7 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 77
+        "y": 90
       },
       "fieldConfig": {
         "defaults": {
@@ -1594,7 +1852,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 77
+        "y": 90
       },
       "fieldConfig": {
         "defaults": {
@@ -1649,7 +1907,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 81
+        "y": 94
       },
       "options": {
         "orientation": "horizontal",
@@ -1687,7 +1945,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 81
+        "y": 94
       },
       "fieldConfig": {
         "defaults": {
@@ -1717,7 +1975,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 88
+        "y": 101
       },
       "fieldConfig": {
         "defaults": {
@@ -1751,7 +2009,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 88
+        "y": 101
       },
       "fieldConfig": {
         "defaults": {
@@ -1794,7 +2052,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 95
+        "y": 108
       },
       "panels": []
     },
@@ -1811,7 +2069,7 @@
         "h": 4,
         "w": 5,
         "x": 0,
-        "y": 96
+        "y": 109
       },
       "fieldConfig": {
         "defaults": {
@@ -1840,7 +2098,7 @@
         "h": 4,
         "w": 5,
         "x": 5,
-        "y": 96
+        "y": 109
       },
       "fieldConfig": {
         "defaults": {
@@ -1885,7 +2143,7 @@
         "h": 4,
         "w": 5,
         "x": 10,
-        "y": 96
+        "y": 109
       },
       "fieldConfig": {
         "defaults": {
@@ -1938,7 +2196,7 @@
         "h": 4,
         "w": 5,
         "x": 15,
-        "y": 96
+        "y": 109
       },
       "fieldConfig": {
         "defaults": {
@@ -1967,7 +2225,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 96
+        "y": 109
       },
       "fieldConfig": {
         "defaults": {
@@ -2020,7 +2278,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 100
+        "y": 113
       },
       "fieldConfig": {
         "defaults": {
@@ -2056,7 +2314,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 100
+        "y": 113
       },
       "fieldConfig": {
         "defaults": {
@@ -2086,7 +2344,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 108
+        "y": 121
       },
       "fieldConfig": {
         "defaults": {
@@ -2121,7 +2379,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 108
+        "y": 121
       },
       "fieldConfig": {
         "defaults": {
@@ -2163,7 +2421,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 115
+        "y": 128
       }
     },
     {
@@ -2179,7 +2437,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 116
+        "y": 129
       },
       "targets": [
         {
@@ -2201,7 +2459,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 140
+        "y": 153
       },
       "options": {
         "orientation": "horizontal",
@@ -2247,7 +2505,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 116
+        "y": 129
       },
       "options": {
         "orientation": "horizontal",
@@ -2288,7 +2546,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 116
+        "y": 129
       },
       "options": {
         "orientation": "horizontal",
@@ -2329,7 +2587,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 124
+        "y": 137
       },
       "options": {
         "dedupStrategy": "exact",
@@ -2357,7 +2615,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 124
+        "y": 137
       },
       "targets": [
         {
@@ -2379,7 +2637,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 132
+        "y": 145
       },
       "fieldConfig": {
         "defaults": {
@@ -2409,7 +2667,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 132
+        "y": 145
       },
       "fieldConfig": {
         "defaults": {
@@ -2434,7 +2692,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 147
+        "y": 160
       }
     },
     {
@@ -2449,7 +2707,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 148
+        "y": 161
       },
       "fieldConfig": {
         "defaults": {
@@ -2478,7 +2736,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 148
+        "y": 161
       },
       "fieldConfig": {
         "defaults": {
@@ -2524,7 +2782,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 148
+        "y": 161
       },
       "fieldConfig": {
         "defaults": {
@@ -2552,7 +2810,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 148
+        "y": 161
       },
       "fieldConfig": {
         "defaults": {
@@ -2581,7 +2839,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 152
+        "y": 165
       },
       "fieldConfig": {
         "defaults": {
@@ -2616,7 +2874,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 152
+        "y": 165
       },
       "options": {
         "orientation": "horizontal",
@@ -2656,7 +2914,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 160
+        "y": 173
       },
       "options": {
         "orientation": "horizontal",
@@ -2697,7 +2955,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 160
+        "y": 173
       },
       "fieldConfig": {
         "defaults": {
@@ -2727,7 +2985,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 160
+        "y": 173
       },
       "options": {
         "showTime": true,
@@ -2753,7 +3011,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 167
+        "y": 180
       },
       "targets": [
         {

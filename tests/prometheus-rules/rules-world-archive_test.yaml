@@ -315,3 +315,96 @@ tests:
       - eval_time: 168h30m
         alertname: JdwillmsenMinecraftWorldArchiveShrank
         exp_alerts: []
+
+  # 2026-10-02. The host under the exporter froze, the exporter came back as
+  # a new pod, and its gauges as new series, with nothing in their own
+  # history but the restart. The first archive after the freeze was the
+  # damaged world, 5% under the week before it. Measured against the new
+  # series alone, the median was the loss itself within a day and the alert
+  # cleared while the damage was still live; the baseline has to be the
+  # world's week, whichever pod reported it.
+  - interval: 4m
+    name: a loss right after the exporter moves to a new pod keeps paging
+    input_series:
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.139:9101"}'
+        values: '759548865+0x1079 759750581+0x359 769145945+0x1079'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.7.139:9101"}'
+        values: '1+0x2519'
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.6.162:9101"}'
+        values: '_x2520 769145945+0x29 730898848+0x719'
+      - series: 'backup_state_reported{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world",instance="10.244.6.162:9101"}'
+        values: '_x2520 1+0x749'
+    alert_rule_test:
+      # The new pod reporting the last good archive: nothing to say.
+      - eval_time: 169h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts: []
+      - eval_time: 171h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+              artifact: world
+              instance: 10.244.6.162:9101
+            exp_annotations:
+              summary: "Minecraft world backup is smaller than its recent typical size"
+              description: >-
+                The newest world archive is more than 2% smaller than the median of those taken in the past week. A
+                world that is played in grows; it does not shrink, and it does not fall below its own recent middle.
+                Treat this as data loss until proven otherwise and do not let the next backup rotate the good one
+                away. Check the server log for "Corruption: N missing files" and the CSI driver's log for an fsck that
+                recovered a journal. A LevelDB compaction does not produce this: it inflates one archive rather than
+                shrinking the next, and the median baseline already absorbs that. If the archive is smaller and the
+                save-time file list shows removed tables re-created at the same sizes, that is compaction and the
+                world is intact.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      # A day on, which is when the per-pod baseline had already let it go.
+      - eval_time: 192h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+              artifact: world
+              instance: 10.244.6.162:9101
+            exp_annotations:
+              summary: "Minecraft world backup is smaller than its recent typical size"
+              description: >-
+                The newest world archive is more than 2% smaller than the median of those taken in the past week. A
+                world that is played in grows; it does not shrink, and it does not fall below its own recent middle.
+                Treat this as data loss until proven otherwise and do not let the next backup rotate the good one
+                away. Check the server log for "Corruption: N missing files" and the CSI driver's log for an fsck that
+                recovered a journal. A LevelDB compaction does not produce this: it inflates one archive rather than
+                shrinking the next, and the median baseline already absorbs that. If the archive is smaller and the
+                save-time file list shows removed tables re-created at the same sizes, that is compaction and the
+                world is intact.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      # Two days on, still unrestored.
+      - eval_time: 216h
+        alertname: JdwillmsenMinecraftWorldArchiveShrank
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              backup_job: jdwillmsen-minecraft-fwb-prd-backup
+              artifact: world
+              instance: 10.244.6.162:9101
+            exp_annotations:
+              summary: "Minecraft world backup is smaller than its recent typical size"
+              description: >-
+                The newest world archive is more than 2% smaller than the median of those taken in the past week. A
+                world that is played in grows; it does not shrink, and it does not fall below its own recent middle.
+                Treat this as data loss until proven otherwise and do not let the next backup rotate the good one
+                away. Check the server log for "Corruption: N missing files" and the CSI driver's log for an fsck that
+                recovered a journal. A LevelDB compaction does not produce this: it inflates one archive rather than
+                shrinking the next, and the median baseline already absorbs that. If the archive is smaller and the
+                save-time file list shows removed tables re-created at the same sizes, that is compaction and the
+                world is intact.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
