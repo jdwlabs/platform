@@ -56,12 +56,12 @@ proxy_config:
     # All three backends verified for tool calling, which Holmes requires.
     # OpenRouter :free = 50 req/day at $0 balance (1000/day once $10 lifetime
     # credit purchased); NIM direct is a separate free quota pool.
-    # gpt-oss-120b leads on latency: nemotron-3-ultra-550b measured 433-600s+
+    # nemotron-3-super leads because nemotron-3-ultra-550b measured 433-600s+
     # per investigation (blowing the relay's per-alert deadline); the ultra
     # model stays as the deeper-reasoning fallback.
     - model_name: sre-investigator
       litellm_params:
-        model: openrouter/openai/gpt-oss-120b:free
+        model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
         api_key: os.environ/OPENROUTER_API_KEY
         # Holmes asks for 64k output tokens; some providers reserve quota for
         # the full max_tokens per request. 16k is ample for RCA prose.
@@ -99,7 +99,7 @@ proxy_config:
         max_tokens: 16384
     # PR review tier, deliberately local-first: OpenRouter's :free quota is
     # per account, not per model name, so reviews routed there would spend
-    # the same 50 req/day Holmes needs for alert investigations. NIM is its
+    # the same daily allowance Holmes needs for alert investigations. NIM is its
     # own quota pool, so it backs the local host before OpenRouter does.
     # The ultra model is left out: its 433-600s latency outlasts a review.
     - model_name: pr-reviewer
@@ -115,7 +115,7 @@ proxy_config:
         max_tokens: 4096
     - model_name: pr-reviewer-fb2
       litellm_params:
-        model: openrouter/openai/gpt-oss-120b:free
+        model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
         api_key: os.environ/OPENROUTER_API_KEY
         max_tokens: 4096
   general_settings:
