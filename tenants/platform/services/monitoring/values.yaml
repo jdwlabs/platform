@@ -54,7 +54,20 @@ podLogsViaLoki:
   # as the per-entry tenant for loki.write, taking precedence over the
   # destination's static tenantId fallback below (used by writers, like
   # cluster events, that don't run this stage).
+  #
+  # The drop stage keeps one high-volume transport out of Loki. The Minecraft
+  # world map's script pack reports every loaded mob's position once a second
+  # by printing a record to the game server's stdout, which is the only way
+  # out of the scripting sandbox; the console bridge reads those lines off the
+  # server's own websocket, so nothing downstream needs them from here. They
+  # are positions that are stale a second later, not logs, and on the day the
+  # layer went live they took the cluster's total log ingest from about 14 to
+  # 44 KB/s. The sentinel is the pack's own and appears in no other line.
   extraLogProcessingStages: |
+    stage.drop {
+      expression          = "\\[Scripting\\] MCMAP1 "
+      drop_counter_reason = "map_live_records"
+    }
     stage.tenant {
       label = "tenant_id"
     }
