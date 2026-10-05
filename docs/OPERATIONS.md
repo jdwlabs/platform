@@ -473,6 +473,9 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | Detached Longhorn volumes accumulate after a StatefulSet is rebuilt | `longhorn-single` uses `Retain`, so a volume outlives the claim it was created for and never ages out. `platformctl cluster volumes list --class orphaned` reports which are genuinely unclaimed; `platformctl cluster volumes reclaim --all-orphaned --dry-run` shows exactly what a reclaim would delete and mutates nothing; re-run with `--confirm` to delete. Do **not** identify candidates by name or by the volume's own `status.kubernetesStatus.pvcName` — that field records the claim the volume was created for and repeats across every generation of the same StatefulSet, so several volumes carry the identical name and only one is live. The command resolves the claim the other way round, from each PVC's `spec.volumeName`, and refuses any volume a PVC or a `Bound` PersistentVolume still points at. Deleting the `volumes.longhorn.io` object cascades to its replicas and its `Released` PV. |
 | TrueNAS zvols/datasets accumulate after PVCs are deleted | Both TrueNAS classes use `Retain`, so deleting a PVC deletes nothing on the NAS: one `truenas-iscsi` PVC leaks a zvol, an extent, a target and the target-extent mapping; one `truenas-nfs` PVC leaks a dataset and its export. None of it is visible to `kubectl`. `platformctl cluster volumes truenas list --class orphaned` reports what is genuinely unreferenced, `... reclaim --all-orphaned --dry-run` prints the exact per-object delete plan and mutates nothing, and `--confirm` deletes. Do **not** identify candidates by name — a provisioned object is named for the PVC UID it was created for and that name outlives the PV, the PVC and the workload. Liveness is proved only from a PersistentVolume that names the object or an open iSCSI session on a target that exports it; if the session list is unreadable, every zvol is refused. The NAS reports no client state for an NFS export, so that class has no session rung and the PV side is the whole of the evidence. See "Reclaiming leaked TrueNAS volumes" below. |
 | `TrueNASCPUPackageHot` fires, or the TrueNAS host (192.168.1.205) is hot or has power-cycled unexpectedly | Read the current reading over SSH first — `ssh truenas_admin@192.168.1.205 sensors` (k10temp `Tctl`/`Tccd1`, mapped to `truenas_cpu_temperature_celsius{sensor="package"}`). A healthy read on this host (AMD Ryzen 7 7700X, 95C Tjmax) is 35-40C under a full pool scrub; the warning tier fires above 80C sustained for 5m and the critical tier above 90C for 2m, both below Tjmax, because by the time the part is regulating at its 95C limit the margin is already gone. Sustained heat under routine ZFS IO is a cooling-capacity fault, not a workload one — check the fan is actually spinning, the fan header/curve, dust in the heatsink, and chassis airflow; none of this is remotely fixable and needs a physical visit. `TrueNASUnexpectedReboot` (`truenas_uptime_seconds < 600`) fires independently on any reboot, planned or not, since a thermal cause cannot always be assumed — this same host has also returned on its own after a multi-hour absence with no thermal signature. Neither TrueNAS's own `alert.list` nor its journal reliably carries a thermal-shutdown record for a hard power-off (no IPMI on this board), so cross-check `probe_success{host="truenas"}` gaps and `truenas_uptime_seconds` resets in Prometheus/Grafana rather than expecting NAS-side confirmation. Pausing a running scrub/resilver from the TrueNAS UI sheds load and buys time but is not a fix. |
+| `HardwareHostTemperatureHigh` / `HardwareHostTemperatureCritical` fires, or a Proxmox host has stopped abruptly with nothing in its logs | Read it live first — `ssh root@<host> 'cat /sys/class/hwmon/hwmon*/name; cat /sys/class/hwmon/hwmon*/temp1_input'` (millidegrees; `k10temp` is the CPU) — and compare with `host:hardware_cpu_temperature_celsius:max{host="<host>"}`. The warning tier is a 10m average at or above 90C, the critical tier a 5m average at or above 95C (not evaluated for pve5, whose CPU holds 95C under load by design); pve1's thermal trip points are 105C and 110C and a thermal power-off leaves no log, which is why the history in Prometheus is the only record. On critical, shed load before anything else: migrate or stop VMs on that host (pve1 carries the HAProxy VM at 192.168.1.199, so losing it also takes the Kubernetes API and ingress off the LAN — `LoadBalancerAddressUnreachable`). Then treat it as a cooling fault, not a workload one: these are small-form-factor machines whose only remedies are physical — fan actually spinning, dust in the heatsink, blocked intake, ambient temperature. After an abrupt stop with no alert, graph the series up to the gap: a climb into the 90s points at thermal, a flat line at ordinary temperature points elsewhere (power, firmware). `smartctl -a /dev/nvme0` on the host shows whether the unsafe-shutdown count moved. See "Hypervisor hosts and the load-balancer address" in §8. |
+| `HardwareHostMetricsDown`, `HardwareHostMetricsMissing` or `HardwareHostTemperatureMissing` fires | Telemetry fault, most likely not a host fault. `MetricsDown` is suppressed only while that host's `:22` probe is *failing*, so it means the host is not known to be down — confirm with `probe_success{host="<host>"}`, which should read `1`; if that one host's series is missing, its reachability is unknown and no alert says so: `HardwareHostProbeMissing` fires only when every `-mgmt` probe is gone, so check the blackbox-exporter pod and the `<host>-mgmt` target directly. `MetricsDown`: node-exporter is stopped, not installed, or not listening on the LAN address; `ssh root@<host> 'systemctl status prometheus-node-exporter; ss -ltnp \| grep 9100'`, then `scenarios/pve-node-exporter-install.md` in `jdwlabs/infrastructure`. All five hosts firing together right after this scrape config first deploys means the exporters were never installed. `MetricsMissing`: no `up{job="pve-node"}` at all — the `pve-node` ScrapeConfig is gone or Prometheus is not loading it; `kubectl -n monitoring get scrapeconfig pve-node`. `TemperatureMissing`: the exporter is scraped but exports nothing the recording rule selects; compare `node_hwmon_chip_names{job="pve-node",host="<host>"}` with the `chip_name` regex in `rules-hardware-hosts.yaml`. Until fixed, that host has no thermal alerting and no history. |
+| `LoadBalancerAddressUnreachable` fires, or `kubectl`/`talosctl`/every `*.jdwlabs.com` hostname times out from the LAN while pods are healthy | 192.168.1.199 is one HAProxy VM (on pve1) with no standby. Check its hypervisor first — `HardwareHostUnreachable{host="pve1"}` firing means the VM went down with the host and comes back with it (`scenarios/host-remote-power-recovery.md` in `jdwlabs/infrastructure`). Host up but address dark: the VM is stopped or HAProxy is — `ssh root@192.168.1.200 'qm list'`, then `ssh haproxy-admin@192.168.1.199 'systemctl status haproxy'`; rebuild path is `scenarios/haproxy-vm-rebuild.md`. The cluster itself keeps running throughout — nodes do not reach the API through this address. A passing `kube-api-lb` does not rule out HAProxy: it proves only that something accepts TCP on `:6443`, not that the API backend answers and not that the separate `:443` frontend works. `gateway-https-lb` is the probe for `:443`; if it alone fails, check HAProxy's `:443` frontend and backend mapping first, then the gateway behind it (see the `IngressPathProbeFailed` row above). |
 | `Released` PVs on `local-path` linger after a node is lost | The provisioner reclaims by scheduling a busybox helper pod **onto the volume's own node** to `rm -rf` the directory. The helper tolerates everything, so a cordoned or tainted node still reclaims normally, but a node that is `NotReady` or removed from the cluster can never run it — the PV stays `Released` and the on-disk `_work` stays on that node's `/var` forever. Longhorn's `Delete` needed no node scheduling, so this failure mode is new since CI `_work` moved to `local-path`. See "Self-hosted CI runners (ARC)" below for the post-incident check. |
 | Grafana dashboards stop syncing from git, or `platform-grafana` goes red with `never became healthy` in the hook log | `platformctl gitsync status` reports each Connection and Repository with `health` and `sync.state`; it exits non-zero when any is unhealthy and prints the full health message. These resources live in Grafana's own API server, so `kubectl` and ArgoCD cannot see them and a red `platform-grafana` sync here means Git Sync is reporting itself broken, not that the deploy failed. Read the message on the **repository**, not the connection: a connection saying `GitHub App lacks required 'webhooks' permission` is describing a requirement derived from a bound repository's `write` workflow, and the App needs no webhooks grant. An empty result means Git Sync is credentialed but not connected. |
 | An edit to `gitsync-resources.yaml` merged but changed nothing | The apply Job creates and never updates, so the next run finds the resources present and skips them. `platformctl gitsync recreate --repository <name> --dry-run`, then `--confirm`, deletes the repository **before** the connection (the repository references it) and requests an ArgoCD refresh of `platform-grafana` so the Job re-runs. `--repository` is required because more than one exists, and the shared connection is deleted only when no other repository still binds to it — recreating one folder leaves the others syncing. Both delete paths refuse while the repository still owns dashboards, because its remove-orphan-resources finalizer collects whatever it owns — `--allow-owned-dashboards` overrides that only when losing them is intended. **Adding** a repository is not this procedure: an absent resource is created by the ordinary sync, so a new folder needs no `recreate` at all. |
@@ -1140,6 +1143,83 @@ histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m]))
 Then confirm the alert rules loaded rather than merely being absent:
 `/api/v1/rules`, filter for `etcd`, `KubeScheduler`, `KubeControllerManager`
 — every one should read `inactive`, never `firing` on a healthy cluster.
+
+**Hypervisor hosts and the load-balancer address (`HardwareHost*`, `LoadBalancer*` alerts):**
+
+The five Proxmox hosts (`pve1`–`pve5`, 192.168.1.200–204), the NAS and the
+HAProxy VM at 192.168.1.199 all sit underneath or beside the cluster, so
+nothing in-cluster discovers them: every target below is a literal address in
+this repo. Three independent signals cover them, and each has its own
+dead-man's-switch because a series that stops existing does not read `0`.
+
+| Signal | Source | Alerts | Defined in |
+|--------|--------|--------|------------|
+| Host answers at all | blackbox TCP `:22`, targets `*-mgmt` (`host` label) | `HardwareHostUnreachable` (critical, 5m), `HardwareHostProbeMissing` | `tenants/platform/services/blackbox-exporter/values.yaml` |
+| Load-balancer address answers | blackbox TCP `192.168.1.199:6443` (`kube-api-lb`) and HTTPS `https://192.168.1.199/` with `container.prd.jdwlabs.com` pinned as Host/SNI (`gateway-https-lb`) | `LoadBalancerAddressUnreachable` (critical, 2m — fires within about four minutes), `LoadBalancerProbeMissing` (per target) | same file |
+| Host telemetry | node-exporter on each hypervisor's `:9100`, job `pve-node` (`host` label) | `HardwareHostTemperatureHigh` (warning), `HardwareHostTemperatureCritical` (critical), `HardwareHostTemperatureMissing`, `HardwareHostMetricsDown`, `HardwareHostMetricsMissing` (all warning) | `tenants/platform/services/kube-prometheus-stack/postInstall/scrapeconfig-pve-hosts.yaml`, `rules-hardware-hosts.yaml` |
+
+`kube-api-lb` is a plain TCP connect: it proves a listener accepts on `:6443`, and says nothing about whether HAProxy's API backend answers behind it. `gateway-https-lb` completes a real request through `:443`, so it is the stronger of the two.
+
+The load-balancer probes exist because the host probe cannot stand in for
+them: the VM can be down with its hypervisor up, and when it is the cluster
+looks healthy from the inside — nodes reach the API through their own local
+proxy, and Prometheus reaches Alertmanager without touching that address —
+while `kubectl`, `talosctl` and every ingress hostname on the LAN are dead.
+If `gateway-https-lb` fails while `IngressPathProbeFailed` is also firing,
+the gateway behind the VM is a possibility, not a conclusion: check
+pod-to-pod connectivity and every gateway replica's NodePort before
+assigning the fault, and HAProxy's `:443` frontend before that.
+
+node-exporter is not deployed from this repo. It is an apt package installed
+by hand on each host — `scenarios/pve-node-exporter-install.md` in
+`jdwlabs/infrastructure` — bound to the host's LAN address only. A host that
+is scraped here but has no exporter reads `up == 0` and raises
+`HardwareHostMetricsDown`, which is deliberately a warning (agent-only route,
+see `tests/alertmanager-routing/routing-matrix.yaml`) so that getting the two
+repos' order wrong does not page. The chart's own `TargetDown` warning fires
+for the job in the same state.
+
+The thermal alerts read one recorded series per host,
+`host:hardware_cpu_temperature_celsius:max` — the hotter of the `k10temp`
+hwmon sensors and, where the firmware publishes one, the ACPI thermal zone.
+Only pve1 has a thermal zone (trip points 105C hot / 110C critical); pve2–pve5
+are carried by `k10temp` alone. The window is inside `avg_over_time`, not in
+a `for:` clause, because a temperature under bursty load dips below any
+threshold often enough that `for:` never completes. pve5 is left out of the
+critical tier: its desktop CPU regulates at 95C by design and holds there
+under sustained load, so that reading is not a step towards a power-off on
+that host and would page on any long all-core job. The warning tier still
+covers it:
+
+| Alert | Condition |
+|-------|-----------|
+| `HardwareHostTemperatureHigh` | 10m average ≥ 90C, at least 5 samples in the window |
+| `HardwareHostTemperatureCritical` | 5m average ≥ 95C, at least 3 samples in the window; pve1–pve4 only |
+
+```
+host:hardware_cpu_temperature_celsius:max
+# one series per host; a host missing here while up{job="pve-node"} == 1 is
+# what HardwareHostTemperatureMissing reports
+
+host:hardware_cpu_temperature_celsius:max{host="pve1"}
+# graph this over the hours before an unexplained power-off: where the line
+# ends is when sampling stopped, and the values before it are how hot it got
+
+max_over_time(host:hardware_cpu_temperature_celsius:max{host="pve1"}[6h])
+# the peak in the preceding six hours only; evaluated after the host has gone
+# silent it keeps returning that peak, so it cannot say when sampling stopped
+
+node_hwmon_chip_names{job="pve-node"}
+node_thermal_zone_temp{job="pve-node"}
+# what each host actually exports, when the recorded series is missing
+
+probe_success{target=~".*-lb"}
+```
+
+A thermal power-off writes nothing to disk, so after an abrupt stop the
+last samples of that series before the gap are the evidence; a host that was
+climbing through 90C when it vanished and one that was sitting at 70C are
+different incidents.
 
 **TrueNAS metrics (`truenas-*` alerts):**
 
