@@ -71,6 +71,33 @@ cases:
       severity: critical
     receivers: ['ai-sre', 'discord']
 
+  # The address every external client dials has to reach a human when it goes
+  # dark: in-cluster delivery still works then, so this is the one alert that
+  # can say so.
+  - name: load-balancer address down fans out to the agent and to humans
+    labels:
+      alertname: LoadBalancerAddressUnreachable
+      severity: critical
+      target: kube-api-lb
+    receivers: ['ai-sre', 'discord']
+
+  # "No probe result" means reachability is unknown, which is the state the
+  # last unexplained host outage spent nine minutes in with nobody told.
+  - name: host probe gone stale fans out to the agent and to humans
+    labels:
+      alertname: HardwareHostProbeStale
+      severity: critical
+      host: pve1
+      target: pve1-mgmt
+    receivers: ['ai-sre', 'discord']
+
+  - name: hypervisor near its thermal trip fans out to the agent and to humans
+    labels:
+      alertname: HardwareHostTemperatureCritical
+      severity: critical
+      host: pve1
+    receivers: ['ai-sre', 'discord']
+
   # truenas-storage-api's alerts carry no tenant label, same as the Graphite
   # pipeline's own TrueNASMetricsStale above — proving they land on the same
   # generic severity-based routes rather than assuming it because the
@@ -115,6 +142,24 @@ cases:
     labels:
       alertname: KubeJobFailed
       severity: warning
+    receivers: ['ai-sre']
+
+  - name: hypervisor running hot below the critical tier reaches the agent only
+    labels:
+      alertname: HardwareHostTemperatureHigh
+      severity: warning
+      host: pve1
+    receivers: ['ai-sre']
+
+  # This one fires on every host if the scrape config goes live before the
+  # exporters are installed. Its staying off the human channel is the whole
+  # reason that ordering mistake is survivable, so it is pinned.
+  - name: hypervisor exporter not scraped reaches the agent only
+    labels:
+      alertname: HardwareHostMetricsDown
+      severity: warning
+      host: pve1
+      job: pve-node
     receivers: ['ai-sre']
 
   - name: relay warning that implies a live relay reaches the agent only

@@ -10,15 +10,71 @@ config:
       prober: tcp
       timeout: 5s
 
-# Live usage sits ~26Mi (a synthetic-probe daemon issuing a handful of TCP
-# connects per scrape interval, not a request-serving service). Request is
-# ~1.5x that; limit leaves headroom for scrape bursts without letting a stuck
-# probe consume the node. CPU is negligible (~1m observed) and floored to a
-# usable value rather than scaled.
+# Two replicas, on two different hypervisors. With one, the exporter is a
+# guest of the thing it watches: when its node's host powers off, the probe
+# of that host stops existing instead of reading 0, HardwareHostUnreachable
+# has nothing to compare, and the alert waits for the pod to be rescheduled
+# and then for a fresh 5m — the delay is longest for exactly the host that
+# just died.
+replicas: 2
+
+# Required, not preferred: two replicas on one node is one replica with extra
+# steps, and a preferred rule gives way under exactly the memory pressure this
+# cluster has.
+#
+# "Different node" only means "different hypervisor" on the workers, which
+# are one per Proxmox host. The control-plane VMs share hosts with workers,
+# and no node label records which host a VM is on, so a hostname spread that
+# admitted them could put both replicas on one physical machine. Their taint
+# already keeps this pod off; the node affinity makes that a stated rule
+# instead of a side effect of a toleration nobody has added yet.
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node-role.kubernetes.io/control-plane
+              operator: DoesNotExist
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - topologyKey: kubernetes.io/hostname
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: prometheus-blackbox-exporter
+            app.kubernetes.io/instance: platform-blackbox-exporter
+
+# The chart default surges a third pod before removing an old one. Under a
+# required anti-affinity that third pod needs a third eligible node, and
+# three of the five workers have no room for it (see resources below) — the
+# rollout would sit Pending forever. Replace in place instead: one replica
+# keeps probing while the other restarts.
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+
+# A drain may take one replica; it may not take the last one. Without this,
+# draining both hosting nodes in one maintenance window is allowed to leave
+# nothing probing.
+podDisruptionBudget:
+  maxUnavailable: 1
+
+# Live usage sits ~44Mi with eight targets (a synthetic-probe daemon issuing a
+# handful of connects per scrape interval, not a request-serving service).
+# The request covers that rather than undercutting it: three of the five
+# workers run at 98-99% of allocatable memory already requested, and a pod
+# admitted there on an optimistic request is the first thing evicted. The
+# consequence is that only the two large workers can take a replica today —
+# which still satisfies the spread, but leaves no spare node, so a replica
+# whose node is lost stays Pending until that node returns. The limit leaves
+# headroom for scrape bursts without letting a stuck probe consume the node.
+# CPU is negligible (~1m observed) and floored to a usable value rather than
+# scaled.
 resources:
   requests:
     cpu: 10m
-    memory: 40Mi
+    memory: 48Mi
   limits:
     memory: 80Mi
 
@@ -118,6 +174,35 @@ serviceMonitor:
         app: container
         env: non
 
+    # 192.168.1.199 is the single HAProxy VM in front of the Kubernetes API,
+    # the Talos API and all HTTP(S) ingress. Nothing above probes it: the
+    # -mgmt targets watch the hypervisors, and the -ingress targets go to the
+    # gateway's in-cluster Service precisely so they never leave the cluster
+    # network. So when the VM's host powered off, the alert that fired named
+    # the hypervisor, and the address every client and every kubeconfig
+    # actually dials had no alert of its own.
+    #
+    # Two targets because they fail independently. :6443 is a TCP passthrough
+    # to the control plane and proves the API path; the HTTPS one is a real
+    # request through the VM's :443 frontend to the gateway and proves the
+    # ingress path. `hostname` pins both the Host header and the TLS
+    # ServerName, exactly as on the -ingress targets, so the wildcard
+    # certificate validates against a bare address.
+    #
+    # Probing this address from a pod is not the hairpin the -ingress comment
+    # above warns about: that is the router refusing to loop a LAN client back
+    # to the *public* IP. This is a LAN address reached directly, the same way
+    # the -mgmt targets are.
+    #
+    # Suffixed "-lb" so the alerts below select the group by regex, and so
+    # neither the -mgmt nor the -ingress rules pick these up.
+    - name: kube-api-lb
+      url: "192.168.1.199:6443"
+    - name: gateway-https-lb
+      url: "https://192.168.1.199/"
+      hostname: container.prd.jdwlabs.com
+      module: http_2xx
+
 prometheusRule:
   enabled: true
   rules:
@@ -126,8 +211,16 @@ prometheusRule:
     # a separate alert class with its own labels/annotations/runbook. An
     # unscoped expr here would double-fire on ingress-path failures with
     # garbage annotations (empty $labels.host, the wrong runbook).
+    #
+    # Aggregated across replicas. Each exporter pod is scraped separately, so
+    # every target has one series per pod, differing only in `pod`. Left
+    # unaggregated that is two alerts per dead host, and — worse — one alert
+    # for every host whenever a single replica loses its own network. max
+    # asks the question the alert means: has ANY vantage point reached it?
+    # It also drops `pod` from the alert's identity, so a replica being
+    # rescheduled mid-outage neither resets the 5m nor resolves and re-fires.
     - alert: HardwareHostUnreachable
-      expr: probe_success{target=~".*-mgmt"} == 0
+      expr: max by (target, host, instance) (probe_success{target=~".*-mgmt"}) == 0
       for: 5m
       labels:
         severity: critical
@@ -149,6 +242,41 @@ prometheusRule:
       annotations:
         summary: "Hardware host reachability probes have stopped reporting entirely"
         description: "No probe_success series found for 10m — the blackbox-exporter deployment or its ServiceMonitor may be down. Host unreachability alerting is blind until this is fixed."
+        runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/host-remote-power-recovery.md"
+
+    # The fast, per-host half of the dead-man's-switch above. That one waits
+    # 10m for every -mgmt series to be gone; this one names a single host
+    # whose probe was reporting within the last hour and has produced nothing
+    # for three minutes. It is the alert that was missing when the only
+    # exporter pod died with the host it was probing: the host's series went
+    # stale rather than to 0, and nothing fired until a replacement pod had
+    # been scheduled and then failed for a fresh 5m.
+    #
+    # The window is in the expression, not in `for:`. A stale series is not a
+    # value that holds — there is nothing for a `for:` clause to keep seeing
+    # — so "was present, is not now" has to be stated as two windows.
+    # The 1h lookback is what lets a target removed from this file on purpose
+    # clear itself, without a list of expected hosts to keep in step.
+    #
+    # for: 1m is only a restart guard: on the first evaluation after
+    # Prometheus itself comes back from a gap longer than 3m, every series
+    # looks stale until its first scrape lands, within the minute.
+    - alert: HardwareHostProbeStale
+      expr: |
+        max by (target, host) (present_over_time(probe_success{target=~".*-mgmt"}[1h]))
+        unless
+        max by (target, host) (present_over_time(probe_success{target=~".*-mgmt"}[3m]))
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "No reachability probe result for {{ $labels.host }} in 3m"
+        description: >-
+          {{ $labels.target }} ({{ $labels.host }}) was being probed within
+          the last hour and no exporter replica has reported a result for 3
+          minutes. Its reachability is unknown, not confirmed down:
+          HardwareHostUnreachable cannot fire without a sample. Check that
+          both blackbox-exporter replicas are Running, on different nodes.
         runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/host-remote-power-recovery.md"
 
     # Distinct from HardwareHostUnreachable: that alert proves a bare host
@@ -177,8 +305,11 @@ prometheusRule:
     # backend fails), not a partial degradation, so a short window already
     # separates it cleanly from a single dropped probe or a cert-renewal
     # blip without adding avoidable delay to the page.
+    #
+    # max across exporter replicas, for the reason given on
+    # HardwareHostUnreachable.
     - alert: IngressPathProbeFailed
-      expr: probe_success{target=~".*-ingress"} == 0
+      expr: max by (target, instance, app, env) (probe_success{target=~".*-ingress"}) == 0
       for: 5m
       labels:
         severity: critical
@@ -203,3 +334,60 @@ prometheusRule:
         summary: "Ingress-path reachability probes have stopped reporting entirely"
         description: "No probe_success series found for the ingress-path targets for 10m — the blackbox-exporter deployment or its ServiceMonitor may be down. The Cilium-desync ingress blind spot this probe exists to close is unmonitored until this is fixed."
         runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+    # The load-balancer address going dark is its own incident class, not a
+    # variant of HardwareHostUnreachable: that alert names a hypervisor, and
+    # the VM can be down (or HAProxy stopped) with its hypervisor healthy.
+    # In-cluster workloads keep running — nodes reach the API through their
+    # own local proxy, and Prometheus reaches Alertmanager without touching
+    # this address — which is exactly why this has to be probed: the cluster
+    # looks fine from the inside while kubectl, talosctl and every ingress
+    # hostname on the LAN are dead.
+    #
+    # for: 2m, shorter than the 5m the host alerts use. With a 1m scrape and a
+    # 1m evaluation interval the worst case from failure to firing is about
+    # four minutes, which still clears three consecutive failed evaluations —
+    # enough that a config reload on the VM or one lost probe stays silent.
+    #
+    # If gateway-https-lb fails while kube-api-lb passes and
+    # IngressPathProbeFailed is also firing, the gateway behind the VM is the
+    # fault, not the VM.
+    #
+    # max across exporter replicas, for the reason given on
+    # HardwareHostUnreachable.
+    - alert: LoadBalancerAddressUnreachable
+      expr: max by (target, instance) (probe_success{target=~".*-lb"}) == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Load-balancer address probe {{ $labels.target }} failing"
+        description: >-
+          The probe of {{ $labels.instance }} ({{ $labels.target }}) on the
+          HAProxy VM has failed for 2m. This address fronts the Kubernetes
+          API, the Talos API and all HTTP(S) ingress; in-cluster workloads
+          keep running but nothing outside the cluster can reach them. Check
+          the VM and its hypervisor (HardwareHostUnreachable) first. See
+          runbook.
+        runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/haproxy-vm-rebuild.md"
+
+    # Dead-man's-switch for the -lb group, for the same reason the other two
+    # groups each have one: a probe that stops reporting does not read 0.
+    #
+    # One absent() per target rather than one over the regex. The two probes
+    # cover different paths, and absent() over the group stays quiet for as
+    # long as either of them still reports — so the API probe alone could
+    # vanish with neither this alert nor the one above noticing. Naming the
+    # target also puts it on the alert, which absent() over a regex cannot.
+    - alert: LoadBalancerProbeMissing
+      expr: |
+        absent(probe_success{target="kube-api-lb"})
+        or
+        absent(probe_success{target="gateway-https-lb"})
+      for: 10m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Load-balancer address probe {{ $labels.target }} has stopped reporting"
+        description: "No probe_success series found for {{ $labels.target }} for 10m — the blackbox-exporter deployment or that target's ServiceMonitor may be down. An outage of the address fronting the Kubernetes API and ingress would go unnoticed on this path until it is fixed."
+        runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/haproxy-vm-rebuild.md"
