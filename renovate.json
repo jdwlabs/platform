@@ -7,6 +7,23 @@
   ],
   "extends": ["github>jdwlabs/.github"],
   "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {
+      "description": "The Gateway API pin gets a pull request of its own. Its freshness check stays red until someone regenerates the vendored bundle and pushes that commit to the branch, and Renovate stops rebasing any branch that carries a commit it did not write. Inside the weekly batch, that froze every other update behind it.",
+      "matchPackageNames": ["kubernetes-sigs/gateway-api"],
+      "groupName": null
+    },
+    {
+      "description": "Storage and database layer: each of these gets its own pull request, outside the weekly batch. Merging here is deploying, and an upgrade to Longhorn, the TrueNAS CSI driver or the Postgres operator and its clusters is done by a person in a chosen window, one at a time. Batched with a dozen routine bumps, the routine ones cannot merge until the storage window comes.",
+      "matchPackageNames": [
+        "longhorn",
+        "ghcr.io/truenas/truenas-csi",
+        "cloudnative-pg",
+        "cluster"
+      ],
+      "groupName": null
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",
