@@ -42,7 +42,12 @@ spec:
             # latency is high-variance: 433-600s+ observed on the big model;
             # 900 gives the fallback chain room to run inside one alert.
             - {name: INVESTIGATION_TIMEOUT_SECONDS, value: "900"}
-            - {name: JIRA_PROJECT, value: "JDWLABS"}
+            # Alert tickets are operational events, not planned work, so they
+            # get a project of their own rather than landing on any stream's
+            # board. The relay scopes its fingerprint dedupe search to this
+            # project: tickets left behind in another one are never found
+            # again, and a re-firing alert opens a duplicate.
+            - {name: JIRA_PROJECT, value: "OPS"}
             # Names where a model-authored remediation patch is written, and
             # bounds it. A single entry is injected into the proposal rather
             # than asked for, so the destination is never something the model
