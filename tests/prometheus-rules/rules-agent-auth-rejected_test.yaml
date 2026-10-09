@@ -1,0 +1,144 @@
+# Unit tests for JdwillmsenMinecraftAgentAuthRejected.
+#
+# The agent counts each Xbox Live rejection of its refresh token and waits a
+# jittered 7.5 to 15 minutes before the next attempt, so the counter steps by
+# one roughly every eleven minutes while the token is dead. The cases pin what
+# the rule is for: a run of rejections pages with the re-authentication
+# action, a lone or doubled one does not, and the page drains on its own once
+# they stop.
+#
+# Rule files are extracted from the PrometheusRule manifests under tenants/ by
+# run.sh, since promtool reads bare rule groups and not the CRD wrapper.
+rule_files:
+  - rules/jdwillmsen-tenant-alerts.yaml
+evaluation_interval: 1m
+tests:
+  # Rejections land at 61m, 72m and 83m. The third completes three inside the
+  # forty-minute window; the five-minute hold then fires the page at 88m.
+  - interval: 1m
+    name: three rejections within forty minutes page the re-authentication alert
+    input_series:
+      - series: 'mc_agent_auth_rejections_total{namespace="jdwillmsen-prd",service="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '0+0x60 1+0x10 2+0x10 3+0x600'
+    alert_rule_test:
+      # Third rejection has just landed; the hold has not run yet.
+      - eval_time: 85m
+        alertname: JdwillmsenMinecraftAgentAuthRejected
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: JdwillmsenMinecraftAgentAuthRejected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+            exp_annotations:
+              summary: "Microsoft is rejecting the Minecraft chat agent's sign-in: a human must act on the account"
+              description: >-
+                Microsoft has rejected the login of the chat agent behind jdwillmsen-minecraft-fwb-prd-server-agent
+                3 times in the last forty minutes. Retrying cannot fix this. Follow
+                docs/minecraft-fwb-agent-reauth-runbook.md in the jdwillmsen/jdw-deployments repo: it covers a fresh
+                device-code sign-in and the case where a sign-in succeeds in the browser and is still rejected, which
+                needed two-step verification on the Microsoft account. The agent logs back in on its own once a token
+                is issued, and this resolves roughly twenty minutes later.
+              runbook_url: "https://github.com/jdwillmsen/jdw-deployments/blob/main/docs/minecraft-fwb-agent-reauth-runbook.md"
+      # The first rejection ages out of the window at 101m, leaving two, so
+      # the page drains by itself with no further rejections. 130m is well
+      # clear of it.
+      - eval_time: 130m
+        alertname: JdwillmsenMinecraftAgentAuthRejected
+        exp_alerts: []
+
+  - interval: 1m
+    name: a single rejection never pages the re-authentication alert
+    input_series:
+      - series: 'mc_agent_auth_rejections_total{namespace="jdwillmsen-prd",service="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '0+0x60 1+0x600'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: JdwillmsenMinecraftAgentAuthRejected
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: JdwillmsenMinecraftAgentAuthRejected
+        exp_alerts: []
+
+  - interval: 1m
+    name: two rejections do not page the re-authentication alert
+    input_series:
+      - series: 'mc_agent_auth_rejections_total{namespace="jdwillmsen-prd",service="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '0+0x60 1+0x10 2+0x600'
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: JdwillmsenMinecraftAgentAuthRejected
+        exp_alerts: []
+
+  # Rejections spread thinner than the window never accumulate: one an hour
+  # is an account that keeps recovering, not a dead token.
+  - interval: 1m
+    name: rejections an hour apart never page the re-authentication alert
+    input_series:
+      - series: 'mc_agent_auth_rejections_total{namespace="jdwillmsen-prd",service="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '0+0x60 1+0x59 2+0x59 3+0x600'
+    alert_rule_test:
+      - eval_time: 125m
+        alertname: JdwillmsenMinecraftAgentAuthRejected
+        exp_alerts: []
+      - eval_time: 185m
+        alertname: JdwillmsenMinecraftAgentAuthRejected
+        exp_alerts: []
+
+  # A container restart in place drops the counter to zero on the same series.
+  # Rejections at 61m and 72m, the reset at 75m, a third at 83m: increase()
+  # adds back what was counted before the reset, so the run still pages.
+  - interval: 1m
+    name: a counter reset on restart does not hide the run of rejections
+    input_series:
+      - series: 'mc_agent_auth_rejections_total{namespace="jdwillmsen-prd",service="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '0+0x60 1+0x10 2+0x2 0+0x7 1+0x600'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: JdwillmsenMinecraftAgentAuthRejected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+            exp_annotations:
+              summary: "Microsoft is rejecting the Minecraft chat agent's sign-in: a human must act on the account"
+              description: >-
+                Microsoft has rejected the login of the chat agent behind jdwillmsen-minecraft-fwb-prd-server-agent
+                3 times in the last forty minutes. Retrying cannot fix this. Follow
+                docs/minecraft-fwb-agent-reauth-runbook.md in the jdwillmsen/jdw-deployments repo: it covers a fresh
+                device-code sign-in and the case where a sign-in succeeds in the browser and is still rejected, which
+                needed two-step verification on the Microsoft account. The agent logs back in on its own once a token
+                is issued, and this resolves roughly twenty minutes later.
+              runbook_url: "https://github.com/jdwillmsen/jdw-deployments/blob/main/docs/minecraft-fwb-agent-reauth-runbook.md"
+
+  # A replaced pod starts a new series at zero. Two rejections on the old pod
+  # and one on its replacement are one run, so the count is summed across
+  # series rather than read from either alone.
+  - interval: 1m
+    name: rejections split across a replaced pod still add up
+    input_series:
+      - series: 'mc_agent_auth_rejections_total{namespace="jdwillmsen-prd",service="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",pod="jdwillmsen-minecraft-fwb-prd-server-agent-6b8f9c9d75-abcde",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '0+0x60 1+0x10 2+0x3'
+      - series: 'mc_agent_auth_rejections_total{namespace="jdwillmsen-prd",service="jdwillmsen-minecraft-fwb-prd-server-agent-metrics",pod="jdwillmsen-minecraft-fwb-prd-server-agent-7bffcbff47-9qhlr",job="jdwillmsen-minecraft-fwb-prd-server-agent-metrics"}'
+        values: '_x76 0+0x10 1+0x600'
+    alert_rule_test:
+      - eval_time: 95m
+        alertname: JdwillmsenMinecraftAgentAuthRejected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+            exp_annotations:
+              summary: "Microsoft is rejecting the Minecraft chat agent's sign-in: a human must act on the account"
+              description: >-
+                Microsoft has rejected the login of the chat agent behind jdwillmsen-minecraft-fwb-prd-server-agent
+                3 times in the last forty minutes. Retrying cannot fix this. Follow
+                docs/minecraft-fwb-agent-reauth-runbook.md in the jdwillmsen/jdw-deployments repo: it covers a fresh
+                device-code sign-in and the case where a sign-in succeeds in the browser and is still rejected, which
+                needed two-step verification on the Microsoft account. The agent logs back in on its own once a token
+                is issued, and this resolves roughly twenty minutes later.
+              runbook_url: "https://github.com/jdwillmsen/jdw-deployments/blob/main/docs/minecraft-fwb-agent-reauth-runbook.md"

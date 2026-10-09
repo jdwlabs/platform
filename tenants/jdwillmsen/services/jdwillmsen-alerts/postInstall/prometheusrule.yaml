@@ -849,6 +849,48 @@ spec:
               the same change.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
+        # Disconnected cannot tell Microsoft refusing the agent's account from
+        # a flapping server, and the fix differs: a refusal only a human can
+        # clear, on the Microsoft account itself, while the retry loop alone
+        # clears everything else. This rule reads the agent's own count of
+        # those rejections so the page names the action. It does not say which
+        # action: a revoked token and an account Microsoft wants a stronger
+        # sign-in from count the same here, and telling them apart is the
+        # runbook's job.
+        #
+        # The agent waits a jittered 7.5 to 15 minutes between rejected
+        # attempts, so the counter moves only a few times an hour. Three in
+        # forty minutes is a rejection that has outlasted an ordinary retry,
+        # never a lone one, and it is reached 15 to 30 minutes after the first
+        # (plus the hold). The window then drains about ten to twenty-five
+        # minutes after the last rejection, which is how it resolves once the
+        # sign-in is renewed. increase() absorbs the counter reset on a pod
+        # restart; summing the increases rather than reading one series keeps
+        # a replaced pod's new series from splitting the count.
+        #
+        # Critical like Disconnected, which it deliberately coexists with: the
+        # two fire together in this incident and the page that says what to do
+        # is this one. Nothing inhibits Disconnected for a tenant rule, so
+        # adding that pattern here would be new router machinery for a pair
+        # that is cheap to read side by side.
+        - alert: JdwillmsenMinecraftAgentAuthRejected
+          expr: sum by (namespace) (increase(mc_agent_auth_rejections_total{namespace="jdwillmsen-prd"}[40m])) >= 3
+          for: 5m
+          labels:
+            severity: critical
+            tenant: jdwillmsen
+            namespace: jdwillmsen-prd
+          annotations:
+            summary: "Microsoft is rejecting the Minecraft chat agent's sign-in: a human must act on the account"
+            description: >-
+              Microsoft has rejected the login of the chat agent behind jdwillmsen-minecraft-fwb-prd-server-agent
+              {{ $value | printf "%.0f" }} times in the last forty minutes. Retrying cannot fix this. Follow
+              docs/minecraft-fwb-agent-reauth-runbook.md in the jdwillmsen/jdw-deployments repo: it covers a fresh
+              device-code sign-in and the case where a sign-in succeeds in the browser and is still rejected, which
+              needed two-step verification on the Microsoft account. The agent logs back in on its own once a token
+              is issued, and this resolves roughly twenty minutes later.
+            runbook_url: "https://github.com/jdwillmsen/jdw-deployments/blob/main/docs/minecraft-fwb-agent-reauth-runbook.md"
+
         # A park with no expiry is the one runtime override nothing brings back
         # on its own: no timer, and a bot's park carries no wake trigger unless
         # someone set one. Git stays the baseline only while overrides stay

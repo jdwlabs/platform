@@ -154,6 +154,14 @@ cases:
       tenant: jdwillmsen
     receivers: ['ai-sre', 'discord']
 
+  - name: jdwillmsen agent auth rejection reaches the agent and the tenant route
+    labels:
+      alertname: JdwillmsenMinecraftAgentAuthRejected
+      severity: critical
+      tenant: jdwillmsen
+      namespace: jdwillmsen-prd
+    receivers: ['ai-sre', 'discord']
+
   # Below critical/warning the tenant route is the only one that matches, so
   # the tenant alert still reaches a human without the agent mirror.
   - name: jdwlabs info reaches the tenant route only
