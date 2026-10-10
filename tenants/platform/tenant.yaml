@@ -119,7 +119,7 @@ services:
   - name: argo-cd
     chart: argo-cd
     repo: https://argoproj.github.io/argo-helm
-    revision: 10.10.1
+    revision: 10.10.2
     namespace: argocd
     postInstall: true
     syncWave: 0
@@ -277,7 +277,7 @@ services:
   - name: grafana
     chart: grafana
     repo: https://grafana-community.github.io/helm-charts
-    revision: 13.4.0
+    revision: 13.5.0
     namespace: monitoring
     postInstall: true
     syncWave: 2
