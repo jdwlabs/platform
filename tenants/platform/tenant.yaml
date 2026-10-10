@@ -183,7 +183,7 @@ services:
   - name: longhorn
     chart: longhorn
     repo: https://charts.longhorn.io
-    revision: 1.12.1
+    revision: 1.13.0
     namespace: longhorn-system
     postInstall: true
     syncWave: 1
