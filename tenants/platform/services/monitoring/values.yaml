@@ -62,10 +62,14 @@ podLogsViaLoki:
   # server's own websocket, so nothing downstream needs them from here. They
   # are positions that are stale a second later, not logs, and on the day the
   # layer went live they took the cluster's total log ingest from about 14 to
-  # 44 KB/s. The sentinel is the pack's own and appears in no other line.
+  # 44 KB/s. The drop is scoped to the game server's container rather than
+  # matched on content alone: the gateway access log prints a client's
+  # User-Agent verbatim, so an unscoped match would let any requester keep its
+  # own requests out of Loki by sending the sentinel.
   extraLogProcessingStages: |
-    stage.drop {
-      expression          = "\\[Scripting\\] MCMAP1 "
+    stage.match {
+      selector            = "{namespace=~\"jdwillmsen-.*\", container=~\".*minecraft-bedrock\"} |= \"[Scripting] MCMAP1 \""
+      action              = "drop"
       drop_counter_reason = "map_live_records"
     }
     stage.tenant {
