@@ -254,6 +254,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: azure/setup-helm@v5.0.1
         with:
           # Pinned, unlike helm-lint: a new Helm release changing template

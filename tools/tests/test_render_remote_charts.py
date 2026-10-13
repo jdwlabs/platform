@@ -5,6 +5,7 @@ No test reaches the network or runs helm; only the command construction and
 the failure classification are covered here. The render itself is the CI job.
 """
 import importlib.util
+import io
 import subprocess
 import unittest
 from pathlib import Path
@@ -22,7 +23,7 @@ def release(**overrides):
     base = {
         "tenant": "platform", "name": "svc", "chart": "thing",
         "repo": "https://charts.example.com/", "revision": "1.2.3",
-        "namespace": "ns", "overlay": "tenants/platform/services/missing/values.yaml",
+        "namespace": "ns", "overlay": "tools/render-remote-charts.py",
     }
     return {**base, **overrides}
 
@@ -61,13 +62,35 @@ class RenderTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(command[:3], ["helm", "template", "svc"])
         self.assertEqual(command[command.index("--namespace") + 1], "ns")
-        self.assertNotIn("-f", command)
+        self.assertIn("-f", command)
+
+    def test_missing_values_file_fails_without_running_helm(self):
+        with mock.patch.object(renderer.subprocess, "run") as run:
+            result = renderer.render(release(overlay="no/such/values.yaml"), "v1.36.3")
+        self.assertFalse(result["ok"])
+        self.assertIn("no/such/values.yaml", result["detail"])
+        run.assert_not_called()
 
     def test_timeout_is_a_failure(self):
         with mock.patch.object(
             renderer.subprocess, "run", side_effect=subprocess.TimeoutExpired("helm", 1)
         ):
             self.assertFalse(renderer.render(release(), "v1.34.0")["ok"])
+
+
+class MainTest(unittest.TestCase):
+    def run_main(self, *argv):
+        err = io.StringIO()
+        with mock.patch.object(renderer.sys, "argv", ["render", *argv]), \
+                mock.patch.object(renderer._remote, "discover_releases", return_value=[release()]), \
+                mock.patch.object(renderer.sys, "stderr", err):
+            return renderer.main(), err.getvalue()
+
+    def test_unknown_only_selection_is_an_error_naming_it(self):
+        code, err = self.run_main("--only", "platform/svc", "--only", "platform/typo")
+        self.assertEqual(code, 1)
+        self.assertIn("platform/typo", err)
+        self.assertNotIn("platform/svc,", err)
 
 
 if __name__ == "__main__":
