@@ -38,5 +38,16 @@
 # window, a hold that turns out not to be needed is reported as stale and
 # fails the run: an exception must not outlive the condition it excused.
 #
-# Nothing is held today.
-holds: []
+holds:
+  - repo: platform
+    pr: 492
+    reason: >-
+      The repository owner opened this one-line change to a platform service
+      under his own account, so the only code owner able to approve it was its
+      author and GitHub refuses a self-approval. Every required check passed;
+      no check was skipped and nothing was urgent. The lapse is the authoring
+      path, not the change: a change to a gated path is meant to be opened
+      under the agent bot so the owner can approve it. The diff was re-read
+      after the merge and does only what its description says, moving alert
+      tickets to their own Jira project. Nothing further closes this; the
+      entry goes inert once the audit window passes the merge.
