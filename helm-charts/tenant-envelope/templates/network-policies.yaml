@@ -1,4 +1,5 @@
 {{- range .Values.namespaces }}
+{{- $namespace := .name }}
 {{- $policy := .networkPolicy | default "default" }}
 {{- /*
 Opt-in, not opt-out: a namespace enforces only once it explicitly sets
@@ -188,5 +189,46 @@ spec:
     - Ingress
   ingress:
     - {}
+{{- end }}
+{{- /*
+The tiers above know nothing about what a namespace runs, and a workload's own
+flows cannot be added from its deployment repo: the tenant AppProject denies
+NetworkPolicy and CiliumNetworkPolicy, so that isolation stays governance-owned
+and a tenant cannot widen its own envelope. These two lists are where such a
+flow is admitted instead, in the tenant file a code owner approves.
+
+A spec is rendered as written. Policies only add, so an entry can widen the
+namespace's allow-set and never narrow it; while the allow-all pair above is
+still rendered an entry changes nothing, which is what lets the allows land
+and be read back before the namespace enforces.
+
+The Cilium list exists for the peers vanilla NetworkPolicy cannot name. A node
+address is not matched by an ipBlock here, so the API server -- which every
+pod reaches at a control-plane node's address -- is reachable only through
+the kube-apiserver entity.
+*/}}
+{{- range .extraNetworkPolicies }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ required (printf "namespace %s: every extraNetworkPolicies entry needs a name" $namespace) .name }}
+  namespace: {{ $namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  {{- required (printf "namespace %s: extraNetworkPolicies entry %s needs a spec" $namespace .name) .spec | toYaml | nindent 2 }}
+{{- end }}
+{{- range .extraCiliumNetworkPolicies }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ required (printf "namespace %s: every extraCiliumNetworkPolicies entry needs a name" $namespace) .name }}
+  namespace: {{ $namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  {{- required (printf "namespace %s: extraCiliumNetworkPolicies entry %s needs a spec" $namespace .name) .spec | toYaml | nindent 2 }}
 {{- end }}
 {{- end }}
