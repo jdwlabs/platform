@@ -66,11 +66,25 @@ podLogsViaLoki:
   # matched on content alone: the gateway access log prints a client's
   # User-Agent verbatim, so an unscoped match would let any requester keep its
   # own requests out of Loki by sending the sentinel.
+  #
+  # The second drop is Tempo 3's backend worker reporting an empty compaction
+  # queue as an error every poll (roughly two a minute while idle), which
+  # gives anything counting error-level lines a constant non-error floor. The
+  # worker is behaving correctly; the level is wrong. It is scoped to the
+  # tempo container and to the full message pair (level, caller message and
+  # the "no jobs found" cause) so a genuine scheduler failure, which carries a
+  # different cause, still lands. Remove it once a Tempo release that demotes
+  # the line is deployed.
   extraLogProcessingStages: |
     stage.match {
       selector            = "{namespace=~\"jdwillmsen-.*\", container=~\".*minecraft-bedrock\"} |= \"[Scripting] MCMAP1 \""
       action              = "drop"
       drop_counter_reason = "map_live_records"
+    }
+    stage.match {
+      selector            = "{namespace=\"monitoring\", container=\"tempo\"} |= \"level=error\" |= \"error calling scheduler\" |= \"no jobs found\""
+      action              = "drop"
+      drop_counter_reason = "tempo_idle_compaction_poll"
     }
     stage.tenant {
       label = "tenant_id"

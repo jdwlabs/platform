@@ -69,8 +69,6 @@ tempo:
     remoteWriteUrl: "http://platform-kube-prometheus-s-prometheus:9090/api/v1/write"
     storage:
       path: /var/tempo/generator/wal
-    traces_storage:
-      path: /var/tempo/generator/traces
   overrides:
     defaults:
       metrics_generator:
