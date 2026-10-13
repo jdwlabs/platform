@@ -50,9 +50,10 @@ _spec.loader.exec_module(_remote)
 
 # Helm's built-in default targets an old Kubernetes, which makes charts with a
 # kubeVersion constraint (kube-prometheus-stack requires >=1.25) fail here for
-# a reason that cannot occur on the cluster. Overridable so the render tracks
-# the cluster's minor.
-DEFAULT_KUBE_VERSION = "v1.34.0"
+# a reason that cannot occur on the cluster. Keep this equal to the version the
+# cluster runs, so version-gated chart templates render the same branch here
+# as they do under ArgoCD.
+DEFAULT_KUBE_VERSION = "v1.36.3"
 
 # A cold chart fetch plus render of the largest chart takes tens of seconds; a
 # hung museum must not hold the job until the runner's own timeout.
@@ -75,14 +76,23 @@ def chart_args(release: dict) -> list[str]:
 
 def render(release: dict, kube_version: str) -> dict:
     overlay = REPO_ROOT / release["overlay"]
+    if not overlay.exists():
+        # The Application lists this file in valueFiles without
+        # ignoreMissingValueFiles, so ArgoCD fails on its absence; rendering
+        # on chart defaults here would pass a release that cannot sync.
+        return {
+            "release": release,
+            "ok": False,
+            "seconds": 0.0,
+            "detail": f"values file {release['overlay']} does not exist",
+        }
     command = [
         "helm", "template", release["name"], *chart_args(release),
         "--namespace", release["namespace"],
         "--kube-version", kube_version,
         "--include-crds",
+        "-f", str(overlay),
     ]
-    if overlay.exists():
-        command += ["-f", str(overlay)]
     started = time.monotonic()
     try:
         done = subprocess.run(
@@ -115,6 +125,11 @@ def main() -> int:
 
     releases = _remote.discover_releases()
     if args.only:
+        known = {f"{r['tenant']}/{r['name']}" for r in releases}
+        unknown = sorted(set(args.only) - known)
+        if unknown:
+            print(f"unknown --only selection: {', '.join(unknown)}", file=sys.stderr)
+            return 1
         releases = [r for r in releases if f"{r['tenant']}/{r['name']}" in args.only]
     if not releases:
         print("no remote chart releases found", file=sys.stderr)
