@@ -1,0 +1,278 @@
+# Unit tests for the probe alerts carried in blackbox-exporter's values.
+#
+# All three probe groups share one metric and are told apart only by the
+# suffix on `target`. That makes the regexes load-bearing in both directions:
+# a load-balancer failure must fire the load-balancer alert and nothing else,
+# and a host or ingress failure must not fire it. Unscoping any one of the
+# selectors still passes promtool's syntax check; these cases are what fail.
+rule_files:
+  - rules/blackbox-exporter-values.yaml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    name: load-balancer address down fires within five minutes and nothing else does
+    input_series:
+      - series: 'probe_success{target="kube-api-lb",instance="192.168.1.199:6443"}'
+        values: '1 1 0 0 0 0 0 0 0 0'
+      - series: 'probe_success{target="gateway-https-lb",instance="https://192.168.1.199/"}'
+        values: '1+0x9'
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22"}'
+        values: '1+0x9'
+      - series: 'probe_success{target="container-prd-ingress",app="container",env="prd"}'
+        values: '1+0x9'
+    alert_rule_test:
+      # Last good probe at 1m, first failed at 2m: still pending at 3m.
+      - eval_time: 3m
+        alertname: LoadBalancerAddressUnreachable
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: LoadBalancerAddressUnreachable
+        exp_alerts:
+          - exp_labels:
+              target: kube-api-lb
+              instance: "192.168.1.199:6443"
+              severity: critical
+            exp_annotations:
+              summary: "Load-balancer address probe kube-api-lb failing"
+              description: >-
+                The probe of 192.168.1.199:6443 (kube-api-lb) on the
+                HAProxy VM has failed for 2m. This address fronts the Kubernetes
+                API, the Talos API and all HTTP(S) ingress; in-cluster workloads
+                keep running but nothing outside the cluster can reach them. Check
+                the VM and its hypervisor (HardwareHostUnreachable) first. See
+                runbook.
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/haproxy-vm-rebuild.md"
+      - eval_time: 9m
+        alertname: HardwareHostUnreachable
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: IngressPathProbeFailed
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: LoadBalancerProbeMissing
+        exp_alerts: []
+
+  - interval: 1m
+    name: a single lost load-balancer probe stays silent
+    input_series:
+      - series: 'probe_success{target="kube-api-lb",instance="192.168.1.199:6443"}'
+        values: '1 1 0 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: LoadBalancerAddressUnreachable
+        exp_alerts: []
+
+  - interval: 1m
+    name: host and ingress probe failures do not fire the load-balancer alert
+    input_series:
+      - series: 'probe_success{target="kube-api-lb",instance="192.168.1.199:6443"}'
+        values: '1+0x12'
+      - series: 'probe_success{target="gateway-https-lb",instance="https://192.168.1.199/"}'
+        values: '1+0x12'
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22"}'
+        values: '0+0x12'
+      - series: 'probe_success{target="container-prd-ingress",app="container",env="prd"}'
+        values: '0+0x12'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: LoadBalancerAddressUnreachable
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: LoadBalancerProbeMissing
+        exp_alerts: []
+
+  # The other two groups still reporting must not mask the -lb group going
+  # missing: each dead-man's-switch covers its own suffix.
+  - interval: 1m
+    name: load-balancer probes vanishing fires their own dead-mans-switch
+    input_series:
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22"}'
+        values: '1+0x12'
+      - series: 'probe_success{target="container-prd-ingress",app="container",env="prd"}'
+        values: '1+0x12'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: LoadBalancerProbeMissing
+        exp_alerts:
+          - exp_labels:
+              target: kube-api-lb
+              severity: critical
+            exp_annotations:
+              summary: "Load-balancer address probe kube-api-lb has stopped reporting"
+              description: "No probe_success series found for kube-api-lb for 10m — the blackbox-exporter deployment or that target's ServiceMonitor may be down. An outage of the address fronting the Kubernetes API and ingress would go unnoticed on this path until it is fixed."
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/haproxy-vm-rebuild.md"
+          - exp_labels:
+              target: gateway-https-lb
+              severity: critical
+            exp_annotations:
+              summary: "Load-balancer address probe gateway-https-lb has stopped reporting"
+              description: "No probe_success series found for gateway-https-lb for 10m — the blackbox-exporter deployment or that target's ServiceMonitor may be down. An outage of the address fronting the Kubernetes API and ingress would go unnoticed on this path until it is fixed."
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/haproxy-vm-rebuild.md"
+      - eval_time: 11m
+        alertname: HardwareHostProbeMissing
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: IngressPathProbeMissing
+        exp_alerts: []
+
+  # absent() over the whole -lb group would stay quiet here, because the HTTPS
+  # probe is still reporting. The API probe disappearing on its own is the
+  # case a group-wide dead-man's-switch cannot see.
+  - interval: 1m
+    name: one load-balancer probe vanishing while the other reports still fires
+    input_series:
+      - series: 'probe_success{target="gateway-https-lb",instance="https://192.168.1.199/"}'
+        values: '1+0x12'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: LoadBalancerProbeMissing
+        exp_alerts:
+          - exp_labels:
+              target: kube-api-lb
+              severity: critical
+            exp_annotations:
+              summary: "Load-balancer address probe kube-api-lb has stopped reporting"
+              description: "No probe_success series found for kube-api-lb for 10m — the blackbox-exporter deployment or that target's ServiceMonitor may be down. An outage of the address fronting the Kubernetes API and ingress would go unnoticed on this path until it is fixed."
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/haproxy-vm-rebuild.md"
+      - eval_time: 11m
+        alertname: LoadBalancerAddressUnreachable
+        exp_alerts: []
+
+  # Two exporter replicas mean two series per target, differing only in `pod`.
+  # The alert has to be one alert, and it must not carry `pod`: if it did, the
+  # replica being rescheduled mid-outage would change the alert's identity and
+  # restart its clock.
+  - interval: 1m
+    name: a host down as seen by both replicas fires once, without a pod label
+    input_series:
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22",pod="exporter-a"}'
+        values: '0+0x10'
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22",pod="exporter-b"}'
+        values: '0+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: HardwareHostUnreachable
+        exp_alerts:
+          - exp_labels:
+              target: pve1-mgmt
+              host: pve1
+              instance: "192.168.1.200:22"
+              severity: critical
+            exp_annotations:
+              summary: "Host pve1 unreachable on :22"
+              description: "TCP connect to pve1-mgmt (pve1) has failed for 5m. This host has no in-cluster identity (bare hypervisor/NAS) — recovery may require Wake-on-LAN or physical access. See runbook."
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/host-remote-power-recovery.md"
+
+  # One replica cut off from the LAN reports every target as down. The other
+  # still reaches them, so nothing is down and nothing may fire.
+  - interval: 1m
+    name: one replica failing every probe while the other succeeds stays silent
+    input_series:
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22",pod="exporter-a"}'
+        values: '0+0x10'
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22",pod="exporter-b"}'
+        values: '1+0x10'
+      - series: 'probe_success{target="kube-api-lb",instance="192.168.1.199:6443",pod="exporter-a"}'
+        values: '0+0x10'
+      - series: 'probe_success{target="kube-api-lb",instance="192.168.1.199:6443",pod="exporter-b"}'
+        values: '1+0x10'
+      - series: 'probe_success{target="container-prd-ingress",app="container",env="prd",pod="exporter-a"}'
+        values: '0+0x10'
+      - series: 'probe_success{target="container-prd-ingress",app="container",env="prd",pod="exporter-b"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HardwareHostUnreachable
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: LoadBalancerAddressUnreachable
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: IngressPathProbeFailed
+        exp_alerts: []
+
+  # The incident shape, with the fix in place: the replica on the dying host
+  # stops reporting at 2m (its series goes stale), the surviving replica sees
+  # the host go down. The alert must fire 5m after the first failed probe,
+  # not 5m after some replacement pod starts probing.
+  - interval: 1m
+    name: the replica on the dead host vanishing does not delay the alert
+    input_series:
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22",pod="exporter-on-pve1"}'
+        values: '1 1 stale'
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22",pod="exporter-on-pve5"}'
+        values: '1 1 0 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: HardwareHostUnreachable
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: HardwareHostUnreachable
+        exp_alerts:
+          - exp_labels:
+              target: pve1-mgmt
+              host: pve1
+              instance: "192.168.1.200:22"
+              severity: critical
+            exp_annotations:
+              summary: "Host pve1 unreachable on :22"
+              description: "TCP connect to pve1-mgmt (pve1) has failed for 5m. This host has no in-cluster identity (bare hypervisor/NAS) — recovery may require Wake-on-LAN or physical access. See runbook."
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/host-remote-power-recovery.md"
+      # A surviving replica is still reporting, so the probe is not stale.
+      - eval_time: 9m
+        alertname: HardwareHostProbeStale
+        exp_alerts: []
+
+  # What actually happened with a single replica: the only series for the
+  # host goes stale, HardwareHostUnreachable has no sample to compare, and
+  # the group-wide dead-man's-switch needs every -mgmt series gone for 10m.
+  # This is the alert that speaks in between.
+  - interval: 1m
+    name: a host whose probe results stop arriving is reported within five minutes
+    input_series:
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22",pod="exporter-a"}'
+        values: '1 1 1 stale'
+      - series: 'probe_success{target="pve2-mgmt",host="pve2",instance="192.168.1.201:22",pod="exporter-b"}'
+        values: '1+0x12'
+    alert_rule_test:
+      # Last sample at 2m. Still inside the 3m window at 4m.
+      - eval_time: 4m
+        alertname: HardwareHostProbeStale
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: HardwareHostProbeStale
+        exp_alerts:
+          - exp_labels:
+              target: pve1-mgmt
+              host: pve1
+              severity: critical
+            exp_annotations:
+              summary: "No reachability probe result for pve1 in 3m"
+              description: >-
+                pve1-mgmt (pve1) was being probed within
+                the last hour and no exporter replica has reported a result for 3
+                minutes. Its reachability is unknown, not confirmed down:
+                HardwareHostUnreachable cannot fire without a sample. Check that
+                both blackbox-exporter replicas are Running, on different nodes.
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/host-remote-power-recovery.md"
+      - eval_time: 7m
+        alertname: HardwareHostUnreachable
+        exp_alerts: []
+      # pve2 is still reported, so the group-wide switch stays out of it.
+      - eval_time: 12m
+        alertname: HardwareHostProbeMissing
+        exp_alerts: []
+
+  # A target deleted from the values file must not alert forever: once it has
+  # been gone longer than the lookback it is no longer "expected".
+  - interval: 1m
+    name: a probe target removed on purpose clears itself after the lookback
+    input_series:
+      - series: 'probe_success{target="old-mgmt",host="old",instance="192.168.1.250:22",pod="exporter-a"}'
+        values: '1 1 1 stale'
+      - series: 'probe_success{target="pve2-mgmt",host="pve2",instance="192.168.1.201:22",pod="exporter-b"}'
+        values: '1+0x70'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: HardwareHostProbeStale
+        exp_alerts: []
