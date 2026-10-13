@@ -11,13 +11,12 @@ deploymentRepo:
 namespaces:
   # Single environment: personal workloads, no non/prd split to promote between.
   #
-  # Not enforcing yet, deliberately. Without enforce: true the envelope also
-  # renders allow-all-egress/ingress, which subsume every rule below, so each
-  # allow here can be applied and read back on the live endpoints before it
-  # carries any traffic. Enforcing is the one-line change that follows, and
-  # its revert is the same line. The flow inventory these rules were derived
-  # from, and the order to roll them out in, are in
+  # Enforcing. The rules below were applied first, beside the allow-all pair,
+  # and watched matching live traffic before this flag removed the pair; the
+  # flow inventory they were derived from is in
   # docs/adr/0031-jdwillmsen-prd-flow-inventory-and-staged-enforcement.md.
+  # Removing the flag is the whole rollback: the pair renders again and
+  # nothing needs restarting.
   - name: jdwillmsen-prd
     # standard's limits.cpu: 6 throttled the Bedrock server at its own 2-core
     # limit after tick-distance/view-distance were raised for the mob farm —
@@ -25,6 +24,7 @@ namespaces:
     # an 8-core pod limit plus the exporter/cronjobs alongside it.
     quotaTier: large
     networkPolicy: default
+    enforce: true
     # Every destination seen leaving the cluster from here is TCP 443: the
     # server's own calls to Microsoft, the hourly version check's dispatch to
     # GitHub, the candidate server it boots to learn the current release, and
