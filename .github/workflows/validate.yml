@@ -245,6 +245,32 @@ jobs:
       - name: Reject mutable image tags in remote chart defaults
         run: python3 tools/check-remote-chart-image-pins.py
 
+  # Templates every third-party chart at its pinned revision against the repo's
+  # own values file. Separate from the image-pin checks because a failure here
+  # means a chart bump will not render, not that an image is unpinned, and
+  # because it needs the same upstream chart repositories, so a museum outage
+  # is told apart from a real render error by the job name alone.
+  render-remote-charts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: azure/setup-helm@v5.0.1
+        with:
+          # Pinned, unlike helm-lint: a new Helm release changing template
+          # semantics must not turn this job red without a commit.
+          version: v3.21.3
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: tools/requirements.txt
+      - name: Install dependencies
+        run: pip install -r tools/requirements.txt
+      - name: Test the renderer
+        run: python3 -m unittest discover -s tools/tests -t tools/tests
+      - name: Render every remote chart against its values
+        run: python3 tools/render-remote-charts.py
+
   # Separate job from the checkers above because this one is a cross-file
   # agreement check, not a content check: its failure means two files that must
   # describe the same tenant folder have drifted, and the fix is in whichever

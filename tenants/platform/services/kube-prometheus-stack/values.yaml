@@ -322,7 +322,8 @@ defaultRules:
 # endpoint addresses have to be written down. Their pod IP is the node IP, so
 # the scrape lands on the node's own :10259 / :10257. Both serve HTTPS with a
 # self-signed serving cert generated at process start, so the chart's default
-# insecureSkipVerify (on Kubernetes >= 1.23) is required, not incidental.
+# serviceMonitor.tlsConfig.insecureSkipVerify (true) is required, not
+# incidental.
 #
 # Prerequisite: both components must be started with --bind-address=0.0.0.0.
 # They default to 127.0.0.1 on Talos, which is reachable only from their own
