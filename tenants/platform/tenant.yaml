@@ -398,7 +398,7 @@ services:
   - name: cnpg-operator
     chart: cloudnative-pg
     repo: https://cloudnative-pg.github.io/charts
-    revision: 0.29.0
+    revision: 0.29.1
     namespace: cnpg-system
     postInstall: true
     syncWave: 3
