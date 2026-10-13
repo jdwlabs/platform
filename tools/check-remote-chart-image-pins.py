@@ -313,6 +313,7 @@ def discover_releases() -> list[dict]:
                     "chart": chart,
                     "repo": repo,
                     "revision": str(service.get("revision") or "").strip(),
+                    "namespace": str(service.get("namespace") or "default"),
                     "overlay": f"tenants/{tenant}/services/{name}/values.yaml",
                 }
             )
