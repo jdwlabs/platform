@@ -163,6 +163,34 @@ jobs:
       - name: Check the rendered config and resolve the routing matrix
         run: tests/alertmanager-routing/run.sh
 
+  # helm-lint renders the envelope with its default values, where no namespace
+  # is defined, so the network policies it produces for real tenants never
+  # passed through a check. This renders it per tenant, the way the governance
+  # ApplicationSet does, and resolves a table of flows against the result.
+  #
+  # Helm is pinned where helm-lint takes latest: what is asserted here is the
+  # rendered output, and a renderer that moved would fail this on a change
+  # that touched no policy.
+  tenant-envelope:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: tools/requirements.txt
+      - name: Install dependencies
+        run: pip install -r tools/requirements.txt
+      - uses: azure/setup-helm@v5.0.1
+        with:
+          version: v3.21.3
+      # Through bash, not by path: a commit made through the contents API
+      # cannot carry a file mode, and a runner that arrived non-executable
+      # would fail here on every pull request for a reason no diff shows.
+      - name: Render each tenant and resolve the flow table
+        run: bash tests/tenant-envelope/run.sh
+
   # Both halves of bootstrap/crds/foundation-crds.yaml, in one job because they
   # are one file and a reviewer chasing a red check should not have to work out
   # which half aged. The two tools own disjoint documents, selected by CRD name,
