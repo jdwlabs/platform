@@ -1,7 +1,8 @@
 // Package truenasexporter polls TrueNAS's JSON-RPC middleware for the three
 // things docs/adr/0025 confirmed the Graphite push cannot carry — pool state,
-// pool/dataset capacity, and disk temperature — and serves them as Prometheus
-// gauges.
+// pool/dataset capacity, and disk temperature — plus the NAS's own active
+// alerts, which are where TrueNAS 25.10 surfaces SMART health, and serves
+// them as Prometheus gauges.
 //
 // It reuses truenas.Caller (cli/internal/truenas/transport.go) rather than
 // opening its own WebSocket client: that code is already the one thing in
@@ -48,12 +49,13 @@ var (
 			"not return a serial, unlike the deleted rule's assumption.",
 		[]string{"disk"}, nil,
 	)
-	smartTestPassedDesc = prometheus.NewDesc(
-		"truenas_disk_smart_test_passed",
-		"1 if the most recent SMART self-test on this disk reported success, 0 if "+
-			"it reported a definite failure. Omitted for a disk with no test history "+
-			"— never guessed.",
-		[]string{"disk"}, nil,
+	alertActiveDesc = prometheus.NewDesc(
+		"truenas_alert_active",
+		"Count of active (not dismissed) TrueNAS alerts from alert.list, per "+
+			"alert class and level. A class with no active alert emits no series. "+
+			"SMART health arrives here as the SMART* classes, because 25.10 "+
+			"removed smart.test.results.query.",
+		[]string{"klass", "level"}, nil,
 	)
 	scrapeOKDesc = prometheus.NewDesc(
 		"truenas_exporter_collector_success",
@@ -94,7 +96,7 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- datasetUsedDesc
 	ch <- datasetAvailableDesc
 	ch <- diskTemperatureDesc
-	ch <- smartTestPassedDesc
+	ch <- alertActiveDesc
 	ch <- scrapeOKDesc
 }
 
@@ -109,7 +111,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	c.run(ch, "pool_state", c.collectPoolState)
 	c.run(ch, "dataset_capacity", c.collectDatasetCapacity)
 	c.run(ch, "disk_temperature", c.collectDiskTemperatures)
-	c.run(ch, "smart_test", c.collectSmartTests)
+	c.run(ch, "alerts", c.collectAlerts)
 
 	_ = ctx
 }
@@ -219,42 +221,35 @@ func (c *Collector) collectDiskTemperatures(ctx context.Context, ch chan<- prome
 	return nil
 }
 
-type smartTestRow struct {
-	Disk  string `json:"disk"`
-	Tests []struct {
-		Status string `json:"status"`
-	} `json:"tests"`
+type alertRow struct {
+	Klass     string `json:"klass"`
+	Level     string `json:"level"`
+	Dismissed bool   `json:"dismissed"`
 }
 
-// smartPassStatuses and smartFailStatuses are the two ends of TrueNAS's
-// smartctl self-test status vocabulary this exporter is confident about
-// without a live read of this NAS's own response shape — see the ADR
-// addendum this PR adds. Anything else (RUNNING, ABORTED_BY_HOST, a status
-// this exporter has never seen) is left unclassified rather than guessed
-// into either bucket.
-var (
-	smartPassStatuses = map[string]bool{"SUCCESS": true, "COMPLETED": true, "COMPLETED_WITHOUT_ERROR": true}
-	smartFailStatuses = map[string]bool{"FAILED": true, "COMPLETED_WITH_ERROR": true, "ERROR": true}
-)
+type alertKey struct{ klass, level string }
 
-func (c *Collector) collectSmartTests(ctx context.Context, ch chan<- prometheus.Metric) error {
-	var rows []smartTestRow
-	if err := c.caller.Call(ctx, "smart.test.results.query", []any{}, &rows); err != nil {
-		return fmt.Errorf("smart.test.results.query: %w", err)
+// collectAlerts counts alert.list entries rather than exporting them one by
+// one: text, args and key carry disk serials and free-form detail that would
+// make every alert its own series, and the TrueNAS UI already holds that
+// detail. klass is bounded by the middleware's own class registry, and level
+// by its seven-value enum.
+func (c *Collector) collectAlerts(ctx context.Context, ch chan<- prometheus.Metric) error {
+	var rows []alertRow
+	if err := c.caller.Call(ctx, "alert.list", []any{}, &rows); err != nil {
+		return fmt.Errorf("alert.list: %w", err)
 	}
+	counts := map[alertKey]float64{}
 	for _, r := range rows {
-		if r.Disk == "" || len(r.Tests) == 0 {
+		// alert.list returns dismissed alerts too; a dismissed one is an
+		// operator's explicit acknowledgement and must not keep paging.
+		if r.Dismissed || r.Klass == "" {
 			continue
 		}
-		status := strings.ToUpper(r.Tests[0].Status)
-		switch {
-		case smartPassStatuses[status]:
-			ch <- prometheus.MustNewConstMetric(smartTestPassedDesc, prometheus.GaugeValue, 1, r.Disk)
-		case smartFailStatuses[status]:
-			ch <- prometheus.MustNewConstMetric(smartTestPassedDesc, prometheus.GaugeValue, 0, r.Disk)
-			// A status this exporter does not recognise is left unemitted for
-			// that disk rather than defaulted to pass or fail.
-		}
+		counts[alertKey{r.Klass, r.Level}]++
+	}
+	for k, n := range counts {
+		ch <- prometheus.MustNewConstMetric(alertActiveDesc, prometheus.GaugeValue, n, k.klass, k.level)
 	}
 	return nil
 }

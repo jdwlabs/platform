@@ -1,6 +1,6 @@
 // Command truenas-prometheus-exporter polls TrueNAS's JSON-RPC middleware
-// for pool state, dataset capacity, disk temperature and SMART self-test
-// results, and serves them on /metrics for Prometheus.
+// for pool state, dataset capacity, disk temperature and active alerts
+// (including SMART), and serves them on /metrics for Prometheus.
 //
 // It is deliberately not a platformctl subcommand: it is a long-running
 // service, not an operator-invoked CLI action, and shipping it as a second

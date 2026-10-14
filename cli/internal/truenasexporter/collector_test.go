@@ -205,32 +205,62 @@ func TestDiskTemperatures_MatchesADRLiveEvidence(t *testing.T) {
 	}
 }
 
-func TestSmartTest_PassFailAndUnclassified(t *testing.T) {
+// alertListRow builds one alert.list entry in the full shape the 25.10.4
+// middleware's api/v25_10_4/alert.py Alert model returns, so the collector is
+// exercised against the fields it must ignore as well as the ones it reads.
+func alertListRow(klass, level string, dismissed bool, args map[string]any) map[string]any {
+	return map[string]any{
+		"uuid": klass + "-uuid", "source": "SMART", "klass": klass, "args": args,
+		"node": "Controller A", "key": klass + "-key",
+		"datetime":        map[string]any{"$date": 1760400000000},
+		"last_occurrence": map[string]any{"$date": 1760400000000},
+		"dismissed":       dismissed, "mail": nil, "text": "text", "id": klass + "-uuid",
+		"level": level, "formatted": "formatted", "one_shot": false,
+	}
+}
+
+// TestAlerts_CountsActiveByClassAndLevel fixes the class strings to the ones
+// the middleware derives from SMART*AlertClass names (alert/base.py strips
+// the AlertClass suffix), and proves dismissed alerts, args and serials stay
+// out of the exported series.
+func TestAlerts_CountsActiveByClassAndLevel(t *testing.T) {
 	fc := &fakeCaller{responses: map[string]any{
-		"pool.query":         []map[string]any{},
-		"pool.dataset.query": []map[string]any{},
-		"disk.temperatures":  map[string]any{},
-		"smart.test.results.query": []map[string]any{
-			{"disk": "sda", "tests": []map[string]any{{"status": "SUCCESS"}}},
-			{"disk": "sdb", "tests": []map[string]any{{"status": "FAILED"}}},
-			{"disk": "sdc", "tests": []map[string]any{{"status": "RUNNING"}}},
-			{"disk": "sdd", "tests": []map[string]any{}},
+		"alert.list": []map[string]any{
+			alertListRow("SMARTFailedSelfTest", "WARNING", false, map[string]any{"name": "sda", "serial": "S1"}),
+			alertListRow("SMARTFailedSelfTest", "WARNING", false, map[string]any{"name": "sdb", "serial": "S2"}),
+			alertListRow("SMARTSpareBlockCount", "CRITICAL", false, map[string]any{"name": "/dev/sdc", "serial": "S3", "sb": 80}),
+			alertListRow("SMARTUncorrectedErrors", "WARNING", true, map[string]any{"name": "sdd", "serial": "S4", "ue": 3}),
+			alertListRow("ZpoolCapacityCritical", "CRITICAL", false, map[string]any{"volume": "storage"}),
 		},
 	}}
-	c := New(fc, nil)
-	metrics := collectAll(t, c)
+	metrics := collectAll(t, New(fc, nil))
 
-	if v := gaugeValue(findMetric(metrics, map[string]string{"disk": "sda"})); v != 1 {
-		t.Errorf("sda smart passed = %v, want 1", v)
+	want := map[[2]string]float64{
+		{"SMARTFailedSelfTest", "WARNING"}:    2,
+		{"SMARTSpareBlockCount", "CRITICAL"}:  1,
+		{"ZpoolCapacityCritical", "CRITICAL"}: 1,
 	}
-	if v := gaugeValue(findMetric(metrics, map[string]string{"disk": "sdb"})); v != 0 {
-		t.Errorf("sdb smart passed = %v, want 0", v)
+	got := map[[2]string]float64{}
+	for _, m := range metrics {
+		if k := labelValue(m, "klass"); k != "" {
+			got[[2]string{k, labelValue(m, "level")}] = gaugeValue(m)
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() != "klass" && lp.GetName() != "level" {
+					t.Errorf("truenas_alert_active carries unexpected label %q", lp.GetName())
+				}
+			}
+		}
 	}
-	if m := findMetric(metrics, map[string]string{"disk": "sdc"}); m != nil {
-		t.Errorf("sdc: RUNNING is not pass or fail, expected no metric, got %v", gaugeValue(m))
+	if len(got) != len(want) {
+		t.Errorf("truenas_alert_active series = %v, want %v", got, want)
 	}
-	if m := findMetric(metrics, map[string]string{"disk": "sdd"}); m != nil {
-		t.Errorf("sdd: no test history, expected no metric, got %v", gaugeValue(m))
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("truenas_alert_active{klass=%q,level=%q} = %v, want %v", k[0], k[1], got[k], v)
+		}
+	}
+	if _, ok := got[[2]string{"SMARTUncorrectedErrors", "WARNING"}]; ok {
+		t.Error("a dismissed alert must not be counted as active")
 	}
 }
 
@@ -248,7 +278,7 @@ func TestCollect_DegradesPerSubCollector(t *testing.T) {
 			},
 		},
 		errs: map[string]error{
-			"smart.test.results.query": errors.New("method not found"),
+			"alert.list": errors.New("truenas rpc error -32601: Method does not exist"),
 		},
 	}
 	// pool.dataset.query has no configured response, which fakeCaller also
@@ -258,10 +288,10 @@ func TestCollect_DegradesPerSubCollector(t *testing.T) {
 	metrics := collectAll(t, c)
 
 	if v := gaugeValue(findMetric(metrics, map[string]string{"pool": "storage", "state": "online"})); v != 1 {
-		t.Errorf("pool_state still expected despite dataset/smart failures, got %v", v)
+		t.Errorf("pool_state still expected despite dataset/alerts failures, got %v", v)
 	}
 	if v := gaugeValue(findMetric(metrics, map[string]string{"disk": "sda"})); v != 36.0 {
-		t.Errorf("disk_temperature still expected despite dataset/smart failures, got %v", v)
+		t.Errorf("disk_temperature still expected despite dataset/alerts failures, got %v", v)
 	}
 
 	success := map[string]float64{}
@@ -279,7 +309,7 @@ func TestCollect_DegradesPerSubCollector(t *testing.T) {
 	if success["dataset_capacity"] != 0 {
 		t.Errorf("collector_success{dataset_capacity} = %v, want 0 (no response configured)", success["dataset_capacity"])
 	}
-	if success["smart_test"] != 0 {
-		t.Errorf("collector_success{smart_test} = %v, want 0 (method not found)", success["smart_test"])
+	if success["alerts"] != 0 {
+		t.Errorf("collector_success{alerts} = %v, want 0 (method does not exist)", success["alerts"])
 	}
 }
