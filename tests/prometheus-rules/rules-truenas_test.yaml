@@ -365,28 +365,190 @@ tests:
               description: "Disk sdc has read above 60C for 10m — real risk of an early failure. Check the fan and airflow for that bay now."
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
-  # A disk with no test history, or a status the exporter does not classify
-  # (RUNNING), emits no truenas_disk_smart_test_passed series at all — see
-  # collector.go's smartPassStatuses/smartFailStatuses. Only an explicit 0
-  # pages.
+  # SMART health arrives as TrueNAS alert classes counted by
+  # truenas_alert_active (collector.go's alerts sub-collector). The class
+  # strings are the middleware's own: alert/base.py strips the AlertClass
+  # suffix from SMARTFailedSelfTestAlertClass and friends.
   - interval: 1m
-    name: SMART test failure pages, a disk with no series does not
+    name: no SMART or critical alert active stays silent
     input_series:
-      - series: 'truenas_disk_smart_test_passed{disk="sda"}'
-        values: '1+0x10'
-      - series: 'truenas_disk_smart_test_passed{disk="sdb"}'
-        values: '0+0x10'
+      - series: 'truenas_alert_active{klass="ZpoolCapacityWarning",level="WARNING"}'
+        values: '1+0x20'
+      - series: 'truenas_exporter_collector_success{collector="alerts"}'
+        values: '1+0x20'
     alert_rule_test:
+      - eval_time: 16m
+        alertname: TrueNASDiskSMARTWarning
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: TrueNASDiskSMARTCritical
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: TrueNASAlertCritical
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: TrueNASExporterCollectorFailing
+        exp_alerts: []
+
+  # A failed self-test is WARNING in TrueNAS and pages warning here; a low
+  # spare block reserve is CRITICAL and pages critical through its own
+  # alertname, so alertmanager's same-alertname inhibition cannot swallow
+  # either. Neither reaches TrueNASAlertCritical, so one failing disk pages
+  # once. The SpareBlockCount class is also left out of the warning rule.
+  - interval: 1m
+    name: SMART alerts page by class and never through the generic critical rule
+    input_series:
+      - series: 'truenas_alert_active{klass="SMARTFailedSelfTest",level="WARNING"}'
+        values: '2+0x20'
+      - series: 'truenas_alert_active{klass="SMARTSpareBlockCount",level="CRITICAL"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TrueNASDiskSMARTWarning
+        exp_alerts: []
       - eval_time: 6m
-        alertname: TrueNASDiskSmartTestFailed
+        alertname: TrueNASDiskSMARTWarning
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              klass: SMARTFailedSelfTest
+            exp_annotations:
+              summary: "TrueNAS reports 2 active SMARTFailedSelfTest SMART alert(s)"
+              description: >-
+                The NAS's own SMART check has raised SMARTFailedSelfTest
+                (uncorrected errors, a failed self-test or a high erase count).
+                Open the TrueNAS alert list to see which disk and serial, treat
+                that disk as failing and plan a replacement; do not wait for a
+                pool DEGRADED alert, which only fires once redundancy is lost.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 6m
+        alertname: TrueNASDiskSMARTCritical
         exp_alerts:
           - exp_labels:
               severity: critical
-              disk: sdb
+              klass: SMARTSpareBlockCount
             exp_annotations:
-              summary: "TrueNAS disk sdb failed its SMART self-test"
-              description: "The most recent SMART self-test on sdb reported failure. Treat this disk as failing and plan a replacement; do not wait for a pool DEGRADED alert, which only fires once redundancy is actually lost."
+              summary: "TrueNAS reports 1 disk(s) with a low SMART spare block reserve"
+              description: >-
+                The NAS's own SMART check reports an SSD at or below 90% of its
+                spare block reserve. Open the TrueNAS alert list to see which
+                disk, and replace it before the reserve is exhausted.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 6m
+        alertname: TrueNASAlertCritical
+        exp_alerts: []
+
+  # An operator can override a class's level in the TrueNAS UI. The SMART
+  # rules key on klass, so a self-test failure raised to CRITICAL still pages
+  # as the SMART warning and still stays out of the generic rule.
+  - interval: 1m
+    name: a SMART class raised to CRITICAL still pages once, as SMART
+    input_series:
+      - series: 'truenas_alert_active{klass="SMARTUncorrectedErrors",level="CRITICAL"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: TrueNASAlertCritical
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: TrueNASDiskSMARTWarning
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              klass: SMARTUncorrectedErrors
+            exp_annotations:
+              summary: "TrueNAS reports 1 active SMARTUncorrectedErrors SMART alert(s)"
+              description: >-
+                The NAS's own SMART check has raised SMARTUncorrectedErrors
+                (uncorrected errors, a failed self-test or a high erase count).
+                Open the TrueNAS alert list to see which disk and serial, treat
+                that disk as failing and plan a replacement; do not wait for a
+                pool DEGRADED alert, which only fires once redundancy is lost.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # Any class the NAS rates CRITICAL or above pages, except the ones another
+  # rule in this file already pages on: VolumeStatus (pool state),
+  # ZpoolCapacityCritical (pool capacity) and DiskTemperatureTooHot (disk
+  # temperature). WARNING-level classes, and a critical class an operator
+  # downgraded to WARNING, stay silent.
+  - interval: 1m
+    name: generic critical alert pages, excluded and sub-critical classes do not
+    input_series:
+      - series: 'truenas_alert_active{klass="BootPoolStatus",level="CRITICAL"}'
+        values: '1+0x20'
+      - series: 'truenas_alert_active{klass="UPSBatteryLow",level="EMERGENCY"}'
+        values: '1+0x20'
+      - series: 'truenas_alert_active{klass="VolumeStatus",level="CRITICAL"}'
+        values: '1+0x20'
+      - series: 'truenas_alert_active{klass="ZpoolCapacityCritical",level="CRITICAL"}'
+        values: '1+0x20'
+      - series: 'truenas_alert_active{klass="DiskTemperatureTooHot",level="CRITICAL"}'
+        values: '1+0x20'
+      - series: 'truenas_alert_active{klass="CertificateExpired",level="WARNING"}'
+        values: '1+0x20'
+      - series: 'truenas_alert_active{klass="ScrubPaused",level="ERROR"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TrueNASAlertCritical
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: TrueNASAlertCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              klass: BootPoolStatus
+              level: CRITICAL
+            exp_annotations:
+              summary: "TrueNAS has 1 active CRITICAL alert(s) of class BootPoolStatus"
+              description: >-
+                TrueNAS raised BootPoolStatus at level CRITICAL.
+                The alert text is in the TrueNAS alert list, not here; read it
+                there and act on it. Dismissing it in TrueNAS resolves this alert.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+          - exp_labels:
+              severity: critical
+              klass: UPSBatteryLow
+              level: EMERGENCY
+            exp_annotations:
+              summary: "TrueNAS has 1 active EMERGENCY alert(s) of class UPSBatteryLow"
+              description: >-
+                TrueNAS raised UPSBatteryLow at level EMERGENCY.
+                The alert text is in the TrueNAS alert list, not here; read it
+                there and act on it. Dismissing it in TrueNAS resolves this alert.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # A sub-collector failing on every scrape (the smart.test.results.query
+  # "Method does not exist" case) pages once it has held for 15m; the others
+  # reporting 1 stay silent, and a single failed scrape does not page.
+  - interval: 1m
+    name: a sub-collector failing for 15m pages, a single failure does not
+    input_series:
+      - series: 'truenas_exporter_collector_success{collector="alerts"}'
+        values: '0+0x20'
+      - series: 'truenas_exporter_collector_success{collector="pool_state"}'
+        values: '1+0x20'
+      - series: 'truenas_exporter_collector_success{collector="disk_temperature"}'
+        values: '1 1 0 1+0x17'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: TrueNASExporterCollectorFailing
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: TrueNASExporterCollectorFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              collector: alerts
+            exp_annotations:
+              summary: "TrueNAS exporter collector alerts is failing"
+              description: >-
+                truenas-prometheus-exporter's alerts call to the
+                TrueNAS middleware has failed for 15m, so every alert built on it
+                is blind. The pod's log names the error on each scrape: "Method
+                does not exist" means a TrueNAS upgrade removed or renamed the
+                method; a permission error means the exporter's user lost a role.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
 
   # dial_ok is set once at process start and never retried (main.go), so
   # this alert has no `for:` window — a single sample of 0 is already the

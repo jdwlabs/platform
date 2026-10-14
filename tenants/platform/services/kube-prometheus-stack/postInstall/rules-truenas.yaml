@@ -264,8 +264,9 @@ spec:
             description: "The graphite-exporter receiving TrueNAS metrics has been unscrapeable for 10m. Pushed samples are being dropped on the floor; expect TrueNASMetricsStale to follow."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
 
-    # Pool state, dataset capacity, disk temperature and SMART, all read over
-    # the TrueNAS JSON-RPC API by truenas-prometheus-exporter
+    # Pool state, dataset capacity, disk temperature and the NAS's own alerts
+    # (SMART among them), all read over the TrueNAS JSON-RPC API by
+    # truenas-prometheus-exporter
     # (cli/cmd/truenas-prometheus-exporter), not over the Graphite push above.
     # The two-state truenas_zfs_pool_state{state="online"|"degraded"} shape
     # and the truenas_disk_temperature_celsius name are unchanged from the
@@ -363,21 +364,99 @@ spec:
             description: "Disk {{ $labels.disk }} has read above 60C for 10m — real risk of an early failure. Check the fan and airflow for that bay now."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
-        # smart.test.results.query's exact response shape was never live-
-        # verified against this NAS (no network path to it from where this
-        # exporter was written — see the ADR addendum), so this reads only
-        # the two SMART self-test outcomes the exporter is confident enough
-        # to classify as pass/fail at all; an unrecognised status emits no
-        # metric for that disk rather than a guessed value on either side.
-        - alert: TrueNASDiskSmartTestFailed
-          expr: truenas_disk_smart_test_passed == 0
+        # TrueNAS 25.10 has no SMART results API: smart.test.results.query was
+        # removed with the SMART test UI, and the NAS's own SMART check now
+        # raises alerts instead (alert/source/smart.py, every 90m). These read
+        # those alerts back through alert.list. Severity is keyed on klass, not
+        # on the level label, because an operator can override a class's level
+        # in the TrueNAS UI and the page should not silently change with it.
+        #
+        # klass=~"SMART.+" rather than the three names: the four SMART classes
+        # are exactly the ones prefixed SMART, so a class a later TrueNAS adds
+        # under the same prefix still pages instead of falling between this
+        # rule and TrueNASAlertCritical, which excludes the same prefix.
+        - alert: TrueNASDiskSMARTWarning
+          expr: |
+            max by (klass) (truenas_alert_active{klass=~"SMART.+", klass!="SMARTSpareBlockCount"}) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS reports {{ $value }} active {{ $labels.klass }} SMART alert(s)"
+            description: >-
+              The NAS's own SMART check has raised {{ $labels.klass }}
+              (uncorrected errors, a failed self-test or a high erase count).
+              Open the TrueNAS alert list to see which disk and serial, treat
+              that disk as failing and plan a replacement; do not wait for a
+              pool DEGRADED alert, which only fires once redundancy is lost.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # TrueNAS itself rates a low spare block reserve CRITICAL: the SSD is
+        # running out of the blocks it remaps failing cells into.
+        - alert: TrueNASDiskSMARTCritical
+          expr: |
+            max by (klass) (truenas_alert_active{klass="SMARTSpareBlockCount"}) > 0
           for: 5m
           labels:
             severity: critical
           annotations:
-            summary: "TrueNAS disk {{ $labels.disk }} failed its SMART self-test"
-            description: "The most recent SMART self-test on {{ $labels.disk }} reported failure. Treat this disk as failing and plan a replacement; do not wait for a pool DEGRADED alert, which only fires once redundancy is actually lost."
+            summary: "TrueNAS reports {{ $value }} disk(s) with a low SMART spare block reserve"
+            description: >-
+              The NAS's own SMART check reports an SSD at or below 90% of its
+              spare block reserve. Open the TrueNAS alert list to see which
+              disk, and replace it before the reserve is exhausted.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # Everything the NAS itself rates CRITICAL or above reaches Alertmanager,
+        # not only TrueNAS's own mail. Keyed on the level label, so a class an
+        # operator downgrades in the TrueNAS UI stops paging here.
+        #
+        # Excluded: classes whose condition this file already pages on from the
+        # exporter's own series, so one fault pages once. SMART.+ goes through
+        # the SMART rules above; VolumeStatus through TrueNASPoolDegraded and
+        # TrueNASPoolNotOnline; ZpoolCapacityCritical (95%, the same threshold)
+        # through TrueNASPoolCapacityCritical; DiskTemperatureTooHot through
+        # TrueNASDiskTemperatureCritical. The cost is VolumeStatus's rarer
+        # "ONLINE but with a pool warning" case, which none of those see.
+        - alert: TrueNASAlertCritical
+          expr: |
+            max by (klass, level) (
+              truenas_alert_active{
+                level=~"CRITICAL|ALERT|EMERGENCY",
+                klass!~"SMART.+|VolumeStatus|ZpoolCapacityCritical|DiskTemperatureTooHot"
+              }
+            ) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS has {{ $value }} active {{ $labels.level }} alert(s) of class {{ $labels.klass }}"
+            description: >-
+              TrueNAS raised {{ $labels.klass }} at level {{ $labels.level }}.
+              The alert text is in the TrueNAS alert list, not here; read it
+              there and act on it. Dismissing it in TrueNAS resolves this alert.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # A sub-collector failing is invisible otherwise: the exporter stays up
+        # and every other family keeps flowing, so its rules simply never fire.
+        # That is how smart.test.results.query returned "Method does not exist"
+        # on every scrape after a TrueNAS upgrade without anyone noticing. 15m
+        # is three consecutive 5m scrapes, so one dropped call does not page.
+        - alert: TrueNASExporterCollectorFailing
+          expr: |
+            max by (collector) (truenas_exporter_collector_success) == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS exporter collector {{ $labels.collector }} is failing"
+            description: >-
+              truenas-prometheus-exporter's {{ $labels.collector }} call to the
+              TrueNAS middleware has failed for 15m, so every alert built on it
+              is blind. The pod's log names the error on each scrape: "Method
+              does not exist" means a TrueNAS upgrade removed or renamed the
+              method; a permission error means the exporter's user lost a role.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
 
         # The dead-man's switch for this exporter, mirroring
         # TrueNASGraphiteExporterDown's role for the push pipeline.
