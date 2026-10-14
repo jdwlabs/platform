@@ -456,7 +456,7 @@ spec:
               is blind. The pod's log names the error on each scrape: "Method
               does not exist" means a TrueNAS upgrade removed or renamed the
               method; a permission error means the exporter's user lost a role.
-            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
         # The dead-man's switch for this exporter, mirroring
         # TrueNASGraphiteExporterDown's role for the push pipeline.

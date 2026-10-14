@@ -1202,8 +1202,8 @@ it looks:
   TrueNAS API instead (`pool.query`, `pool.dataset.query`,
   `disk.temperatures`). SMART has no results API on 25.10: the NAS's own SMART
   check raises `SMART*` alert classes, which the exporter reads through
-  `alert.list` as `truenas_alert_active{klass,level}` — see the 2026-10-14
-  note in `docs/adr/0025-…`.
+  `alert.list` as `truenas_alert_active{klass,level}` — see
+  `docs/adr/0031-truenas-smart-health-from-alert-list.md`.
 - `graphite_dropped_samples_total` climbing is **normal**. The mapping ignores
   401 of the 476 pushed paths on purpose, so that counter rises continuously
   on a healthy pipeline and is not a health signal.
