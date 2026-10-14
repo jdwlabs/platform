@@ -416,8 +416,11 @@ spec:
         # the SMART rules above; VolumeStatus through TrueNASPoolDegraded and
         # TrueNASPoolNotOnline; ZpoolCapacityCritical (95%, the same threshold)
         # through TrueNASPoolCapacityCritical; DiskTemperatureTooHot through
-        # TrueNASDiskTemperatureCritical. The cost is VolumeStatus's rarer
-        # "ONLINE but with a pool warning" case, which none of those see.
+        # TrueNASDiskTemperatureCritical. VolumeStatus is excluded only while
+        # one of those pool rules is itself firing: a pool that is still
+        # ONLINE can carry a critical VolumeStatus that none of them sees, and
+        # that must page here. The alert has no pool label to match on, so
+        # the condition is any pool, which is exact for this one-pool NAS.
         - alert: TrueNASAlertCritical
           expr: |
             max by (klass, level) (
@@ -426,6 +429,17 @@ spec:
                 klass!~"SMART.+|VolumeStatus|ZpoolCapacityCritical|DiskTemperatureTooHot"
               }
             ) > 0
+            or
+            (
+              max by (klass, level) (
+                truenas_alert_active{level=~"CRITICAL|ALERT|EMERGENCY", klass="VolumeStatus"}
+              ) > 0
+              unless on ()
+              (
+                max(truenas_zfs_pool_state{state="degraded"}) == 1
+                or max(truenas_zfs_pool_state{state="online"}) == 0
+              )
+            )
           for: 5m
           labels:
             severity: critical

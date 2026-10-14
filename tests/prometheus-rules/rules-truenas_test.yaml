@@ -467,10 +467,11 @@ tests:
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
   # Any class the NAS rates CRITICAL or above pages, except the ones another
-  # rule in this file already pages on: VolumeStatus (pool state),
-  # ZpoolCapacityCritical (pool capacity) and DiskTemperatureTooHot (disk
-  # temperature). WARNING-level classes, and a critical class an operator
-  # downgraded to WARNING, stay silent.
+  # rule in this file already pages on: VolumeStatus while the pool is
+  # degraded (the pool rules page on that), ZpoolCapacityCritical (pool
+  # capacity) and DiskTemperatureTooHot (disk temperature). WARNING-level
+  # classes, and a critical class an operator downgraded to WARNING, stay
+  # silent.
   - interval: 1m
     name: generic critical alert pages, excluded and sub-critical classes do not
     input_series:
@@ -480,6 +481,10 @@ tests:
         values: '1+0x20'
       - series: 'truenas_alert_active{klass="VolumeStatus",level="CRITICAL"}'
         values: '1+0x20'
+      - series: 'truenas_zfs_pool_state{pool="storage",state="degraded"}'
+        values: '1+0x20'
+      - series: 'truenas_zfs_pool_state{pool="storage",state="online"}'
+        values: '0+0x20'
       - series: 'truenas_alert_active{klass="ZpoolCapacityCritical",level="CRITICAL"}'
         values: '1+0x20'
       - series: 'truenas_alert_active{klass="DiskTemperatureTooHot",level="CRITICAL"}'
@@ -580,3 +585,36 @@ tests:
               summary: "TrueNAS API-polling exporter never authenticated"
               description: "truenas-prometheus-exporter's one, process-lifetime dial to the TrueNAS middleware failed or was rejected. It will not retry on its own — check the pod's logs for the reason, fix it (rotate kv/truenas-prometheus, not kv/truenas-csi), and redeploy."
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#8-observability-quick-refs"
+
+  # A critical VolumeStatus on a pool that is still ONLINE: no pool rule
+  # fires, so this one must, once and as critical.
+  - interval: 1m
+    name: a critical VolumeStatus on an online pool pages through the generic rule
+    input_series:
+      - series: 'truenas_alert_active{klass="VolumeStatus",level="CRITICAL"}'
+        values: '1+0x20'
+      - series: 'truenas_zfs_pool_state{pool="storage",state="degraded"}'
+        values: '0+0x20'
+      - series: 'truenas_zfs_pool_state{pool="storage",state="online"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TrueNASAlertCritical
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: TrueNASAlertCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              klass: VolumeStatus
+              level: CRITICAL
+            exp_annotations:
+              summary: "TrueNAS has 1 active CRITICAL alert(s) of class VolumeStatus"
+              description: >-
+                TrueNAS raised VolumeStatus at level CRITICAL.
+                The alert text is in the TrueNAS alert list, not here; read it
+                there and act on it. Dismissing it in TrueNAS resolves this alert.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 6m
+        alertname: TrueNASPoolDegraded
+        exp_alerts: []
