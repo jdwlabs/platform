@@ -30,8 +30,9 @@ spec:
         - name: exporter
           # Digest is the real manifest-list index published by
           # .github/workflows/release-truenas-exporter.yml's Docker Hub run
-          # against the truenas-exporter-v0.1.0 tag, not a placeholder.
-          image: docker.io/jdwlabs/truenas-prometheus-exporter:truenas-exporter-v0.1.0@sha256:30c2bee318fb1713553cc8b0bad4d706f0ce19650a41eaa5b38b17d7fe4cb657
+          # for the truenas-exporter-v0.2.0 git tag, not a placeholder. The
+          # workflow strips the git tag's prefix, so the image tag is v0.2.0.
+          image: docker.io/jdwlabs/truenas-prometheus-exporter:v0.2.0@sha256:eae6e1abf82f052581e71a98df764a1bf3602fdb2391aef533ea6cf90f04b3f8
           env:
             # Port 443, not democratic-csi's driver-config port: the
             # middleware listens for TLS there regardless of what any CSI
