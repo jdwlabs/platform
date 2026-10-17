@@ -37,7 +37,7 @@ sidecars:
     # third sidecar with nothing to talk to, this one stays off until the
     # cluster grows the controller; flipping it on is one values change.
     enabled: false
-    image: registry.k8s.io/sig-storage/csi-snapshotter:v8.6.0@sha256:42af0929bcd60a43499825c078a60ff0534e08af8fbeb283aa391be40feb9f3e
+    image: registry.k8s.io/sig-storage/csi-snapshotter:v8.7.0@sha256:b03d3334f8035fa42660b166f6eb819a659a14774da020eb1b6c52cd422eaadb
   livenessProbe:
     image: registry.k8s.io/sig-storage/livenessprobe:v2.20.0@sha256:19f2cf2f40e1987c7943945deca5f65cd4e4bf5cc0657fc78a5df131861578e8
   nodeDriverRegistrar:
