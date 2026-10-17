@@ -97,7 +97,7 @@ jobs:
       # deployments/.github/workflows/promote-prd.yml.
       - name: Generate cross-repo read token
         id: bot-token
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           app-id: ${{ secrets.AGENT_APP_ID }}
           private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
