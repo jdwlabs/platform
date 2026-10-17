@@ -56,7 +56,7 @@ in place removes the ambiguity.
 | ArgoCD UI | `https://argocd.jdwlabs.com`  | `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' \| base64 -d`               |
 | Headlamp  | `https://dashboard.jdwlabs.com` | Log in via Dex: credentials stored in `kv/argocd-dex` (see §1.2 for password rotation)                             |
 | Grafana   | `https://grafana.jdwlabs.com` | `admin` / value at `kv/grafana` field `admin_password`                                                                |
-| db-ui     | `https://db.jdwlabs.com`      | Cluster-side OAuth via gitops-managed config                                                                          |
+| db-ui     | `https://dbui.jdwlabs.com`    | Adminer database login only; no gateway auth (see [GATEWAY-EXPOSURE.md](GATEWAY-EXPOSURE.md))                          |
 | Vault     | `https://vault.jdwlabs.com`   | Root token in `secret/vault/vault-init` (offline copy required for break-glass)                                       |
 | Proxmox   | `https://pve<1-5>.attlocal.net:8006` (LAN); Tailscale subnet router off-LAN — route live, off-LAN access not yet demonstrated (§1.3) | Proxmox's own local auth — not gitops-managed |
 
