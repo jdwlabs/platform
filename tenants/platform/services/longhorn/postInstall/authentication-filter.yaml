@@ -8,4 +8,4 @@ spec:
   basic:
     realm: "Authentication Required - Longhorn"
     secretRef:
-      name: longhorn-basic-auth
+      name: longhorn-auth-credentials

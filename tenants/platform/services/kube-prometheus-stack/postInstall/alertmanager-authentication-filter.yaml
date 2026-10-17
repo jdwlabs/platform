@@ -8,4 +8,4 @@ spec:
   basic:
     realm: "Authentication Required - Alertmanager"
     secretRef:
-      name: alertmanager-basic-auth
+      name: alertmanager-auth-credentials
