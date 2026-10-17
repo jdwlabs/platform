@@ -260,7 +260,7 @@ jobs:
         with:
           # Pinned, unlike helm-lint: a new Helm release changing template
           # semantics must not turn this job red without a commit.
-          version: v3.21.3
+          version: v4.3.1
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.x"
