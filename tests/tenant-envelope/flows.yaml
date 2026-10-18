@@ -19,10 +19,22 @@ x-pods:
     pod: {namespace: jdwillmsen-prd, labels: {app: jdwillmsen-minecraft-fwb-prd-minecraft-bedrock}}
   agent: &agent
     pod: {namespace: jdwillmsen-prd, labels: {app: jdwillmsen-minecraft-fwb-prd-server-agent}}
+  bot: &bot
+    pod: {namespace: jdwillmsen-prd, labels: {app: jdwillmsen-minecraft-fwb-prd-afk-bot}}
   map: &map
     pod: {namespace: jdwillmsen-prd, labels: {app: jdwillmsen-minecraft-fwb-prd-map}}
+  joinProbe: &joinProbe
+    pod: {namespace: jdwillmsen-prd, labels: {app: jdwillmsen-minecraft-fwb-prd-join-probe}}
   backupExporter: &backupExporter
     pod: {namespace: jdwillmsen-prd, labels: {app: jdwillmsen-minecraft-fwb-prd-backup-exporter}}
+  job: &job
+    pod:
+      namespace: jdwillmsen-prd
+      labels: {batch.kubernetes.io/job-name: jdwillmsen-minecraft-fwb-prd-volume-recovery-1, job-name: jdwillmsen-minecraft-fwb-prd-volume-recovery-1}
+  # The server the version check boots to read the current release from: a
+  # bare pod the job creates, which carries no label a rule here selects.
+  candidate: &candidate
+    pod: {namespace: jdwillmsen-prd, labels: {}}
   prometheus: &prometheus
     pod: {namespace: monitoring, labels: {app.kubernetes.io/name: prometheus}}
   gateway: &gateway
@@ -35,7 +47,30 @@ x-pods:
     pod: {namespace: jdwlabs-prd, labels: {app: usersrole-prd}}
 
 flows:
+  # --- inside the namespace --------------------------------------------------
+  - {name: agent holds a session on the game port, seen: hubble, from: *agent, to: *bedrock, port: 31132, protocol: UDP, expect: allow}
+  - {name: agent reads the console bridge, seen: hubble, from: *agent, to: *bedrock, port: 8766, expect: allow}
+  - {name: agent reads the server monitor, seen: hubble, from: *agent, to: *bedrock, port: 8080, expect: allow}
+  - {name: agent calls the map's internal port, seen: hubble, from: *agent, to: *map, port: 9090, expect: allow}
+  - {name: agent reads the backup exporter, seen: hubble, from: *agent, to: *backupExporter, port: 9101, expect: allow}
+  - {name: bot holds a session on the game port, seen: hubble, from: *bot, to: *bedrock, port: 31132, protocol: UDP, expect: allow}
+  - {name: bot reports presence to the agent, seen: hubble, from: *bot, to: *agent, port: 9090, expect: allow}
+  - {name: map reads the console bridge, seen: hubble, from: *map, to: *bedrock, port: 8766, expect: allow}
+  - {name: map calls the agent, seen: hubble, from: *map, to: *agent, port: 9090, expect: allow}
+  - {name: join probe handshakes with the server, seen: hubble, from: *joinProbe, to: *bedrock, port: 31132, protocol: UDP, expect: allow}
+
+  # --- players ---------------------------------------------------------------
+  - {name: player through another node arrives as that node's tunnel address, seen: hubble, from: {ip: 10.244.7.0}, to: *bedrock, port: 31132, protocol: UDP, expect: allow}
+  - {name: player through the server's own node arrives as its bridge address, seen: chart, from: {ip: 10.244.6.1}, to: *bedrock, port: 31132, protocol: UDP, expect: allow}
+  - {name: player whose source address is left alone, seen: chart, from: {ip: 203.0.113.9}, to: *bedrock, port: 31132, protocol: UDP, expect: allow}
+  - {name: second transport signaling, seen: chart, from: {ip: 10.244.7.0}, to: *bedrock, port: 31132, protocol: TCP, expect: allow}
+  - {name: second transport first gameplay port, seen: chart, from: {ip: 10.244.7.0}, to: *bedrock, port: 31160, protocol: UDP, expect: allow}
+  - {name: second transport last gameplay port, seen: chart, from: {ip: 10.244.7.0}, to: *bedrock, port: 31179, protocol: UDP, expect: allow}
+  - {name: port below the gameplay range, seen: guard, from: {ip: 10.244.7.0}, to: *bedrock, port: 31159, protocol: UDP, expect: deny}
+  - {name: port above the gameplay range, seen: guard, from: {ip: 10.244.7.0}, to: *bedrock, port: 31180, protocol: UDP, expect: deny}
   - {name: console bridge is not reachable through a node, seen: guard, from: {ip: 10.244.7.0}, to: *bedrock, port: 8766, expect: deny}
+
+  # --- the rest of the cluster -----------------------------------------------
   - {name: kubelet probes the map, seen: hubble, from: {ip: 10.244.7.1}, to: *map, port: 8080, expect: allow}
   - {name: prometheus scrapes the server monitor, seen: hubble, from: *prometheus, to: *bedrock, port: 8080, expect: allow}
   - {name: prometheus scrapes the backup exporter, seen: hubble, from: *prometheus, to: *backupExporter, port: 9101, expect: allow}
@@ -44,8 +79,19 @@ flows:
   - {name: name resolution, seen: hubble, from: *agent, to: *dns, port: 53, protocol: UDP, expect: allow}
   - {name: another tenant cannot read the console bridge, seen: guard, from: *otherTenant, to: *bedrock, port: 8766, expect: deny}
   - {name: agent cannot reach prometheus, seen: guard, from: *agent, to: *prometheus, port: 9090, expect: deny}
+
+  # --- the cluster's API -----------------------------------------------------
+  - {name: job drives the server through the API, seen: hubble, from: *job, to: {entity: kube-apiserver}, port: 6443, expect: allow}
+  - {name: job cannot reach a control-plane kubelet, seen: guard, from: *job, to: {entity: kube-apiserver}, port: 10250, expect: deny}
   - {name: a workload that is not a job has no API access, seen: guard, from: *agent, to: {entity: kube-apiserver}, port: 6443, expect: deny}
+
+  # --- outside the cluster ---------------------------------------------------
   - {name: server calls Microsoft, seen: hubble, from: *bedrock, to: {ip: 4.150.223.110}, port: 443, expect: allow}
+  - {name: version check dispatches to GitHub, seen: hubble, from: *job, to: {ip: 140.82.114.5}, port: 443, expect: allow}
+  - {name: candidate server downloads the release, seen: hubble, from: *candidate, to: {ip: 150.171.110.177}, port: 443, expect: allow}
+  - {name: agent asks the inference host, seen: chart, from: *agent, to: {ip: 192.168.1.50}, port: 8000, expect: allow}
+  - {name: bot has no route to the inference host, seen: guard, from: *bot, to: {ip: 192.168.1.50}, port: 8000, expect: deny}
+  - {name: agent reaches nothing else on the inference host, seen: guard, from: *agent, to: {ip: 192.168.1.50}, port: 22, expect: deny}
   - {name: agent reaches nothing else on the LAN, seen: guard, from: *agent, to: {ip: 192.168.1.1}, port: 8000, expect: deny}
   - {name: plain HTTP out is not open, seen: guard, from: *bedrock, to: {ip: 4.150.223.110}, port: 80, expect: deny}
   - {name: UDP out is not open, seen: guard, from: *bedrock, to: {ip: 203.0.113.9}, port: 3478, protocol: UDP, expect: deny}
