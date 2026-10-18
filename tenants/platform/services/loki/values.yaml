@@ -22,6 +22,47 @@ singleBinary:
                 operator: In
                 values: ["true"]
   priorityClassName: platform-critical
+  # One rules sidecar per tenant org beyond `platform`. The org a rule is
+  # evaluated against is the directory it lands in, and Alloy stamps a log's
+  # org from the *namespace's* tenant label, so the sidecar is bound to the
+  # tenant's namespaces and not to anything in the ConfigMap. A ConfigMap
+  # cannot choose its own org (no folder annotation, no tenant label read), so
+  # a tenant can neither plant rules in another org nor in `platform`, and a
+  # `loki_rule` ConfigMap in any namespace not listed here stays inert. List
+  # every namespace of the tenant here when it gains one.
+  extraContainers:
+    - name: loki-sc-rules-jdwillmsen
+      # Keep the version in step with `sidecar.image` of the chart.
+      image: docker.io/kiwigrid/k8s-sidecar:2.5.0@sha256:a6b3f707f883108376514489a94d6629109a327b2978e1d826cd104c4ca436df
+      imagePullPolicy: IfNotPresent
+      env:
+        - {name: METHOD, value: WATCH}
+        - {name: LABEL, value: loki_rule}
+        - {name: FOLDER, value: /rules/jdwillmsen}
+        - {name: RESOURCE, value: both}
+        - {name: NAMESPACE, value: jdwillmsen-prd}
+        - {name: WATCH_SERVER_TIMEOUT, value: "60"}
+        - {name: WATCH_CLIENT_TIMEOUT, value: "60"}
+        - {name: LOG_LEVEL, value: INFO}
+      resources:
+        requests:
+          memory: 64Mi
+        limits:
+          memory: 192Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+      volumeMounts:
+        - {name: tmp, mountPath: /tmp}
+        - {name: sc-rules-jdwillmsen, mountPath: /rules/jdwillmsen}
+  extraVolumes:
+    - name: sc-rules-jdwillmsen
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: sc-rules-jdwillmsen
+      mountPath: /rules/jdwillmsen
   resources:
     requests:
       cpu: 500m
@@ -86,6 +127,7 @@ sidecar:
     # ConfigMap cannot ask for a subdirectory. Moving the sidecar's mount to
     # the org path instead makes `/rules` contain exactly one tenant directory,
     # `platform`, which is the org every platform-owned writer already stamps.
+    # Other tenants' orgs get their own sidecar under `singleBinary` above.
     folder: /rules/platform
   resources:
     requests:
