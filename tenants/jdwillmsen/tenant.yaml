@@ -11,14 +11,13 @@ deploymentRepo:
 namespaces:
   # Single environment: personal workloads, no non/prd split to promote between.
   #
-  # externalEgress declares intent rather than taking effect today. Without
-  # enforce: true the envelope also renders allow-all-egress/ingress, which
-  # subsume every scoped rule — the policy engine now enforces, but it has
-  # nothing restrictive to enforce here. It is set because a Bedrock server in
-  # online mode authenticates players against Xbox Live and will need egress
-  # the moment this namespace does restrict. The scoped rule opens 443 only;
-  # whether that covers Bedrock's auth path is unverified, so revisit before
-  # enabling enforce here.
+  # Not enforcing yet, deliberately. Without enforce: true the envelope also
+  # renders allow-all-egress/ingress, which subsume every rule below, so each
+  # allow here can be applied and read back on the live endpoints before it
+  # carries any traffic. Enforcing is the one-line change that follows, and
+  # its revert is the same line. The flow inventory these rules were derived
+  # from, and the order to roll them out in, are in
+  # docs/adr/0032-jdwillmsen-prd-flow-inventory-and-staged-enforcement.md.
   - name: jdwillmsen-prd
     # standard's limits.cpu: 6 throttled the Bedrock server at its own 2-core
     # limit after tick-distance/view-distance were raised for the mob farm —
@@ -31,7 +30,114 @@ namespaces:
     # together, on top of whatever runs steady.
     quotaTier: large
     networkPolicy: default
+    # Every destination seen leaving the cluster from here is TCP 443: the
+    # server's own calls to Microsoft, the hourly version check's dispatch to
+    # GitHub, the candidate server it boots to learn the current release, and
+    # the agent signing in to Xbox Live. The bots' sign-in and the server's
+    # own start after a restart were not seen, so they are the first thing to
+    # watch for.
     externalEgress: true
+    extraNetworkPolicies:
+      # The default tier has no rule for a namespace's own pods talking to
+      # each other, and nearly everything here does: the agent, both bots and
+      # the join probe hold sessions on the server's game port, the agent and
+      # the map read the console bridge, and the map and the agent call each
+      # other. Namespace-wide rather than pair by pair, because the pairs are
+      # the deployment chart's business and change with it; a pair missing
+      # here would be an outage that only a platform change could end.
+      #
+      # It also reaches pods the chart means to keep apart from the server,
+      # which is why the map's browser checks cannot be isolated by a policy
+      # of their own while this is in place.
+      - name: allow-same-namespace
+        spec:
+          podSelector: {}
+          policyTypes:
+            - Ingress
+            - Egress
+          ingress:
+            - from:
+                - podSelector: {}
+          egress:
+            - to:
+                - podSelector: {}
+      # Players arrive through a NodePort, and kube-proxy rewrites their
+      # source on the way in: to the entry node's tunnel address when that is
+      # not the node the server runs on, which is how the traffic seen
+      # arriving looked. No source is named because none would mean anything:
+      # whatever can reach a node's port arrives as that node. An address list
+      # would add nothing but a way to lock players out when a node changes.
+      - name: allow-game-ingress
+        spec:
+          podSelector:
+            matchLabels:
+              app: jdwillmsen-minecraft-fwb-prd-minecraft-bedrock
+          policyTypes:
+            - Ingress
+          ingress:
+            - ports:
+                - port: 31132
+                  protocol: UDP
+      # The second route in that the chart keeps a Service for: signaling
+      # over TCP and one UDP port per player. The server does not speak it
+      # today, so none of this has been seen carrying traffic. Kept apart
+      # from the rule above so that a port range the engine refused could not
+      # take the port players actually use down with it. It opens the way in
+      # only: a server that starts connections out to its players would need
+      # egress nothing here grants.
+      - name: allow-game-nethernet-ingress
+        spec:
+          podSelector:
+            matchLabels:
+              app: jdwillmsen-minecraft-fwb-prd-minecraft-bedrock
+          policyTypes:
+            - Ingress
+          ingress:
+            - ports:
+                - port: 31132
+                  protocol: TCP
+                - port: 31160
+                  endPort: 31179
+                  protocol: UDP
+      # In-game chat answers come from the inference host on the LAN, which
+      # the external allow excludes along with the rest of the LAN. One
+      # address and one port, for the one workload that calls it.
+      - name: allow-agent-inference-egress
+        spec:
+          podSelector:
+            matchLabels:
+              app: jdwillmsen-minecraft-fwb-prd-server-agent
+          policyTypes:
+            - Egress
+          egress:
+            - to:
+                - ipBlock:
+                    cidr: 192.168.1.50/32
+              ports:
+                - port: 8000
+                  protocol: TCP
+    extraCiliumNetworkPolicies:
+      # The backup, the scheduled restart, the volume recovery that runs every
+      # five minutes, the version check and the hook that holds a sync while
+      # players are warned all drive the server through the cluster's API.
+      # Only Job pods do, and only their service accounts are bound to
+      # anything, so only they are selected. The port is the one the API
+      # server listens on, not the Service's 443: the address is rewritten to
+      # a control-plane node before the policy sees it, and the entity alone
+      # would open every port on those nodes.
+      - name: allow-job-kube-apiserver-egress
+        spec:
+          endpointSelector:
+            matchExpressions:
+              - key: batch.kubernetes.io/job-name
+                operator: Exists
+          egress:
+            - toEntities:
+                - kube-apiserver
+              toPorts:
+                - ports:
+                    - port: "6443"
+                      protocol: TCP
 
 project:
   elevated: false
