@@ -81,6 +81,16 @@ cases:
       target: kube-api-lb
     receivers: ['ai-sre', 'discord']
 
+  # "No probe result" means reachability is unknown, which is the state the
+  # last unexplained host outage spent nine minutes in with nobody told.
+  - name: host probe gone stale fans out to the agent and to humans
+    labels:
+      alertname: HardwareHostProbeStale
+      severity: critical
+      host: pve1
+      target: pve1-mgmt
+    receivers: ['ai-sre', 'discord']
+
   - name: hypervisor near its thermal trip fans out to the agent and to humans
     labels:
       alertname: HardwareHostTemperatureCritical
