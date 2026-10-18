@@ -24,6 +24,11 @@ namespaces:
     # limit after tick-distance/view-distance were raised for the mob farm —
     # cgroup stats showed ~34% of periods throttled. large gives headroom for
     # an 8-core pod limit plus the exporter/cronjobs alongside it.
+    #
+    # large was later raised from 8 to 12 limit cores: the crew-lab server and
+    # map left 0.35 cores free, so the 1-core backup pod was refused by the
+    # quota and a nightly backup never ran. The 04:00 cronjobs need 2 cores
+    # together, on top of whatever runs steady.
     quotaTier: large
     networkPolicy: default
     externalEgress: true
