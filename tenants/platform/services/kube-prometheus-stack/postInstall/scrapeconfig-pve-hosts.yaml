@@ -1,0 +1,44 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: pve-node
+  namespace: monitoring
+spec:
+  # The hypervisors sit underneath the cluster: no kubelet, no Pod, nothing a
+  # ServiceMonitor selector can match, so a static target list is the only
+  # discovery available — the same reason vllm-inference-node is a
+  # ScrapeConfig. Their addresses are gateway DHCP reservations (see
+  # docs/host-addressing.md in jdwlabs/infrastructure), the same ones
+  # blackbox-exporter's -mgmt targets already pin.
+  #
+  # A job of its own rather than a second target set on the chart's
+  # `node-exporter` job: every bundled Node* rule and dashboard selects
+  # job="node-exporter" and assumes a Kubernetes node behind it, so folding
+  # five hypervisors in would make those rules speak for hosts they were never
+  # tuned for.
+  #
+  # One staticConfig per host, not one list of five: `host` is what the
+  # blackbox -mgmt series already carry, so a host's reachability and its
+  # telemetry join on that label without parsing an address out of `instance`.
+  jobName: pve-node
+  staticConfigs:
+    - targets:
+        - 192.168.1.200:9100
+      labels:
+        host: pve1
+    - targets:
+        - 192.168.1.201:9100
+      labels:
+        host: pve2
+    - targets:
+        - 192.168.1.202:9100
+      labels:
+        host: pve3
+    - targets:
+        - 192.168.1.203:9100
+      labels:
+        host: pve4
+    - targets:
+        - 192.168.1.204:9100
+      labels:
+        host: pve5
