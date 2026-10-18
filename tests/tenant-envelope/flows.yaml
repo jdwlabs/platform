@@ -1,0 +1,51 @@
+# Flows the rendered tenant policies must admit or refuse once a namespace
+# enforces. run.sh resolves each one; the header there says what "resolves"
+# does and does not cover.
+#
+# An end is one of:
+#   pod:    {namespace, labels}   a pod, matched by pod and namespace selectors
+#   ip:     an address            outside the cluster, matched by ipBlock/CIDR
+#   entity: kube-apiserver        matched only by a Cilium entity rule
+#
+# `seen` is where the flow comes from: `hubble` for one observed on the live
+# namespace, `chart` for one the deployment chart declares that did not occur
+# while anyone was watching, `guard` for one that has to stay refused.
+#
+# Addresses standing in for players are from the documentation ranges, never
+# a real one.
+
+x-pods:
+  bedrock: &bedrock
+    pod: {namespace: jdwillmsen-prd, labels: {app: jdwillmsen-minecraft-fwb-prd-minecraft-bedrock}}
+  agent: &agent
+    pod: {namespace: jdwillmsen-prd, labels: {app: jdwillmsen-minecraft-fwb-prd-server-agent}}
+  map: &map
+    pod: {namespace: jdwillmsen-prd, labels: {app: jdwillmsen-minecraft-fwb-prd-map}}
+  backupExporter: &backupExporter
+    pod: {namespace: jdwillmsen-prd, labels: {app: jdwillmsen-minecraft-fwb-prd-backup-exporter}}
+  prometheus: &prometheus
+    pod: {namespace: monitoring, labels: {app.kubernetes.io/name: prometheus}}
+  gateway: &gateway
+    pod: {namespace: nginx-gateway, labels: {app.kubernetes.io/name: nginx-gateway}}
+  postgres: &postgres
+    pod: {namespace: database, labels: {cnpg.io/cluster: platform-postgresql-cluster-prd}}
+  dns: &dns
+    pod: {namespace: kube-system, labels: {k8s-app: kube-dns}}
+  otherTenant: &otherTenant
+    pod: {namespace: jdwlabs-prd, labels: {app: usersrole-prd}}
+
+flows:
+  - {name: console bridge is not reachable through a node, seen: guard, from: {ip: 10.244.7.0}, to: *bedrock, port: 8766, expect: deny}
+  - {name: kubelet probes the map, seen: hubble, from: {ip: 10.244.7.1}, to: *map, port: 8080, expect: allow}
+  - {name: prometheus scrapes the server monitor, seen: hubble, from: *prometheus, to: *bedrock, port: 8080, expect: allow}
+  - {name: prometheus scrapes the backup exporter, seen: hubble, from: *prometheus, to: *backupExporter, port: 9101, expect: allow}
+  - {name: gateway serves the map, seen: hubble, from: *gateway, to: *map, port: 8080, expect: allow}
+  - {name: agent reaches postgres, seen: hubble, from: *agent, to: *postgres, port: 5432, expect: allow}
+  - {name: name resolution, seen: hubble, from: *agent, to: *dns, port: 53, protocol: UDP, expect: allow}
+  - {name: another tenant cannot read the console bridge, seen: guard, from: *otherTenant, to: *bedrock, port: 8766, expect: deny}
+  - {name: agent cannot reach prometheus, seen: guard, from: *agent, to: *prometheus, port: 9090, expect: deny}
+  - {name: a workload that is not a job has no API access, seen: guard, from: *agent, to: {entity: kube-apiserver}, port: 6443, expect: deny}
+  - {name: server calls Microsoft, seen: hubble, from: *bedrock, to: {ip: 4.150.223.110}, port: 443, expect: allow}
+  - {name: agent reaches nothing else on the LAN, seen: guard, from: *agent, to: {ip: 192.168.1.1}, port: 8000, expect: deny}
+  - {name: plain HTTP out is not open, seen: guard, from: *bedrock, to: {ip: 4.150.223.110}, port: 80, expect: deny}
+  - {name: UDP out is not open, seen: guard, from: *bedrock, to: {ip: 203.0.113.9}, port: 3478, protocol: UDP, expect: deny}

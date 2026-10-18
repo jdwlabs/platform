@@ -26,7 +26,9 @@ Each tenant receives:
 - **Vault path prefix** for secret isolation
 - **ARC runner sets** registered to their GitHub org (dormant by default)
 - **Database schemas** managed by Atlas operator in shared CNPG clusters
-- **NetworkPolicies** (default-deny + DNS + ingress controller)
+- **NetworkPolicies** (default-deny + DNS + ingress controller). A workload's own flows are admitted per
+  namespace from `tenant.yaml` (`extraNetworkPolicies`, `extraCiliumNetworkPolicies`), because the tenant
+  AppProject denies both kinds to the tenant's own repositories
 - **ResourceQuota** and **LimitRange** per namespace
 
 ## Directory Structure
