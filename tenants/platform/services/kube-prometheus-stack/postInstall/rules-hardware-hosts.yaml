@@ -1,0 +1,175 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: hardware-hosts-rules
+  namespace: monitoring
+spec:
+  groups:
+    - name: hardware-hosts
+      rules:
+        # One CPU temperature per host, from whichever source that host has.
+        # The five hypervisors do not agree on one: all of them load k10temp,
+        # but only pve1's firmware also publishes an ACPI thermal zone, with
+        # trip points at 105C and 110C — and a thermal power-off writes no
+        # log line, so the history is the only evidence. Taking the max of both means the alerts below read the
+        # hotter of "what the CPU says" and "what the firmware acts on", and a
+        # host with only one of them still produces a series.
+        #
+        # hwmon's `chip` label is a device path (k10temp is
+        # pci0000:00_0000:00:18_3 here), not a driver name, and differs per
+        # board; the driver name lives only on node_hwmon_chip_names. Joining
+        # on it is what keeps NIC, NVMe, DIMM and GPU sensors — all of which
+        # these hosts also expose under node_hwmon_temp_celsius, some with
+        # limits of their own well under 90C — out of a CPU alert. coretemp is
+        # listed so an Intel host added later is covered without an edit.
+        #
+        # Recorded rather than inlined three times so the alerts cannot drift
+        # apart, and so the series that is actually alerted on is the one a
+        # human graphs after an unexplained power-off.
+        - record: host:hardware_cpu_temperature_celsius:max
+          expr: |
+            max by (host) (
+              (
+                node_hwmon_temp_celsius{job="pve-node"}
+                * on (instance, chip) group_left ()
+                node_hwmon_chip_names{job="pve-node", chip_name=~"k10temp|coretemp"}
+              )
+              or
+              node_thermal_zone_temp{job="pve-node", type=~"acpitz|x86_pkg_temp"}
+            )
+
+        # The window lives in avg_over_time, with no `for:`. A CPU under a
+        # bursty load swings several degrees between scrapes, and `for:`
+        # resets on the first sample back under the line — so a host averaging
+        # well above the threshold but dipping below it once every few minutes
+        # would never fire. An average over the window fires on exactly that
+        # shape.
+        #
+        # 90C: pve1 reads 70-80C under its ordinary load and its first trip
+        # point is 105C, so ten minutes averaging 90C is a cooling problem with
+        # margin still left to act on it, not a boost excursion.
+        # keep_firing_for stops the alert resolving and re-firing each time
+        # the average grazes the line.
+        #
+        # The count_over_time guard is the price of dropping `for:`: an
+        # average over a window holding one sample is just that sample, so
+        # without it the first scrape after an exporter restart or a scrape
+        # gap would fire on a single hot reading.
+        #
+        # Distinct alertnames per tier on purpose: Alertmanager's inhibit rule
+        # drops a warning once a critical with the same alertname is active,
+        # and both tiers firing together is the expected shape of a real
+        # overheat.
+        - alert: HardwareHostTemperatureHigh
+          expr: |
+            avg_over_time(host:hardware_cpu_temperature_celsius:max[10m]) >= 90
+            and
+            count_over_time(host:hardware_cpu_temperature_celsius:max[10m]) >= 5
+          keep_firing_for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Host {{ $labels.host }} CPU averaging {{ $value | printf \"%.0f\" }}C over 10m"
+            description: >-
+              CPU temperature on {{ $labels.host }} has averaged 90C or more
+              for 10 minutes. A thermal power-off leaves no log on these hosts
+              (pve1's first trip point is 105C), so this is the early
+              signal. Check load, fan and airflow before it reaches the
+              critical tier. See runbook.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # 95C over a shorter window: 10C under pve1's first trip point and
+        # within a few degrees of where the mobile CPUs in pve1-pve4 start
+        # throttling. Five minutes rather than ten because the remaining
+        # margin is small and a host that trips takes its VMs — one of them
+        # the cluster's load balancer — down with it.
+        #
+        # pve5 is excluded, not forgotten. Its desktop CPU regulates at 95C by
+        # design: under sustained all-core load it raises clocks until it
+        # reaches that temperature and then holds there, so 95C on that host
+        # is the part working as intended, with nothing above it for a higher
+        # threshold to catch. A critical here would page on a long compile.
+        # The warning tier still covers pve5, and reaches the agent only.
+        - alert: HardwareHostTemperatureCritical
+          expr: |
+            avg_over_time(host:hardware_cpu_temperature_celsius:max{host!="pve5"}[5m]) >= 95
+            and
+            count_over_time(host:hardware_cpu_temperature_celsius:max{host!="pve5"}[5m]) >= 3
+          keep_firing_for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Host {{ $labels.host }} CPU averaging {{ $value | printf \"%.0f\" }}C over 5m — thermal shutdown likely"
+            description: >-
+              CPU temperature on {{ $labels.host }} has averaged 95C or more
+              for 5 minutes, within reach of the thermal trip point at which
+              the host powers off with no log. Shed load now (migrate or stop
+              VMs) and check cooling; expect an abrupt stop of every VM on
+              this host if it keeps climbing. See runbook.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # The two alerts above compare an existing series, so a host that
+        # exports no CPU temperature at all — hwmon collector disabled, a
+        # kernel that stops loading k10temp, a sensor naming this rule's
+        # selectors do not match — would be silently uncovered while its
+        # target still reads `up`. This is the alert that says so.
+        - alert: HardwareHostTemperatureMissing
+          expr: |
+            up{job="pve-node"} == 1
+            unless on (host)
+            host:hardware_cpu_temperature_celsius:max
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Host {{ $labels.host }} is scraped but reports no CPU temperature"
+            description: >-
+              node-exporter on {{ $labels.host }} answers, but neither a
+              k10temp/coretemp hwmon sensor nor an ACPI thermal zone is in
+              what it exports, so the thermal alerts cannot fire for this
+              host. Check `curl -s http://{{ $labels.instance }}/metrics |
+              grep -E 'node_hwmon_chip_names|node_thermal_zone_temp'` against
+              the selectors in the recording rule.
+            runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/pve-node-exporter-install.md"
+
+        # Only a warning, and only while the host itself still answers on :22.
+        # A host that is down is HardwareHostUnreachable's to report, as a
+        # critical; repeating it here would add a second alert for the same
+        # fault. What this one isolates is the quieter failure — the box is
+        # fine but its telemetry has stopped — which costs nothing today and
+        # the evidence for the next unexplained power-off.
+        #
+        # It also fires for every host if this scrape config is live before
+        # node-exporter has been installed on them. That is why it is not
+        # critical: an ordering mistake in a two-repo rollout must not page.
+        - alert: HardwareHostMetricsDown
+          expr: |
+            up{job="pve-node"} == 0
+            unless on (host)
+            probe_success{target=~".*-mgmt"} == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Host {{ $labels.host }} is reachable but node-exporter on :9100 is not being scraped"
+            description: >-
+              The pve-node target {{ $labels.instance }} ({{ $labels.host }})
+              has been down for 15m while the host still answers on :22. No
+              temperature or load history is being recorded for it. Check
+              `systemctl status prometheus-node-exporter` on the host and that
+              it listens on the LAN address. See runbook.
+            runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/pve-node-exporter-install.md"
+
+        # Dead-man's-switch for the job as a whole. Every rule above selects
+        # on job="pve-node"; if the ScrapeConfig is deleted, renamed or never
+        # reconciled, `up` for it does not read 0, it stops existing, and all
+        # of them match nothing.
+        - alert: HardwareHostMetricsMissing
+          expr: absent(up{job="pve-node"}) == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Hypervisor host metrics have stopped reporting entirely"
+            description: "No `up` series exists for job pve-node — the ScrapeConfig is gone or Prometheus is not loading it. Host thermal alerting is blind until this is fixed."
+            runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/pve-node-exporter-install.md"

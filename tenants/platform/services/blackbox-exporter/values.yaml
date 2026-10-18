@@ -118,6 +118,35 @@ serviceMonitor:
         app: container
         env: non
 
+    # 192.168.1.199 is the single HAProxy VM in front of the Kubernetes API,
+    # the Talos API and all HTTP(S) ingress. Nothing above probes it: the
+    # -mgmt targets watch the hypervisors, and the -ingress targets go to the
+    # gateway's in-cluster Service precisely so they never leave the cluster
+    # network. So when the VM's host powered off, the alert that fired named
+    # the hypervisor, and the address every client and every kubeconfig
+    # actually dials had no alert of its own.
+    #
+    # Two targets because they fail independently. :6443 is a TCP passthrough
+    # to the control plane and proves the API path; the HTTPS one is a real
+    # request through the VM's :443 frontend to the gateway and proves the
+    # ingress path. `hostname` pins both the Host header and the TLS
+    # ServerName, exactly as on the -ingress targets, so the wildcard
+    # certificate validates against a bare address.
+    #
+    # Probing this address from a pod is not the hairpin the -ingress comment
+    # above warns about: that is the router refusing to loop a LAN client back
+    # to the *public* IP. This is a LAN address reached directly, the same way
+    # the -mgmt targets are.
+    #
+    # Suffixed "-lb" so the alerts below select the group by regex, and so
+    # neither the -mgmt nor the -ingress rules pick these up.
+    - name: kube-api-lb
+      url: "192.168.1.199:6443"
+    - name: gateway-https-lb
+      url: "https://192.168.1.199/"
+      hostname: container.prd.jdwlabs.com
+      module: http_2xx
+
 prometheusRule:
   enabled: true
   rules:
@@ -203,3 +232,57 @@ prometheusRule:
         summary: "Ingress-path reachability probes have stopped reporting entirely"
         description: "No probe_success series found for the ingress-path targets for 10m — the blackbox-exporter deployment or its ServiceMonitor may be down. The Cilium-desync ingress blind spot this probe exists to close is unmonitored until this is fixed."
         runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+    # The load-balancer address going dark is its own incident class, not a
+    # variant of HardwareHostUnreachable: that alert names a hypervisor, and
+    # the VM can be down (or HAProxy stopped) with its hypervisor healthy.
+    # In-cluster workloads keep running — nodes reach the API through their
+    # own local proxy, and Prometheus reaches Alertmanager without touching
+    # this address — which is exactly why this has to be probed: the cluster
+    # looks fine from the inside while kubectl, talosctl and every ingress
+    # hostname on the LAN are dead.
+    #
+    # for: 2m, shorter than the 5m the host alerts use. With a 1m scrape and a
+    # 1m evaluation interval the worst case from failure to firing is about
+    # four minutes, which still clears three consecutive failed evaluations —
+    # enough that a config reload on the VM or one lost probe stays silent.
+    #
+    # If gateway-https-lb fails while kube-api-lb passes and
+    # IngressPathProbeFailed is also firing, the gateway behind the VM is the
+    # fault, not the VM.
+    - alert: LoadBalancerAddressUnreachable
+      expr: probe_success{target=~".*-lb"} == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Load-balancer address probe {{ $labels.target }} failing"
+        description: >-
+          The probe of {{ $labels.instance }} ({{ $labels.target }}) on the
+          HAProxy VM has failed for 2m. This address fronts the Kubernetes
+          API, the Talos API and all HTTP(S) ingress; in-cluster workloads
+          keep running but nothing outside the cluster can reach them. Check
+          the VM and its hypervisor (HardwareHostUnreachable) first. See
+          runbook.
+        runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/haproxy-vm-rebuild.md"
+
+    # Dead-man's-switch for the -lb group, for the same reason the other two
+    # groups each have one: a probe that stops reporting does not read 0.
+    #
+    # One absent() per target rather than one over the regex. The two probes
+    # cover different paths, and absent() over the group stays quiet for as
+    # long as either of them still reports — so the API probe alone could
+    # vanish with neither this alert nor the one above noticing. Naming the
+    # target also puts it on the alert, which absent() over a regex cannot.
+    - alert: LoadBalancerProbeMissing
+      expr: |
+        absent(probe_success{target="kube-api-lb"})
+        or
+        absent(probe_success{target="gateway-https-lb"})
+      for: 10m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Load-balancer address probe {{ $labels.target }} has stopped reporting"
+        description: "No probe_success series found for {{ $labels.target }} for 10m — the blackbox-exporter deployment or that target's ServiceMonitor may be down. An outage of the address fronting the Kubernetes API and ingress would go unnoticed on this path until it is fixed."
+        runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/haproxy-vm-rebuild.md"

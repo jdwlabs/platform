@@ -1,0 +1,303 @@
+# Unit tests for the hypervisor host rules.
+#
+# Two things here are easy to break without any other check noticing. The
+# thermal alerts carry their window in avg_over_time instead of `for:` — the
+# "oscillating" case below is a host that averages over the threshold while
+# dipping under it on every other scrape, the exact shape a `for:` clause
+# never fires on. And the recording rule has to produce a series from either
+# temperature source and from nothing else: the cases after it pin the
+# thermal-zone-only host, the hwmon-only host, and a hot non-CPU sensor.
+rule_files:
+  - rules/hardware-hosts-rules.yaml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    name: oscillating temperature averaging over 90C fires the warning tier only
+    input_series:
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="pci0000:00_0000:00:18_3",sensor="temp1"}'
+        values: '98 86 98 86 98 86 98 86 98 86 98 86 98 86 98 86'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="pci0000:00_0000:00:18_3",chip_name="k10temp"}'
+        values: '1+0x15'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: HardwareHostTemperatureHigh
+        exp_alerts:
+          - exp_labels:
+              host: pve1
+              severity: warning
+            exp_annotations:
+              summary: "Host pve1 CPU averaging 92C over 10m"
+              description: >-
+                CPU temperature on pve1 has averaged 90C or more
+                for 10 minutes. A thermal power-off leaves no log on these hosts
+                (pve1's first trip point is 105C), so this is the early
+                signal. Check load, fan and airflow before it reaches the
+                critical tier. See runbook.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 12m
+        alertname: HardwareHostTemperatureCritical
+        exp_alerts: []
+
+  # With the window in the expression instead of `for:`, a window holding a
+  # single sample averages to that sample. The first scrape after an exporter
+  # restart must not page on one reading.
+  - interval: 1m
+    name: one hot sample with no history behind it stays silent
+    input_series:
+      - series: 'node_thermal_zone_temp{job="pve-node",instance="192.168.1.200:9100",host="pve1",type="acpitz",zone="0"}'
+        values: '99 70 70 70 70 70 70'
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: HardwareHostTemperatureCritical
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: HardwareHostTemperatureCritical
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: HardwareHostTemperatureCritical
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: HardwareHostTemperatureHigh
+        exp_alerts: []
+
+  # No hwmon CPU sensor at all, only the firmware's ACPI zone: the `or` branch
+  # of the recording rule has to carry the host on its own.
+  - interval: 1m
+    name: a host with only an ACPI thermal zone still alerts
+    input_series:
+      - series: 'node_thermal_zone_temp{job="pve-node",instance="192.168.1.200:9100",host="pve1",type="acpitz",zone="0"}'
+        values: '97+0x15'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: HardwareHostTemperatureCritical
+        exp_alerts:
+          - exp_labels:
+              host: pve1
+              severity: critical
+            exp_annotations:
+              summary: "Host pve1 CPU averaging 97C over 5m — thermal shutdown likely"
+              description: >-
+                CPU temperature on pve1 has averaged 95C or more
+                for 5 minutes, within reach of the thermal trip point at which
+                the host powers off with no log. Shed load now (migrate or stop
+                VMs) and check cooling; expect an abrupt stop of every VM on
+                this host if it keeps climbing. See runbook.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      # Both tiers together is the intended shape of a real overheat.
+      - eval_time: 6m
+        alertname: HardwareHostTemperatureHigh
+        exp_alerts:
+          - exp_labels:
+              host: pve1
+              severity: warning
+            exp_annotations:
+              summary: "Host pve1 CPU averaging 97C over 10m"
+              description: >-
+                CPU temperature on pve1 has averaged 90C or more
+                for 10 minutes. A thermal power-off leaves no log on these hosts
+                (pve1's first trip point is 105C), so this is the early
+                signal. Check load, fan and airflow before it reaches the
+                critical tier. See runbook.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # The hotter of the two sources wins: the CPU reads cool while the zone the
+  # firmware acts on is at the line.
+  - interval: 1m
+    name: the hotter of hwmon and thermal zone is the one recorded
+    input_series:
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="pci0000:00_0000:00:18_3",sensor="temp1"}'
+        values: '70+0x5'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="pci0000:00_0000:00:18_3",chip_name="k10temp"}'
+        values: '1+0x5'
+      - series: 'node_thermal_zone_temp{job="pve-node",instance="192.168.1.200:9100",host="pve1",type="acpitz",zone="0"}'
+        values: '93+0x5'
+    promql_expr_test:
+      - expr: host:hardware_cpu_temperature_celsius:max
+        eval_time: 3m
+        exp_samples:
+          - labels: 'host:hardware_cpu_temperature_celsius:max{host="pve1"}'
+            value: 93
+
+  # pve5's CPU holds 95C under sustained load by design, so the same reading
+  # that pages for pve1 must stay a warning there.
+  - interval: 1m
+    name: pve5 sitting at its regulation point warns but does not page
+    input_series:
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.204:9100",host="pve5",chip="pci0000:00_0000:00:18_3",sensor="temp1"}'
+        values: '95+0x15'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.204:9100",host="pve5",chip="pci0000:00_0000:00:18_3",chip_name="k10temp"}'
+        values: '1+0x15'
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.203:9100",host="pve4",chip="pci0000:00_0000:00:18_3",sensor="temp1"}'
+        values: '95+0x15'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.203:9100",host="pve4",chip="pci0000:00_0000:00:18_3",chip_name="k10temp"}'
+        values: '1+0x15'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: HardwareHostTemperatureCritical
+        exp_alerts:
+          - exp_labels:
+              host: pve4
+              severity: critical
+            exp_annotations:
+              summary: "Host pve4 CPU averaging 95C over 5m — thermal shutdown likely"
+              description: >-
+                CPU temperature on pve4 has averaged 95C or more
+                for 5 minutes, within reach of the thermal trip point at which
+                the host powers off with no log. Shed load now (migrate or stop
+                VMs) and check cooling; expect an abrupt stop of every VM on
+                this host if it keeps climbing. See runbook.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+    promql_expr_test:
+      - expr: count(ALERTS{alertname="HardwareHostTemperatureHigh", alertstate="firing", host="pve5"})
+        eval_time: 12m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+
+  # NVMe, NIC and DIMM sensors share node_hwmon_temp_celsius. A drive at 99C
+  # is a real problem, but it is not this alert's, and its own limits differ.
+  - interval: 1m
+    name: a hot non-CPU hwmon sensor does not count as CPU temperature
+    input_series:
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.201:9100",host="pve2",chip="pci0000:00_0000:00:18_3",sensor="temp1"}'
+        values: '60+0x15'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.201:9100",host="pve2",chip="pci0000:00_0000:00:18_3",chip_name="k10temp"}'
+        values: '1+0x15'
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.201:9100",host="pve2",chip="nvme_nvme0",sensor="temp1"}'
+        values: '99+0x15'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.201:9100",host="pve2",chip="nvme_nvme0",chip_name="nvme"}'
+        values: '1+0x15'
+    promql_expr_test:
+      - expr: host:hardware_cpu_temperature_celsius:max
+        eval_time: 12m
+        exp_samples:
+          - labels: 'host:hardware_cpu_temperature_celsius:max{host="pve2"}'
+            value: 60
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: HardwareHostTemperatureHigh
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: HardwareHostTemperatureCritical
+        exp_alerts: []
+
+  # Scraped fine, but nothing the recording rule selects: the thermal alerts
+  # would be blind for this host and only this alert says so.
+  - interval: 1m
+    name: a scraped host exporting no CPU temperature is reported
+    input_series:
+      - series: 'up{job="pve-node",instance="192.168.1.202:9100",host="pve3"}'
+        values: '1+0x20'
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.202:9100",host="pve3",chip="nvme_nvme0",sensor="temp1"}'
+        values: '50+0x20'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.202:9100",host="pve3",chip="nvme_nvme0",chip_name="nvme"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: HardwareHostTemperatureMissing
+        exp_alerts:
+          - exp_labels:
+              job: pve-node
+              instance: "192.168.1.202:9100"
+              host: pve3
+              severity: warning
+            exp_annotations:
+              summary: "Host pve3 is scraped but reports no CPU temperature"
+              description: >-
+                node-exporter on pve3 answers, but neither a
+                k10temp/coretemp hwmon sensor nor an ACPI thermal zone is in
+                what it exports, so the thermal alerts cannot fire for this
+                host. Check `curl -s http://192.168.1.202:9100/metrics |
+                grep -E 'node_hwmon_chip_names|node_thermal_zone_temp'` against
+                the selectors in the recording rule.
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/pve-node-exporter-install.md"
+
+  - interval: 1m
+    name: a healthy host at an ordinary temperature is silent on every rule
+    input_series:
+      - series: 'up{job="pve-node",instance="192.168.1.200:9100",host="pve1"}'
+        values: '1+0x20'
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22"}'
+        values: '1+0x20'
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="pci0000:00_0000:00:18_3",sensor="temp1"}'
+        values: '76+0x20'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="pci0000:00_0000:00:18_3",chip_name="k10temp"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: HardwareHostTemperatureHigh
+        exp_alerts: []
+      - eval_time: 18m
+        alertname: HardwareHostTemperatureCritical
+        exp_alerts: []
+      - eval_time: 18m
+        alertname: HardwareHostTemperatureMissing
+        exp_alerts: []
+      - eval_time: 18m
+        alertname: HardwareHostMetricsDown
+        exp_alerts: []
+      - eval_time: 18m
+        alertname: HardwareHostMetricsMissing
+        exp_alerts: []
+
+  # The state the cluster is in if the scrape config lands before the
+  # exporters do: hosts reachable, nothing on :9100. It must alert, and at
+  # warning — the severity is what keeps that ordering mistake from paging.
+  - interval: 1m
+    name: exporter down on a reachable host fires a warning
+    input_series:
+      - series: 'up{job="pve-node",instance="192.168.1.200:9100",host="pve1"}'
+        values: '0+0x20'
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: HardwareHostMetricsDown
+        exp_alerts:
+          - exp_labels:
+              job: pve-node
+              instance: "192.168.1.200:9100"
+              host: pve1
+              severity: warning
+            exp_annotations:
+              summary: "Host pve1 is reachable but node-exporter on :9100 is not being scraped"
+              description: >-
+                The pve-node target 192.168.1.200:9100 (pve1) has
+                been down for 15m while the host still answers on :22. No
+                temperature or load history is being recorded for it. Check
+                `systemctl status prometheus-node-exporter` on the host and that
+                it listens on the LAN address. See runbook.
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/pve-node-exporter-install.md"
+      # The job exists, so the dead-man's-switch stays out of it.
+      - eval_time: 16m
+        alertname: HardwareHostMetricsMissing
+        exp_alerts: []
+
+  # A powered-off host is HardwareHostUnreachable's to report; a second alert
+  # here for the same fault is noise.
+  - interval: 1m
+    name: exporter down because the whole host is down stays silent
+    input_series:
+      - series: 'up{job="pve-node",instance="192.168.1.200:9100",host="pve1"}'
+        values: '0+0x20'
+      - series: 'probe_success{target="pve1-mgmt",host="pve1",instance="192.168.1.200:22"}'
+        values: '0+0x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: HardwareHostMetricsDown
+        exp_alerts: []
+
+  - interval: 1m
+    name: no pve-node up series at all fires the dead-mans-switch
+    input_series: []
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: HardwareHostMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              job: pve-node
+              severity: warning
+            exp_annotations:
+              summary: "Hypervisor host metrics have stopped reporting entirely"
+              description: "No `up` series exists for job pve-node — the ScrapeConfig is gone or Prometheus is not loading it. Host thermal alerting is blind until this is fixed."
+              runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/pve-node-exporter-install.md"
