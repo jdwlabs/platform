@@ -34,6 +34,55 @@ singleBinary:
     # Sized to cover WAL + index + chunks previously split across two 20Gi PVCs.
     storageClass: "truenas-nfs"
     size: 30Gi
+  # One rules sidecar per tenant org that ships LogQL rules. The chart's own
+  # sidecar (see `sidecar:` below) sees only the monitoring namespace and
+  # writes only the platform org, so a tenant's labelled rule ConfigMap was
+  # never loaded and `/rules/<tenant>` did not exist. The org is fixed by the
+  # namespace each sidecar is pinned to, never by the ConfigMap itself, so a
+  # tenant cannot plant rules into another tenant's org. A further tenant
+  # needs its own container, volume and mount here.
+  extraVolumes:
+    - name: sc-rules-jdwillmsen
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: sc-rules-jdwillmsen
+      mountPath: /rules/jdwillmsen
+  extraContainers:
+    - name: loki-sc-rules-jdwillmsen
+      image: docker.io/kiwigrid/k8s-sidecar:2.5.0
+      imagePullPolicy: IfNotPresent
+      env:
+        - name: METHOD
+          value: WATCH
+        - name: LABEL
+          value: loki_rule
+        - name: FOLDER
+          value: /rules/jdwillmsen
+        - name: RESOURCE
+          value: both
+        - name: NAMESPACE
+          value: jdwillmsen-prd
+        - name: WATCH_SERVER_TIMEOUT
+          value: "60"
+        - name: WATCH_CLIENT_TIMEOUT
+          value: "60"
+        - name: LOG_LEVEL
+          value: INFO
+      resources:
+        requests:
+          memory: 96Mi
+        limits:
+          memory: 256Mi
+      securityContext:
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: sc-rules-jdwillmsen
+          mountPath: /rules/jdwillmsen
 
 chunksCache:
   enabled: true

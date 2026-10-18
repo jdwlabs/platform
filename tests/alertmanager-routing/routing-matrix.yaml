@@ -162,6 +162,23 @@ cases:
       namespace: jdwillmsen-prd
     receivers: ['ai-sre', 'discord']
 
+  # Real Loki rules the jdwillmsen org's ruler evaluates.
+  - name: jdwillmsen log-derived warning reaches the tenant route
+    labels:
+      alertname: JdwillmsenMinecraftMapPasskeyAddedLogged
+      severity: warning
+      tenant: jdwillmsen
+      namespace: jdwillmsen-prd
+    receivers: ['ai-sre', 'discord']
+
+  - name: jdwillmsen world corruption log alert reaches the agent and the tenant route
+    labels:
+      alertname: JdwillmsenMinecraftWorldCorruptionLogged
+      severity: critical
+      tenant: jdwillmsen
+      namespace: jdwillmsen-prd
+    receivers: ['ai-sre', 'discord']
+
   # Below critical/warning the tenant route is the only one that matches, so
   # the tenant alert still reaches a human without the agent mirror.
   - name: jdwlabs info reaches the tenant route only
