@@ -14,6 +14,17 @@ resources:
   limits:
     memory: 192Mi
 
+# The backend fetches the Dex issuer's discovery document and keys server-side.
+# Pod DNS returns the public address for argocd.jdwlabs.com, and the home
+# router does not hairpin LAN traffic back to its own WAN address, so that
+# fetch times out and every sign-in fails with "failed to get provider". Pin
+# the issuer host to the LAN load-balancer VIP that fronts the same gateway;
+# TLS still verifies against the real hostname.
+hostAliases:
+  - ip: 192.168.1.199
+    hostnames:
+      - argocd.jdwlabs.com
+
 config:
   oidc:
     # externalSecret mode is the only chart path that wires the client
