@@ -1,6 +1,9 @@
+# Users reach the API server with their own Dex id_token (the apiserver
+# trusts the issuer; see oidc-admin-rbac.yaml), so the pod's ServiceAccount
+# needs no permissions. Binding it to cluster-admin would turn any Headlamp
+# bypass on the public listener into cluster-admin.
 clusterRoleBinding:
-  create: true
-  clusterRoleName: cluster-admin
+  create: false
 
 # Ran BestEffort (first evicted under node memory pressure, invisible to the
 # scheduler). Observed ~48Mi; request ~2x that, limit leaves headroom for
