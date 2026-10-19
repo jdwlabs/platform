@@ -1739,6 +1739,12 @@ also caught 4/4 but took 305-496s; Gemma-4-31B caught 2/4 in 24-41s; the
 local Qwen3-Coder caught 1/4 with three false findings. Re-run the comparison
 before swapping a model.
 
+**Incomplete or failed reviews alert.** `rules-pr-agent.yaml` (Loki ruler)
+raises `PRAgentReviewIncomplete` when a diff outgrew the 90000-token budget
+and files were left out (the PR comment also lists them), and
+`PRAgentReviewFailed` when no model produced a review. Both are `info` and
+reach Discord only.
+
 **Exposure.** GitHub delivers App webhooks only to a public URL, so
 `pr-agent.jdwlabs.com` is reachable from the internet through the existing
 wildcard DNS and WAN 443 forward. The HTTPRoute admits only

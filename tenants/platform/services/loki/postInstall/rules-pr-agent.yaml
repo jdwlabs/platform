@@ -1,0 +1,37 @@
+# PR-Agent exposes no metrics, so its logs are the only place a partial or
+# failed review shows up. Both alerts are info: they reach Discord through the
+# default route without spending an AI-SRE investigation on a review.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-pr-agent
+  namespace: monitoring
+  labels:
+    loki_rule: "true"
+data:
+  pr-agent.yaml: |
+    groups:
+      - name: pr-agent-review-coverage
+        interval: 5m
+        rules:
+          # /review drops whole files and /improve clips its patch once a diff
+          # outgrows CONFIG__MAX_MODEL_TOKENS. The PR comment says so, but only
+          # to whoever reads that comment; this makes a recurring gap visible.
+          - alert: PRAgentReviewIncomplete
+            expr: |
+              sum(count_over_time({namespace="pr-review", container="pr-agent"} |~ `because of the token budget|clipping the tokens` [1h])) > 0
+            labels:
+              severity: info
+            annotations:
+              summary: "PR-Agent reviewed only part of a PR diff"
+              description: "{{ $value }} truncated review(s) in the last hour. The diff outgrew PR-Agent's 90000-token budget (CONFIG__MAX_MODEL_TOKENS), so files were left out or the patch was clipped."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#pr-agent-advisory-reviewer"
+          - alert: PRAgentReviewFailed
+            expr: |
+              sum(count_over_time({namespace="pr-review", container="pr-agent"} |= `Failed to generate prediction with any model` [1h])) > 0
+            labels:
+              severity: info
+            annotations:
+              summary: "PR-Agent failed to produce a review"
+              description: "{{ $value }} review(s) lost in the last hour: every pr-reviewer route failed, or pr-reviewer and pr-reviewer-fb2 both returned output PR-Agent could not parse."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#pr-agent-advisory-reviewer"
