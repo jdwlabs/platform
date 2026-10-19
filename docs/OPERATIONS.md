@@ -1726,8 +1726,18 @@ it, and an App approval counts toward the Baseline ruleset's required
 approvals, so auto-approval is pinned off and the `.pr_agent.toml` files
 that could re-enable it are not read. It has no permission to push and
 registers no check, so CODEOWNERS and the rulesets still gate every merge.
-Its model is LiteLLM's `pr-reviewer` route: the local vLLM first, then
-NVIDIA NIM, then OpenRouter.
+Its model is LiteLLM's `pr-reviewer` route: NVIDIA NIM's Nemotron-3-Super
+first, then the local vLLM (small diffs only: its window is 32k), then NIM's
+Gemma-4-31B. None of it touches OpenRouter, whose free quota Holmes needs.
+PR-Agent budgets each prompt to 90000 tokens and also retries on
+`pr-reviewer-fb2` when it cannot parse Nemotron's reply.
+
+**Model choice.** Picked on 2026-10-19 by running PR-Agent itself against a
+copy of infrastructure#208 (50k tokens) with two planted bugs, two runs per
+model. Nemotron-3-Super caught 4/4 with no false findings in 96-159s; Step-5
+also caught 4/4 but took 305-496s; Gemma-4-31B caught 2/4 in 24-41s; the
+local Qwen3-Coder caught 1/4 with three false findings. Re-run the comparison
+before swapping a model.
 
 **Exposure.** GitHub delivers App webhooks only to a public URL, so
 `pr-agent.jdwlabs.com` is reachable from the internet through the existing
@@ -1800,5 +1810,5 @@ and PR-Agent's response code.
 |---|---|
 | Deliveries show 403 `Webhook secret not configured` | `GITHUB__WEBHOOK_SECRET` is empty: `kv/pr-agent` `webhook-secret` is missing or ESO has not synced |
 | Deliveries show 403 `signatures didn't match` | The secret in Vault differs from the one in the App settings; regenerate both from one file |
-| Delivery 200 but no comment | Check pod logs. A LiteLLM 400 from `max_tokens_ceiling_guardrail` means the prompt outgrew the 32k local window; lower `CONFIG__MAX_MODEL_TOKENS`. A 401 means `kv/litellm` `pr_reviewer_key` is not registered with LiteLLM |
+| Delivery 200 but no comment | Check pod logs. A LiteLLM 400 from `max_tokens_ceiling_guardrail` means the prompt outgrew NIM's 128k window; lower `CONFIG__MAX_MODEL_TOKENS`. `Empty content in model response, finish_reason: length` means Nemotron's reasoning used the whole `max_tokens` on `pr-reviewer`; raise it in the LiteLLM values. A 401 means `kv/litellm` `pr_reviewer_key` is not registered with LiteLLM |
 | Deliveries time out | Pod not Ready, or the route did not attach: `kubectl -n pr-review get httproute pr-agent -o yaml` and check `status.parents` |
