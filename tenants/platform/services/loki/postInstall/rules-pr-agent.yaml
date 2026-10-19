@@ -1,6 +1,10 @@
 # PR-Agent exposes no metrics, so its logs are the only place a partial or
 # failed review shows up. Both alerts are info: they reach Discord through the
 # default route without spending an AI-SRE investigation on a review.
+#
+# They match the parsed log message, never the raw line: PR-Agent logs every
+# diff, prompt and model reply at DEBUG, so a raw-line filter fires on any PR
+# whose diff merely contains these strings -- this file included.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -14,24 +18,24 @@ data:
       - name: pr-agent-review-coverage
         interval: 5m
         rules:
-          # /review drops whole files and /improve clips its patch once a diff
+          # /review prunes files and /improve clips its patch once a diff
           # outgrows CONFIG__MAX_MODEL_TOKENS. The PR comment says so, but only
           # to whoever reads that comment; this makes a recurring gap visible.
           - alert: PRAgentReviewIncomplete
             expr: |
-              sum(count_over_time({namespace="pr-review", container="pr-agent"} |~ `because of the token budget|clipping the tokens` [1h])) > 0
+              sum by (pr_url) (count_over_time({namespace="pr-review", container="pr-agent"} | json msg="record.message", pr_url="record.extra.pr_url" | msg=~`Tokens: [0-9]+, total tokens over limit: [0-9]+, pruning diff\.|Token count [0-9]+ exceeds the limit [0-9]+\. clipping the tokens` [1h])) > 0
             labels:
               severity: info
             annotations:
-              summary: "PR-Agent reviewed only part of a PR diff"
-              description: "{{ $value }} truncated review(s) in the last hour. The diff outgrew PR-Agent's 90000-token budget (CONFIG__MAX_MODEL_TOKENS), so files were left out or the patch was clipped."
+              summary: "PR-Agent reviewed only part of {{ $labels.pr_url }}"
+              description: "The diff outgrew PR-Agent's 90000-token budget (CONFIG__MAX_MODEL_TOKENS), so /review left files out or /improve clipped the patch ({{ $value }} matching log line(s) in the last hour)."
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#pr-agent-advisory-reviewer"
           - alert: PRAgentReviewFailed
             expr: |
-              sum(count_over_time({namespace="pr-review", container="pr-agent"} |= `Failed to generate prediction with any model` [1h])) > 0
+              sum by (pr_url) (count_over_time({namespace="pr-review", container="pr-agent"} | json msg="record.message", pr_url="record.extra.pr_url" | msg=~`Failed to (review PR|generate code suggestions for PR).*` [1h])) > 0
             labels:
               severity: info
             annotations:
-              summary: "PR-Agent failed to produce a review"
-              description: "{{ $value }} review(s) lost in the last hour: every pr-reviewer route failed, or pr-reviewer and pr-reviewer-fb2 both returned output PR-Agent could not parse."
+              summary: "PR-Agent failed to review {{ $labels.pr_url }}"
+              description: "/review or /improve produced nothing: pr-reviewer and pr-reviewer-fb2 both failed, timed out or returned output PR-Agent could not parse ({{ $value }} matching log line(s) in the last hour)."
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#pr-agent-advisory-reviewer"
