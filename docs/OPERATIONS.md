@@ -1728,7 +1728,9 @@ that could re-enable it are not read. It has no permission to push and
 registers no check, so CODEOWNERS and the rulesets still gate every merge.
 Its model is LiteLLM's `pr-reviewer` route: NVIDIA NIM's Nemotron-3-Super
 first, then the local vLLM (small diffs only: its window is 32k), then NIM's
-Gemma-4-31B. None of it touches OpenRouter, whose free quota Holmes needs.
+Gemma-4-31B. None of it touches OpenRouter, whose free quota Holmes needs;
+it does share NIM's Nemotron with Holmes's last cloud fallback, capped by the
+`pr-reviewer` key's 10 requests a minute.
 PR-Agent budgets each prompt to 90000 tokens and also retries on
 `pr-reviewer-fb2` when it cannot parse Nemotron's reply.
 
@@ -1740,10 +1742,10 @@ local Qwen3-Coder caught 1/4 with three false findings. Re-run the comparison
 before swapping a model.
 
 **Incomplete or failed reviews alert.** `rules-pr-agent.yaml` (Loki ruler)
-raises `PRAgentReviewIncomplete` when a diff outgrew the 90000-token budget
-and files were left out (the PR comment also lists them), and
-`PRAgentReviewFailed` when no model produced a review. Both are `info` and
-reach Discord only.
+raises `PRAgentReviewIncomplete` per PR when a diff outgrew the 90000-token
+budget (the PR comment lists the files left out), and `PRAgentReviewFailed`
+when no model produced a review. Both match the parsed log message, because
+PR-Agent logs every diff at DEBUG. Both are `info` and reach Discord only.
 
 **Exposure.** GitHub delivers App webhooks only to a public URL, so
 `pr-agent.jdwlabs.com` is reachable from the internet through the existing
@@ -1816,5 +1818,5 @@ and PR-Agent's response code.
 |---|---|
 | Deliveries show 403 `Webhook secret not configured` | `GITHUB__WEBHOOK_SECRET` is empty: `kv/pr-agent` `webhook-secret` is missing or ESO has not synced |
 | Deliveries show 403 `signatures didn't match` | The secret in Vault differs from the one in the App settings; regenerate both from one file |
-| Delivery 200 but no comment | Check pod logs. A LiteLLM 400 from `max_tokens_ceiling_guardrail` means the prompt outgrew NIM's 128k window; lower `CONFIG__MAX_MODEL_TOKENS`. `Empty content in model response, finish_reason: length` means Nemotron's reasoning used the whole `max_tokens` on `pr-reviewer`; raise it in the LiteLLM values. A 401 means `kv/litellm` `pr_reviewer_key` is not registered with LiteLLM |
+| Delivery 200 but no comment | Check pod logs. `ContextWindowExceededError` / `maximum context length` means the prompt outgrew NIM's 128k window; lower `CONFIG__MAX_MODEL_TOKENS`. `Empty content in model response, finish_reason: length` means Nemotron's reasoning used the whole `max_tokens` on `pr-reviewer`; raise it in the LiteLLM values. A 401 means `kv/litellm` `pr_reviewer_key` is not registered with LiteLLM |
 | Deliveries time out | Pod not Ready, or the route did not attach: `kubectl -n pr-review get httproute pr-agent -o yaml` and check `status.parents` |

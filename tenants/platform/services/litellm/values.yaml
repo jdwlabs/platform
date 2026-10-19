@@ -84,9 +84,9 @@ proxy_config:
     # under it, so a model change there needs no edit to the model name here.
     # The context window is not decoupled. Two places assume 32768 tokens,
     # which must match serving.yaml's --max-model-len: the guardrail in
-    # postInstall/custom-callbacks-configmap.yaml (sre-investigator-local)
-    # and pr-reviewer-fb1's max_tokens sizing below. Update both if that
-    # changes.
+    # postInstall/custom-callbacks-configmap.yaml (sre-investigator-local and
+    # pr-reviewer-fb1) and pr-reviewer-fb1's max_tokens sizing below. Update
+    # both if that changes.
     - model_name: sre-investigator-local
       litellm_params:
         model: hosted_vllm/local-chat
