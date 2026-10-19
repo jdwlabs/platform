@@ -39,9 +39,9 @@ spec:
             - {name: GITHUB__DEPLOYMENT_TYPE, value: "app"}
             - {name: OPENAI__API_BASE, value: "http://platform-litellm.ai-sre.svc.cluster.local:4000/v1"}
             # The openai/ prefix routes through litellm's OpenAI-compatible
-            # client. LiteLLM owns the outage fallback chain; the fallback
-            # here only covers a reply PR-Agent cannot parse, which it
-            # retries on a different model and never on the same one.
+            # client. LiteLLM owns the outage fallback chain. PR-Agent moves to
+            # its own fallback on any failed call, which also covers a reply it
+            # cannot parse: LiteLLM sees that as a success and cannot retry it.
             - {name: CONFIG__MODEL, value: "openai/pr-reviewer"}
             - {name: CONFIG__FALLBACK_MODELS, value: '["openai/pr-reviewer-fb2"]'}
             # Both NIM models accept a ~120k-token prompt. Their tokenizers

@@ -55,13 +55,14 @@ data:
         "sre-investigator": 131072,
         "sre-investigator-fb1": 131072,
         "sre-investigator-fb2": 131072,
-        # 32768 must match --max-model-len in infrastructure's serving.yaml.
+        # 32768 here and for pr-reviewer-fb1 must match --max-model-len in
+        # infrastructure's serving.yaml.
         "sre-investigator-local": 32768,
         # This hook runs once, against the requested name, before the router
-        # picks a deployment -- so a pr-reviewer call is sized for NIM's
-        # window even when the local fallback ends up serving it. An
-        # over-limit request there fails vLLM's own context check and the
-        # router moves on to pr-reviewer-fb2.
+        # picks a deployment, and only for a caller that sets max_tokens.
+        # PR-Agent sets none, so its calls pass through untouched; an
+        # over-limit one fails vLLM's own context check on the local fallback
+        # and the router moves on to pr-reviewer-fb2.
         "pr-reviewer": 131072,
         "pr-reviewer-fb1": 32768,
         "pr-reviewer-fb2": 131072,
