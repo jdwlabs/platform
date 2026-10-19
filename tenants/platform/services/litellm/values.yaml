@@ -82,42 +82,48 @@ proxy_config:
     # Requests the neutral alias local-chat, not a model name: the host serves
     # whichever model infrastructure's inference/vllm/serving.yaml selects
     # under it, so a model change there needs no edit to the model name here.
-    # The context window is not decoupled. Three places assume 32768 tokens,
+    # The context window is not decoupled. Two places assume 32768 tokens,
     # which must match serving.yaml's --max-model-len: the guardrail in
-    # postInstall/custom-callbacks-configmap.yaml (sre-investigator-local and
-    # pr-reviewer), pr-reviewer's max_tokens sizing below, and
-    # CONFIG__CUSTOM_MODEL_MAX_TOKENS / CONFIG__MAX_MODEL_TOKENS in
-    # tenants/platform/services/pr-agent/postInstall/pr-agent.yaml. Update
-    # all three if that changes. PR-Agent's 20000 is not the window minus
-    # the guardrail's 6000-token margin: it is chosen to fit inside what is
-    # left after that margin and room for the answer, so re-derive it there
-    # rather than computing it from the window.
+    # postInstall/custom-callbacks-configmap.yaml (sre-investigator-local)
+    # and pr-reviewer-fb1's max_tokens sizing below. Update both if that
+    # changes.
     - model_name: sre-investigator-local
       litellm_params:
         model: hosted_vllm/local-chat
         api_base: http://192.168.1.50:8000/v1
         max_tokens: 16384
-    # PR review tier, deliberately local-first: OpenRouter's :free quota is
-    # per account, not per model name, so reviews routed there would spend
-    # the same daily allowance Holmes needs for alert investigations. NIM is its
-    # own quota pool, so it backs the local host before OpenRouter does.
-    # The ultra model is left out: its 433-600s latency outlasts a review.
+    # PR review tier, NIM-first. On a 50k-token PR with two planted bugs,
+    # Nemotron-3-Super caught both in both runs with no false findings; the
+    # local Qwen3-Coder caught one of four with three false findings, and its
+    # 32k window cannot hold a large PR at all. Every entry stays off
+    # OpenRouter: its :free quota is per account, not per model name, so
+    # reviews there would spend the allowance Holmes needs for alert
+    # investigations. The model names are fixed because the pr-reviewer
+    # virtual key is scoped to exactly these three.
     - model_name: pr-reviewer
+      litellm_params:
+        model: nvidia_nim/nvidia/nemotron-3-super-120b-a12b
+        api_key: os.environ/NVIDIA_NIM_API_KEY
+        # A reasoning model: at 4096 its thinking alone used the whole budget
+        # on a large review and returned no content (finish_reason: length).
+        max_tokens: 16384
+    # Quota-immune backstop while NIM is down. Its 32k window holds only small
+    # diffs; a larger request fails the context check and moves on to fb2.
+    - model_name: pr-reviewer-fb1
       litellm_params:
         model: hosted_vllm/local-chat
         api_base: http://192.168.1.50:8000/v1
         # Review comments are short; the rest of the 32k window is the diff.
         max_tokens: 4096
-    - model_name: pr-reviewer-fb1
-      litellm_params:
-        model: nvidia_nim/nvidia/nemotron-3-super-120b-a12b
-        api_key: os.environ/NVIDIA_NIM_API_KEY
-        max_tokens: 4096
+    # Also PR-Agent's own fallback model: Nemotron occasionally returns YAML
+    # PR-Agent cannot repair, and PR-Agent retries a failed parse only on a
+    # different model. Gemma caught one of the two planted bugs, with no false
+    # findings, in 24-41s.
     - model_name: pr-reviewer-fb2
       litellm_params:
-        model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
-        api_key: os.environ/OPENROUTER_API_KEY
-        max_tokens: 4096
+        model: nvidia_nim/google/gemma-4-31b-it
+        api_key: os.environ/NVIDIA_NIM_API_KEY
+        max_tokens: 8192
   general_settings:
     # LITELLM_MASTER_KEY is injected from the litellm-secrets ESO secret above.
     master_key: os.environ/LITELLM_MASTER_KEY

@@ -1,6 +1,6 @@
 # PR-Agent as a GitHub App: GitHub posts PR events to it through the public
 # gateway and it answers with advisory review comments generated through
-# LiteLLM's local-first pr-reviewer route. It never approves, requests
+# LiteLLM's pr-reviewer route. It never approves, requests
 # changes or pushes; merge gating stays with CODEOWNERS and the rulesets.
 apiVersion: apps/v1
 kind: Deployment
@@ -39,15 +39,20 @@ spec:
             - {name: GITHUB__DEPLOYMENT_TYPE, value: "app"}
             - {name: OPENAI__API_BASE, value: "http://platform-litellm.ai-sre.svc.cluster.local:4000/v1"}
             # The openai/ prefix routes through litellm's OpenAI-compatible
-            # client; LiteLLM owns the fallback chain, so none is set here.
+            # client. LiteLLM owns the outage fallback chain; the fallback
+            # here only covers a reply PR-Agent cannot parse, which it
+            # retries on a different model and never on the same one.
             - {name: CONFIG__MODEL, value: "openai/pr-reviewer"}
-            - {name: CONFIG__FALLBACK_MODELS, value: "[]"}
-            # LiteLLM's guardrail sizes every pr-reviewer call for the 32k
-            # local window minus its 6000-token margin and refuses, without
-            # falling back, anything that leaves no room to answer. 20000
-            # keeps PR-Agent's diff compression inside that.
-            - {name: CONFIG__CUSTOM_MODEL_MAX_TOKENS, value: "20000"}
-            - {name: CONFIG__MAX_MODEL_TOKENS, value: "20000"}
+            - {name: CONFIG__FALLBACK_MODELS, value: '["openai/pr-reviewer-fb2"]'}
+            # Both NIM models accept a ~120k-token prompt. Their tokenizers
+            # count up to ~4% more than PR-Agent's tiktoken estimate, and
+            # pr-reviewer reserves 16384 output tokens, so 90000 is what fits.
+            # A larger diff is pruned, and the comment says so.
+            - {name: CONFIG__CUSTOM_MODEL_MAX_TOKENS, value: "90000"}
+            - {name: CONFIG__MAX_MODEL_TOKENS, value: "90000"}
+            # A 50k-token review took up to 159s on NIM; the 120s default
+            # cut those off.
+            - {name: CONFIG__AI_TIMEOUT, value: "300"}
             # /describe is left out because it rewrites the PR title and
             # body, which carry the author's rationale.
             - {name: GITHUB_APP__PR_COMMANDS, value: '["/review", "/improve"]'}
