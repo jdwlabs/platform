@@ -449,3 +449,52 @@ data:
         last_seen       TIMESTAMPTZ NOT NULL,
         process_version TEXT        NOT NULL DEFAULT ''
     );
+
+  V9__minecraft_crew_work.sql: |
+    -- The crew work queue: what crew-control hands to a unit and what the unit
+    -- reports back.
+    --
+    -- crew_work holds the current state of each item, so a poll reads one row.
+    -- crew_work_event is the append-only trail of every state change, kept
+    -- separate so the current row can be updated in place without losing how it
+    -- got there. Events go with their work item on delete.
+    --
+    -- unit is the crew registry slug, not a foreign key: a unit must be
+    -- addressable before it has ever connected. kind separates long-running
+    -- tasks from one-shot commands, which share the queue and its states.
+    --
+    -- Both tables live in the existing minecraft schema on purpose: V2's
+    -- default privileges for app cover that schema, so they and the event
+    -- sequence are reachable by the runtime role with no grant here. A new
+    -- schema would need its own grants.
+    CREATE TABLE IF NOT EXISTS minecraft.crew_work
+    (
+        id           UUID        NOT NULL PRIMARY KEY,
+        unit         TEXT        NOT NULL,
+        kind         TEXT        NOT NULL CHECK (kind IN ('task', 'command')),
+        body         JSONB       NOT NULL,
+        state        TEXT        NOT NULL CHECK (state IN ('queued', 'delivered', 'running', 'done', 'failed', 'cancelled')),
+        progress     INT         NOT NULL DEFAULT 0,
+        reason       TEXT        NOT NULL DEFAULT '',
+        operator     TEXT        NOT NULL,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        delivered_at TIMESTAMPTZ
+    );
+
+    -- A unit's poll asks for its oldest work in a given state.
+    CREATE INDEX IF NOT EXISTS crew_work_unit_state_created_idx
+        ON minecraft.crew_work (unit, state, created_at);
+
+    CREATE TABLE IF NOT EXISTS minecraft.crew_work_event
+    (
+        id       BIGSERIAL   NOT NULL PRIMARY KEY,
+        work_id  UUID        NOT NULL REFERENCES minecraft.crew_work (id) ON DELETE CASCADE,
+        state    TEXT        NOT NULL,
+        progress INT         NOT NULL,
+        reason   TEXT        NOT NULL DEFAULT '',
+        at       TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS crew_work_event_work_at_idx
+        ON minecraft.crew_work_event (work_id, at);
