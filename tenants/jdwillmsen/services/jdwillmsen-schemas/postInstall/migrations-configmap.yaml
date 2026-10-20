@@ -498,3 +498,87 @@ data:
 
     CREATE INDEX IF NOT EXISTS crew_work_event_work_at_idx
         ON minecraft.crew_work_event (work_id, at);
+
+  V10__minecraft_crew_jobs.sql: |
+    -- Crew jobs and the world ledger.
+    --
+    -- crew_place names a chest or an area the crew can work with, as an
+    -- inclusive bounding box; a chest has min = max. crew_stock is the last
+    -- count a unit saw of an item at a place, so it is a ledger of
+    -- observations, not a live inventory. Stock rows go with their place.
+    --
+    -- crew_job is a goal with a deadline; crew_job_step is one unit of work
+    -- inside it. A step's template is turned into a crew_work row when its
+    -- depends_on keys are done, and work_id points back at that row. It is not
+    -- a foreign key, so work can be pruned without touching the job history.
+    -- Steps go with their job on delete.
+    --
+    -- All objects live in the existing minecraft schema on purpose: V2's
+    -- default privileges for app cover that schema, so no grant is needed here.
+    CREATE TABLE IF NOT EXISTS minecraft.crew_place
+    (
+        id         TEXT        NOT NULL PRIMARY KEY CHECK (id ~ '^[a-z][a-z0-9-]{1,31}$'),
+        name       TEXT        NOT NULL,
+        kind       TEXT        NOT NULL CHECK (kind IN ('chest', 'area')),
+        min_x      INT         NOT NULL,
+        min_y      INT         NOT NULL,
+        min_z      INT         NOT NULL,
+        max_x      INT         NOT NULL,
+        max_y      INT         NOT NULL,
+        max_z      INT         NOT NULL,
+        items      TEXT[]      NOT NULL DEFAULT '{}',
+        seeded     BOOLEAN     NOT NULL DEFAULT false,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS minecraft.crew_stock
+    (
+        place_id TEXT        NOT NULL REFERENCES minecraft.crew_place (id) ON DELETE CASCADE,
+        item     TEXT        NOT NULL,
+        count    INT         NOT NULL CHECK (count >= 0),
+        seen_at  TIMESTAMPTZ NOT NULL,
+        unit     TEXT        NOT NULL,
+        PRIMARY KEY (place_id, item)
+    );
+
+    CREATE TABLE IF NOT EXISTS minecraft.crew_job
+    (
+        id         UUID        NOT NULL PRIMARY KEY,
+        kind       TEXT        NOT NULL CHECK (kind IN ('plan', 'stock')),
+        spec       JSONB       NOT NULL,
+        state      TEXT        NOT NULL CHECK (state IN ('running', 'done', 'failed', 'cancelled')),
+        reason     TEXT        NOT NULL DEFAULT '',
+        operator   TEXT        NOT NULL,
+        round      INT         NOT NULL DEFAULT 0,
+        deadline   TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS crew_job_state_updated_idx
+        ON minecraft.crew_job (state, updated_at);
+
+    CREATE TABLE IF NOT EXISTS minecraft.crew_job_step
+    (
+        id         UUID   NOT NULL PRIMARY KEY,
+        job_id     UUID   NOT NULL REFERENCES minecraft.crew_job (id) ON DELETE CASCADE,
+        key        TEXT   NOT NULL,
+        unit       TEXT,
+        template   JSONB  NOT NULL,
+        depends_on TEXT[] NOT NULL DEFAULT '{}',
+        state      TEXT   NOT NULL CHECK (state IN ('waiting', 'queued', 'running', 'done', 'failed', 'cancelled')),
+        attempts   INT    NOT NULL DEFAULT 0,
+        work_id    UUID,
+        reason     TEXT   NOT NULL DEFAULT '',
+        UNIQUE (job_id, key)
+    );
+
+    -- Work spawned by a job points back at it; nullable because most work is
+    -- queued directly. Not foreign keys, for the same reason as work_id.
+    ALTER TABLE minecraft.crew_work
+        ADD COLUMN IF NOT EXISTS job_id  UUID,
+        ADD COLUMN IF NOT EXISTS step_id UUID;
+
+    CREATE INDEX IF NOT EXISTS crew_work_job_idx
+        ON minecraft.crew_work (job_id);
