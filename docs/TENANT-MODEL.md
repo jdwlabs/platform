@@ -16,6 +16,7 @@ A tenant is a GitHub organization (or individual developer account) that:
 |----------------|----------------|----------------------------------------------------------------------|---------------------|------------------------------|
 | jdwlabs        | jdwlabs        | `jdwlabs-non`, `jdwlabs-prd`, `jdwlabs-runners`                      | `kv/jdwlabs`        | `jdwlabs/deployments`        |
 | dotablaze-tech | dotablaze-tech | `dotablaze-tech-non`, `dotablaze-tech-prd`, `dotablaze-tech-runners` | `kv/dotablaze-tech` | `dotablaze-tech/deployments` |
+| jdwillmsen     | jdwillmsen     | `jdwillmsen-prd`                                                     | per app, e.g. `kv/minecraft-fwb` | `jdwillmsen/jdw-deployments` |
 
 ## Tenant Resources
 
