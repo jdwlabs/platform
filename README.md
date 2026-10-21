@@ -25,6 +25,7 @@ Tenant-centric Kubernetes GitOps platform managed by ArgoCD.
 |-----------------------------------------------------|-----------------------------------------------------|--------------------------------------------------------------|----------------------------------|
 | [jdwlabs](https://github.com/jdwlabs) | [jdwlabs](https://github.com/jdwlabs) | [deployments](https://github.com/jdwlabs/deployments) | Workload Tier (AI & Browser-Automation) |
 | [dotablaze-tech](https://github.com/dotablaze-tech) | [dotablaze-tech](https://github.com/dotablaze-tech) | [deployments](https://github.com/dotablaze-tech/deployments) | Workload Tier (Distributed Services) |
+| [jdwillmsen](https://github.com/jdwillmsen) | [jdwillmsen](https://github.com/jdwillmsen) | [jdw-deployments](https://github.com/jdwillmsen/jdw-deployments) | Workload Tier (Personal: Game Servers) |
 | [platform](https://github.com/jdwlabs/platform) | [jdwlabs](https://github.com/jdwlabs) | [platform](https://github.com/jdwlabs/platform) | Infrastructure Tier (Core Governance) |
 
 ## Quick Links
