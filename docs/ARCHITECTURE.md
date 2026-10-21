@@ -4,6 +4,36 @@
 
 `jdwlabs/platform` is a tenant-centric GitOps platform managing Kubernetes applications via ArgoCD. It enforces tenant boundaries, namespace isolation, and standardized resource controls.
 
+## Layer model
+
+The lab is split into four layers. Each has one job, and a layer can change
+without the layers above it noticing: infrastructure could move from owned
+hardware to a cloud provider and tenants would not change.
+
+| Layer | Job | Repos |
+|---|---|---|
+| Infrastructure | The lab's own cloud provider: a control plane that provisions compute and clusters on whatever hardware is underneath | `jdwlabs/infrastructure` |
+| Platform | The managed layer on top, comparable to a managed Kubernetes service: a security baseline every tenant inherits, plus shared services | `jdwlabs/platform` (this repo) |
+| Delivery | Each tenant's GitOps declaration of what runs in its namespaces, kept apart from application code | one deployments repo per tenant |
+| Applications | The software being built; it produces images and never deploys itself | one or more app repos per tenant |
+
+Platform and Infrastructure are shared. Delivery and Applications belong to a
+tenant, and the tenant boundary sits between them and the platform.
+
+**Baseline a tenant inherits** from `helm-charts/tenant-envelope`, without
+configuring it: an ArgoCD AppProject scoped to its own repos and namespaces,
+Pod Security Standards labels on each namespace, network policies (default
+deny once the namespace sets `enforce: true`), resource quotas, limit ranges,
+priority classes, and its slice of the observability stack.
+
+**Shared services** live under `tenants/platform/services/`: certificates,
+secrets (Vault and External Secrets), PostgreSQL clusters, persistent storage, the ingress gateway, and metrics, logs, traces, dashboards and
+alerting.
+
+Where a change belongs: hardware or cluster lifecycle goes to infrastructure;
+anything every tenant should get goes here; what one tenant runs goes to its
+deployments repo; how the software behaves goes to its app repo.
+
 ## Repository Layout
 
 ```
