@@ -42,8 +42,8 @@ podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
 
-# Applied to the gateway container and to the db-ready init container alike, so
-# it has to hold for both images. Neither a uid nor a sealed root filesystem is
+# Applied to the gateway container only; the db-ready init container has its
+# own, stricter one under `db`. Neither a uid nor a sealed root filesystem is
 # set: the gateway image declares USER root and its entrypoint runs prisma
 # against its own application directory, so overriding either would leave the
 # container unable to start. Capability and privilege-escalation limits carry no
@@ -165,6 +165,20 @@ db:
       memory: 16Mi
     limits:
       memory: 64Mi
+
+  # The wait container only runs psql, and the bitnami image is built for
+  # uid 1001, so unlike the gateway beside it (which declares USER root and
+  # lets prisma write into its own application directory) it can be sealed.
+  # /tmp is the only path it writes, mounted as an emptyDir.
+  dbReadySecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    capabilities:
+      drop:
+        - ALL
 
   # How to connect to the existing postgres server/cluster
   endpoint: localhost

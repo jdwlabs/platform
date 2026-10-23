@@ -42,7 +42,7 @@ spec:
       initContainers:
         - name: db-ready
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+            {{- toYaml .Values.db.dbReadySecurityContext | nindent 12 }}
           image: "{{ .Values.db.dbReadyImage }}:{{ .Values.db.dbReadyTag | default "16.1.0-debian-11-r20" }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- with .Values.db.dbReadyResources }}
@@ -101,11 +101,9 @@ spec:
               else
                 echo "Database failed to become ready before we gave up waiting."
               fi
-          {{ if .Values.securityContext.readOnlyRootFilesystem }}
           volumeMounts:
-            - name: tmp
+            - name: db-ready-tmp
               mountPath: /tmp
-          {{ end }}
       containers:
         - name: {{ include "litellm.name" . }}
           securityContext:
@@ -211,6 +209,9 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
+        - name: db-ready-tmp
+          emptyDir:
+            sizeLimit: 16Mi
         {{ if .Values.securityContext.readOnlyRootFilesystem }}
         - name: tmp
           emptyDir:
