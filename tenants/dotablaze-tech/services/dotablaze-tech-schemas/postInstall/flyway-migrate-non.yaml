@@ -12,12 +12,15 @@ spec:
   template:
     spec:
       restartPolicy: Never
-      # Capability and seccomp restrictions only, deliberately. The image
-      # declares no user and its JVM owns paths under /flyway, so pinning a uid
-      # or sealing the root filesystem risks a container that never starts --
-      # and this Job is a sync hook against a production database, where that
-      # failure blocks the sync rather than degrading quietly.
+      # The image declares no user, so a numeric uid is pinned for runAsNonRoot
+      # (a name cannot be verified by the kubelet). The migrations are read
+      # from a ConfigMap mount and the JVM's only scratch space is /tmp, so
+      # the root filesystem is sealed with an emptyDir there; both were run
+      # against the pinned image with a read-only root before this was set.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -27,6 +30,7 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+            readOnlyRootFilesystem: true
           # The ceiling is well above what a schema migration needs so the
           # JVM is bounded without risking an OOM kill mid-migration -- this
           # Job is a sync hook against a live database, where a killed
@@ -62,7 +66,12 @@ spec:
           volumeMounts:
             - mountPath: /flyway/sql
               name: migrations
+            - mountPath: /tmp
+              name: tmp
       volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
         - name: migrations
           configMap:
             name: dotablaze-tech-migrations
