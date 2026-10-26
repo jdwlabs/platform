@@ -582,3 +582,171 @@ data:
 
     CREATE INDEX IF NOT EXISTS crew_work_job_idx
         ON minecraft.crew_work (job_id);
+  V11__minecraft_crew_events.sql: |
+    -- The crew unit event stream: the durable counterpart of the console's
+    -- fleet feed.
+    --
+    -- The feed lives in memory, 200 events deep, and is lost on every restart;
+    -- history cannot be filtered, sorted or replayed. crew_event is the
+    -- append-only record of what a unit did and what happened to it, written by
+    -- crew-control as it derives events from polling the units.
+    --
+    -- Repeated idle polls are not one row each: a unit that finds nothing to do
+    -- many times a minute is stored as one idle_rollup row whose payload holds
+    -- the count and the last poll's time. Without that rule most of the table
+    -- would be no-ops.
+    --
+    -- kind is deliberately not a CHECK: the list grows, and a constraint would
+    -- need a migration per addition. crew-control owns the vocabulary and the
+    -- store writes only what it accepted. severity is constrained, because the
+    -- console's colouring and toasts have a fixed vocabulary.
+    --
+    -- unit is the crew registry slug, not a foreign key, like crew_work's: a unit
+    -- must be addressable before it has ever connected. task_id and job_id are not
+    -- foreign keys either, for the same reason as crew_job_step.work_id: events
+    -- must outlive, or predate, the rows they name.
+    --
+    -- at is timestamptz, so the instant is stored UTC and read back in whatever
+    -- zone the console asks for. x, y and z are nullable: an offline event happens
+    -- nowhere in particular. payload is a JSON object for the kind's own detail.
+    --
+    -- All objects live in the existing minecraft schema on purpose: V2's default
+    -- privileges for app cover that schema, so no grant is needed here.
+    CREATE TABLE IF NOT EXISTS minecraft.crew_event
+    (
+        id       BIGINT           NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        unit     TEXT             NOT NULL,
+        at       TIMESTAMPTZ      NOT NULL DEFAULT now(),
+        kind     TEXT             NOT NULL,
+        severity TEXT             NOT NULL CHECK (severity IN ('ok', 'info', 'warn', 'crit')),
+        task_id  UUID,
+        job_id   UUID,
+        x        DOUBLE PRECISION,
+        y        DOUBLE PRECISION,
+        z        DOUBLE PRECISION,
+        payload  JSONB            NOT NULL DEFAULT '{}'::jsonb
+    );
+
+    -- One index per console query shape: a unit's history, a kind across the
+    -- fleet, one severity's slice, and the unfiltered stream (which also serves
+    -- the retention delete). Each ends in (at, id) because the query pages by
+    -- keyset on that pair: the cursor comparison and the ORDER BY are then both
+    -- answered by one index scan in either direction, with no sort step.
+    CREATE INDEX IF NOT EXISTS crew_event_unit_at_idx
+        ON minecraft.crew_event (unit, at, id);
+    CREATE INDEX IF NOT EXISTS crew_event_kind_at_idx
+        ON minecraft.crew_event (kind, at, id);
+    CREATE INDEX IF NOT EXISTS crew_event_severity_at_idx
+        ON minecraft.crew_event (severity, at, id);
+    CREATE INDEX IF NOT EXISTS crew_event_at_idx
+        ON minecraft.crew_event (at, id);
+  V12__minecraft_crew_event_analytics.sql: |
+    -- The analytic columns of crew_event: why a task ended, how long it took, which
+    -- session and crew build it ran under, and the earlier event that explains it.
+    --
+    -- They were left out of V11 because the first slice stored only what the live
+    -- feed shows. The explorer and the insight rules filter on them, so they are
+    -- columns rather than payload keys: a filter on a JSONB key would scan, and a
+    -- CHECK catches a writer that invents an outcome.
+    --
+    -- Additive only, and every column is nullable: rows written before this
+    -- migration, and events of kinds these do not describe, leave them null.
+    -- Nothing is rewritten or dropped.
+    --
+    -- cause_ref names another crew_event row but is not a foreign key, for the
+    -- reason task_id is not one: pruning removes old rows, and a link to a pruned
+    -- cause must read as a dangling id, not block the delete.
+    ALTER TABLE minecraft.crew_event
+        ADD COLUMN IF NOT EXISTS reason_code  TEXT,
+        ADD COLUMN IF NOT EXISTS duration_ms  INTEGER,
+        ADD COLUMN IF NOT EXISTS attempt      INTEGER,
+        ADD COLUMN IF NOT EXISTS session_id   TEXT,
+        ADD COLUMN IF NOT EXISTS crew_version TEXT,
+        ADD COLUMN IF NOT EXISTS cause_ref    BIGINT,
+        ADD COLUMN IF NOT EXISTS outcome      TEXT;
+
+    DO
+    $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1
+                           FROM pg_constraint
+                           WHERE conname = 'crew_event_outcome_check'
+                             AND conrelid = 'minecraft.crew_event'::regclass) THEN
+                ALTER TABLE minecraft.crew_event
+                    ADD CONSTRAINT crew_event_outcome_check CHECK (outcome IN ('ok', 'noop', 'failed'));
+            END IF;
+        END
+    $$;
+
+    -- Partial indexes: most rows carry none of these, so an index over every row
+    -- would be mostly nulls. Each ends in (at, id) like V11's, for keyset paging.
+    CREATE INDEX IF NOT EXISTS crew_event_reason_at_idx
+        ON minecraft.crew_event (reason_code, at, id) WHERE reason_code IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS crew_event_outcome_at_idx
+        ON minecraft.crew_event (outcome, at, id) WHERE outcome IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS crew_event_session_at_idx
+        ON minecraft.crew_event (session_id, at, id) WHERE session_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS crew_event_cause_idx
+        ON minecraft.crew_event (cause_ref, at, id) WHERE cause_ref IS NOT NULL;
+  V13__minecraft_crew_alerts.sql: |
+    -- Alert state that survives a restart: which alerts are firing, and which are
+    -- acknowledged or muted.
+    --
+    -- The engine keeps this in memory, so a restart used to forget every
+    -- acknowledgement and mute and re-announce whatever was still wrong. One row
+    -- per alert id (rule.unit); the engine's saver rewrites the set whenever it
+    -- changes, and the engine reads it back once at start.
+    --
+    -- No coordinates and no operator identity: the alert already carries neither,
+    -- so the public console may show it.
+    --
+    -- The table is a snapshot of the engine's list, not a history; events carry
+    -- the history. Rows for alerts that left the list are deleted by the saver.
+    CREATE TABLE IF NOT EXISTS minecraft.crew_alert
+    (
+        id          TEXT        NOT NULL PRIMARY KEY,
+        rule        TEXT        NOT NULL,
+        unit        TEXT        NOT NULL,
+        name        TEXT        NOT NULL DEFAULT '',
+        severity    TEXT        NOT NULL CHECK (severity IN ('warn', 'crit')),
+        state       TEXT        NOT NULL CHECK (state IN ('firing', 'resolved')),
+        text        TEXT        NOT NULL DEFAULT '',
+        since       TIMESTAMPTZ NOT NULL,
+        resolved_at TIMESTAMPTZ,
+        acked       BOOLEAN     NOT NULL DEFAULT false,
+        muted_until TIMESTAMPTZ,
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  V14__minecraft_crew_position.sql: |
+    -- Where units stood, sampled coarsely, so the console can replay a past
+    -- window on a top-down map.
+    --
+    -- Separate from crew_event on purpose: a position every couple of seconds per
+    -- moving unit would outnumber every other event kind many times over and slow
+    -- the explorer, the analytics and the retention delete that share that table.
+    -- crew-control stores a row only when a unit moved or after a keepalive, and
+    -- the console interpolates between rows.
+    --
+    -- unit is the crew registry slug, not a foreign key, like crew_event's. Only
+    -- the overworld is recorded, so there is no dimension column. Rows are
+    -- operator-only data: no route that serves them to a signed-out reader exists.
+    -- Retention matches crew_event's and is enforced by crew-control's prune job.
+    --
+    -- All objects live in the existing minecraft schema, so V2's default
+    -- privileges for app already cover them.
+    CREATE TABLE IF NOT EXISTS minecraft.crew_position
+    (
+        id   BIGINT           NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        unit TEXT             NOT NULL,
+        at   TIMESTAMPTZ      NOT NULL,
+        x    DOUBLE PRECISION NOT NULL,
+        y    DOUBLE PRECISION NOT NULL,
+        z    DOUBLE PRECISION NOT NULL
+    );
+
+    -- Both read shapes page by keyset on (at, id): the whole fleet over a range,
+    -- and one unit over a range. The first also serves the retention delete.
+    CREATE INDEX IF NOT EXISTS crew_position_at_idx
+        ON minecraft.crew_position (at, id);
+    CREATE INDEX IF NOT EXISTS crew_position_unit_at_idx
+        ON minecraft.crew_position (unit, at, id);
