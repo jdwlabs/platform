@@ -76,11 +76,21 @@ spec:
     - name: node-capacity
       rules:
         - alert: NodeMemoryHigh
-          expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.85
+          expr: (1 - (node_memory_MemAvailable_bytes{job!="pve-node"} / node_memory_MemTotal_bytes{job!="pve-node"})) > 0.85
           for: 10m
           labels:
             severity: warning
           annotations:
             summary: "Node {{ $labels.instance }} memory above 85%"
             description: "Node {{ $labels.instance }} memory is {{ $value | humanizePercentage }}; tight memory amplifies storage/manager OOM cascades."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+        # Hypervisors run guest memory as anonymous pages and sit at 86-89% by design, so they get their own, higher threshold.
+        - alert: HypervisorMemoryHigh
+          expr: (1 - (node_memory_MemAvailable_bytes{job="pve-node"} / node_memory_MemTotal_bytes{job="pve-node"})) > 0.95
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Hypervisor {{ $labels.instance }} memory above 95%"
+            description: "Proxmox host {{ $labels.instance }} memory is {{ $value | humanizePercentage }}; guest VMs may start swapping or be OOM-killed."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
