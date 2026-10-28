@@ -119,7 +119,7 @@ services:
   - name: argo-cd
     chart: argo-cd
     repo: https://argoproj.github.io/argo-helm
-    revision: 10.11.1
+    revision: 10.10.5
     namespace: argocd
     postInstall: true
     syncWave: 0
