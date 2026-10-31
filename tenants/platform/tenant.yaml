@@ -269,7 +269,7 @@ services:
   - name: monitoring
     chart: k8s-monitoring
     repo: https://grafana.github.io/helm-charts
-    revision: 4.5.5
+    revision: 4.6.0
     namespace: monitoring
     postInstall: false
     syncWave: 2
@@ -277,7 +277,7 @@ services:
   - name: grafana
     chart: grafana
     repo: https://grafana-community.github.io/helm-charts
-    revision: 14.0.1
+    revision: 14.2.0
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -298,7 +298,7 @@ services:
   - name: kube-prometheus-stack
     chart: kube-prometheus-stack
     repo: https://prometheus-community.github.io/helm-charts
-    revision: "92.13.1"
+    revision: "92.16.1"
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -389,7 +389,7 @@ services:
   - name: reloader
     chart: reloader
     repo: https://stakater.github.io/stakater-charts
-    revision: 2.2.18
+    revision: 2.2.19
     namespace: reloader
     postInstall: false
     syncWave: 2
