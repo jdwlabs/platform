@@ -46,3 +46,6 @@ notVendored:
   xmeshes.gateway.networking.x-k8s.io: >-
     Experimental x-k8s.io kind for mesh conformance; this cluster runs no
     service mesh.
+  xtelemetrypolicies.gateway.networking.x-k8s.io: >-
+    Experimental x-k8s.io kind with no consumer here; its API can change
+    between minors, so adopting it is a decision of its own.
