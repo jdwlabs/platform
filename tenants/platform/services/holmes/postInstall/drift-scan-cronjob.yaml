@@ -105,7 +105,10 @@ spec:
                   - restart-spike: a container that restarted 3 or more times
                     in the last hour. A high lifetime restart count on an old
                     pod is NOT a spike; use increase() over the last hour.
-                  - node-memory: a node with more than 90% of memory in use.
+                  - node-memory: a Kubernetes node (job node-exporter) with more
+                    than 90% of memory in use by MemAvailable. Ignore the Proxmox
+                    hosts pve1-pve5: ZFS ARC is reclaimable cache that MemAvailable
+                    does not count, so they sit near 90% by design.
                   - tls-expiry: a cert-manager Certificate expiring within 30 days.
                   Report each condition you confirmed on its own final line,
                   in exactly this form, after all other text:
@@ -142,7 +145,10 @@ spec:
                   prom=http://platform-kube-prometheus-s-prometheus.monitoring.svc.cluster.local:9090
                   q_pending='count(kube_pod_status_phase{phase="Pending"} == 1 and on (namespace, pod) (time() - kube_pod_created) > 300) or vector(0)'
                   q_restart='count(increase(kube_pod_container_status_restarts_total[1h]) >= 3) or vector(0)'
-                  q_memory='count((1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.9) or vector(0)'
+                  # job="node-exporter" is the Kubernetes nodes only. The Proxmox
+                  # hosts (job pve-node) run ZFS, whose ARC cache is excluded from
+                  # MemAvailable, so they read ~90% used with no swap and no OOMs.
+                  q_memory='count((1 - node_memory_MemAvailable_bytes{job="node-exporter"} / node_memory_MemTotal_bytes{job="node-exporter"}) > 0.9) or vector(0)'
                   q_tls='count(certmanager_certificate_expiration_timestamp_seconds - time() < 30 * 86400) or vector(0)'
 
                   # Prints the scalar result, or nothing when Prometheus could
