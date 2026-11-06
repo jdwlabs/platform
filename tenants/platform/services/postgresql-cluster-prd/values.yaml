@@ -1,11 +1,10 @@
-# cluster:
-#  storage:
-#    size: 6Gi
-#    storageClass: "openebs-single-replica"
-
 externalClusters: []
 
 cluster:
+  # Headroom for WAL retained by a lagging replica slot; a PVC can grow but never shrink.
+  storage:
+    size: 16Gi
+
   monitoring:
     enabled: true
     podMonitor:
