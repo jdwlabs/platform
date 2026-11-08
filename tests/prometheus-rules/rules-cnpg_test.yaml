@@ -1,0 +1,118 @@
+# Unit tests for CNPGReplicationSlotInactive.
+#
+# The series shapes are the live ones: CNPG mirrors each HA slot onto every
+# standby, and those copies report active=0 for as long as they exist. The
+# rule is only usable if it ignores them, so most cases below are about
+# staying silent.
+rule_files:
+  - rules/cnpg-rules.yaml
+evaluation_interval: 1m
+tests:
+  # Steady state on a three-instance cluster: the primary's slots are both
+  # streaming, and each standby holds an inactive copy of its sibling's slot.
+  - interval: 1m
+    name: healthy cluster with mirrored standby slots is silent
+    input_series:
+      - series: 'cnpg_pg_replication_slots_active{namespace="database",pod="platform-postgresql-cluster-prd-10",slot_name="_cnpg_platform_postgresql_cluster_prd_1",slot_type="physical"}'
+        values: '1+0x180'
+      - series: 'cnpg_pg_replication_slots_active{namespace="database",pod="platform-postgresql-cluster-prd-10",slot_name="_cnpg_platform_postgresql_cluster_prd_6",slot_type="physical"}'
+        values: '1+0x180'
+      - series: 'cnpg_pg_replication_slots_active{namespace="database",pod="platform-postgresql-cluster-prd-1",slot_name="_cnpg_platform_postgresql_cluster_prd_6",slot_type="physical"}'
+        values: '0+0x180'
+      - series: 'cnpg_pg_replication_slots_active{namespace="database",pod="platform-postgresql-cluster-prd-6",slot_name="_cnpg_platform_postgresql_cluster_prd_1",slot_type="physical"}'
+        values: '0+0x180'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+0x180'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-1"}'
+        values: '1+0x180'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-6"}'
+        values: '1+0x180'
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: CNPGReplicationSlotInactive
+        exp_alerts: []
+
+  # A replica restart or node drain: its slot goes inactive for a quarter of
+  # an hour, then the replica streams again.
+  - interval: 1m
+    name: short replica outage is silent
+    input_series:
+      - series: 'cnpg_pg_replication_slots_active{namespace="database",pod="platform-postgresql-cluster-prd-10",slot_name="_cnpg_platform_postgresql_cluster_prd_1",slot_type="physical"}'
+        values: '1+0x30 0+0x15 1+0x60'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+0x105'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: CNPGReplicationSlotInactive
+        exp_alerts: []
+      - eval_time: 105m
+        alertname: CNPGReplicationSlotInactive
+        exp_alerts: []
+
+  # The 2026-11-06 shape: replica -11 died and its slot on the primary stayed
+  # inactive for a day and a half while the standby copies sat at 0 as usual.
+  - interval: 1m
+    name: dead replica slot on the primary fires after thirty minutes
+    input_series:
+      - series: 'cnpg_pg_replication_slots_active{namespace="database",pod="platform-postgresql-cluster-prd-10",slot_name="_cnpg_platform_postgresql_cluster_prd_11",slot_type="physical"}'
+        values: '0+0x600'
+      - series: 'cnpg_pg_replication_slots_active{namespace="database",pod="platform-postgresql-cluster-prd-10",slot_name="_cnpg_platform_postgresql_cluster_prd_6",slot_type="physical"}'
+        values: '1+0x600'
+      - series: 'cnpg_pg_replication_slots_active{namespace="database",pod="platform-postgresql-cluster-prd-6",slot_name="_cnpg_platform_postgresql_cluster_prd_11",slot_type="physical"}'
+        values: '0+0x600'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+0x600'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-6"}'
+        values: '1+0x600'
+    alert_rule_test:
+      - eval_time: 29m
+        alertname: CNPGReplicationSlotInactive
+        exp_alerts: []
+      - eval_time: 31m
+        alertname: CNPGReplicationSlotInactive
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: database
+              cnpg_cluster: platform-postgresql-cluster-prd
+              pod: platform-postgresql-cluster-prd-10
+              slot_name: _cnpg_platform_postgresql_cluster_prd_11
+              slot_type: physical
+            exp_annotations:
+              summary: "Replication slot _cnpg_platform_postgresql_cluster_prd_11 on platform-postgresql-cluster-prd-10 has been inactive for 30m"
+              description: >-
+                Slot _cnpg_platform_postgresql_cluster_prd_11 (physical) on primary platform-postgresql-cluster-prd-10 has had no
+                consumer for 30 minutes and is retaining WAL. A `_cnpg_` slot names the replica that stopped
+                streaming: check that instance's pod and its CNPGInstanceMetricsAbsent / CNPGClusterHA* alerts.
+                Retained WAL is capped by max_slot_wal_keep_size (4GB, about 20h of idle WAL); past it the slot
+                is invalidated and the replica must be recloned, as there is no WAL archive to catch up from. A
+                slot that is not CNPG's own is a client that went away: drop it if nothing will reconnect.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#3-postgresql-operations"
+
+  # After a failover the old primary rejoins as a standby. Its slots become
+  # mirrored copies, so the alert must follow the role, not the pod name.
+  - interval: 1m
+    name: inactive slot on a demoted primary is silent
+    input_series:
+      - series: 'cnpg_pg_replication_slots_active{namespace="database",pod="platform-postgresql-cluster-prd-10",slot_name="_cnpg_platform_postgresql_cluster_prd_1",slot_type="physical"}'
+        values: '0+0x120'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '1+0x120'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: CNPGReplicationSlotInactive
+        exp_alerts: []
+
+  # The rule is scoped to prd. The non-prd cluster runs one instance, so it
+  # has no HA slots, and nothing there is worth a warning.
+  - interval: 1m
+    name: inactive slot on the non-prd cluster is silent
+    input_series:
+      - series: 'cnpg_pg_replication_slots_active{namespace="database",pod="platform-postgresql-cluster-non-3",slot_name="debezium",slot_type="logical"}'
+        values: '0+0x120'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-non-3"}'
+        values: '0+0x120'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: CNPGReplicationSlotInactive
+        exp_alerts: []

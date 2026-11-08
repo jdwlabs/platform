@@ -168,6 +168,16 @@ cases:
       severity: warning
     receivers: ['ai-sre']
 
+  # Early warning, about a day ahead of the slot being invalidated; a replica
+  # that is actually gone already pages through CNPGInstanceMetricsAbsent.
+  - name: inactive prd replication slot reaches the agent only
+    labels:
+      alertname: CNPGReplicationSlotInactive
+      severity: warning
+      namespace: database
+      cnpg_cluster: platform-postgresql-cluster-prd
+    receivers: ['ai-sre']
+
   # Tenant routes own their tenant's alerts at every severity, which is what
   # keeps them free to point at a per-tenant channel later.
   - name: jdwlabs warning reaches the agent and the tenant route

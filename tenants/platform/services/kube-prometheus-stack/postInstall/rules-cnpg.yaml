@@ -78,3 +78,36 @@ spec:
               ready standby replicas, putting the cluster at risk if another
               instance fails.
             runbook_url: "https://github.com/cloudnative-pg/charts/blob/main/charts/cluster/docs/runbooks/CNPGClusterHAWarning.md"
+    # An inactive slot pins WAL until its consumer returns. On 2026-11-06 the
+    # slot of a dead prd replica did so for ~34h until the volume filled and
+    # prd stopped taking writes; the cluster's max_slot_wal_keep_size now
+    # bounds that, but the slot is then invalidated and the replica has to be
+    # recovered, so it is worth knowing about long before either happens.
+    # Primary only: CNPG mirrors every HA slot onto each standby, where the
+    # copies are always inactive, so an unscoped `active == 0` never clears.
+    - name: cnpg-slots-postgresql-cluster-prd
+      rules:
+        - alert: CNPGReplicationSlotInactive
+          expr: |
+            (
+              cnpg_pg_replication_slots_active{namespace="database", pod=~"platform-postgresql-cluster-prd-([1-9][0-9]*)$"} == 0
+            )
+            and on (namespace, pod)
+            (
+              cnpg_pg_replication_in_recovery{namespace="database", pod=~"platform-postgresql-cluster-prd-([1-9][0-9]*)$"} == 0
+            )
+          for: 30m
+          labels:
+            severity: warning
+            namespace: database
+            cnpg_cluster: platform-postgresql-cluster-prd
+          annotations:
+            summary: "Replication slot {{ $labels.slot_name }} on {{ $labels.pod }} has been inactive for 30m"
+            description: >-
+              Slot {{ $labels.slot_name }} ({{ $labels.slot_type }}) on primary {{ $labels.pod }} has had no
+              consumer for 30 minutes and is retaining WAL. A `_cnpg_` slot names the replica that stopped
+              streaming: check that instance's pod and its CNPGInstanceMetricsAbsent / CNPGClusterHA* alerts.
+              Retained WAL is capped by max_slot_wal_keep_size (4GB, about 20h of idle WAL); past it the slot
+              is invalidated and the replica must be recloned, as there is no WAL archive to catch up from. A
+              slot that is not CNPG's own is a client that went away: drop it if nothing will reconnect.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#3-postgresql-operations"
