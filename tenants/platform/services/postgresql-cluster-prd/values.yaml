@@ -5,6 +5,20 @@ cluster:
   storage:
     size: 16Gi
 
+  postgresql:
+    parameters:
+      # Caps the WAL a replication slot may pin; PostgreSQL's default (-1) is
+      # unbounded, which let a dead replica's slot fill the 8Gi volume and stop
+      # prd writes on 2026-11-06. archive_timeout forces a 16MB segment every
+      # 5 minutes even when idle (~200MB/h observed), so 4GB holds about 20h
+      # of an absent replica: pg_wal tops out near 4GB + max_wal_size, well
+      # inside 16Gi. Past the cap PostgreSQL invalidates the slot instead of
+      # filling the disk, and that replica has to be recloned: no backup
+      # target is configured, so CNPG's archive_command succeeds without
+      # archiving anything (ContinuousArchiving=True notwithstanding) and
+      # there is no archive to catch up from. Reloadable (sighup).
+      max_slot_wal_keep_size: 4GB
+
   monitoring:
     enabled: true
     podMonitor:
