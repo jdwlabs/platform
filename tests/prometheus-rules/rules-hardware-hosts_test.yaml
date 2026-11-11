@@ -332,3 +332,180 @@ tests:
                 `systemctl status prometheus-node-exporter` on the host and that
                 it listens on the LAN address. See runbook.
               runbook_url: "https://github.com/jdwlabs/infrastructure/blob/main/scenarios/pve-node-exporter-install.md"
+
+  # The chronic-heat tier, on the readings that motivated it: pve1 at its 6h
+  # average of 84C fires, its siblings at their ordinary 53C do not, and pve5
+  # at the top of its healthy range stays under the line. TrueNAS arrives
+  # through a different metric and must come out under the same `host`
+  # label, once, even with a second exporter pod's series overlapping.
+  - interval: 1m
+    name: a host averaging 80C or more over 6h fires the chronic-heat warning
+    input_series:
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="pci0000:00_0000:00:18_3",sensor="temp1"}'
+        values: '90 78 90 78 84+0x376'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="pci0000:00_0000:00:18_3",chip_name="k10temp"}'
+        values: '1+0x380'
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.201:9100",host="pve2",chip="pci0000:00_0000:00:18_3",sensor="temp1"}'
+        values: '53+0x380'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.201:9100",host="pve2",chip="pci0000:00_0000:00:18_3",chip_name="k10temp"}'
+        values: '1+0x380'
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.204:9100",host="pve5",chip="pci0000:00_0000:00:18_3",sensor="temp1"}'
+        values: '78+0x380'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.204:9100",host="pve5",chip="pci0000:00_0000:00:18_3",chip_name="k10temp"}'
+        values: '1+0x380'
+      - series: 'truenas_cpu_temperature_celsius{job="truenas-graphite-exporter",host="truenas",sensor="package",pod="truenas-graphite-exporter-a"}'
+        values: '82+0x380'
+      - series: 'truenas_cpu_temperature_celsius{job="truenas-graphite-exporter",host="truenas",sensor="package",pod="truenas-graphite-exporter-b"}'
+        values: '_x300 82+0x80'
+    alert_rule_test:
+      - eval_time: 370m
+        alertname: HardwareHostTemperatureElevated
+        exp_alerts:
+          - exp_labels:
+              host: pve1
+              severity: warning
+            exp_annotations:
+              summary: "Host pve1 CPU averaged 84C over 6h"
+              description: >-
+                The CPU on pve1 has averaged 80C or more for 6
+                hours. That is chronic heat, not load: the cooling path (fan,
+                dust, thermal paste, airflow) is degraded. A Proxmox host in this
+                state has powered off without a log at 85-88C, below every trip
+                point, so act on this before the critical tier. See runbook.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+          - exp_labels:
+              host: truenas
+              severity: warning
+            exp_annotations:
+              summary: "Host truenas CPU averaged 82C over 6h"
+              description: >-
+                The CPU on truenas has averaged 80C or more for 6
+                hours. That is chronic heat, not load: the cooling path (fan,
+                dust, thermal paste, airflow) is degraded. A Proxmox host in this
+                state has powered off without a log at 85-88C, below every trip
+                point, so act on this before the critical tier. See runbook.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      # Never above 90 for long enough, so neither acute tier joins in.
+      - eval_time: 370m
+        alertname: HardwareHostTemperatureHigh
+        exp_alerts: []
+
+  # A host back from a power-off has only minutes of history; a 6h average of
+  # those minutes is a reading, not a trend.
+  - interval: 1m
+    name: a hot host with under 300 samples of history stays silent on chronic heat
+    input_series:
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="pci0000:00_0000:00:18_3",sensor="temp1"}'
+        values: '_x100 86+0x320'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="pci0000:00_0000:00:18_3",chip_name="k10temp"}'
+        values: '1+0x420'
+    alert_rule_test:
+      - eval_time: 370m
+        alertname: HardwareHostTemperatureElevated
+        exp_alerts: []
+      - eval_time: 400m
+        alertname: HardwareHostTemperatureElevated
+        exp_alerts:
+          - exp_labels:
+              host: pve1
+              severity: warning
+            exp_annotations:
+              summary: "Host pve1 CPU averaged 86C over 6h"
+              description: >-
+                The CPU on pve1 has averaged 80C or more for 6
+                hours. That is chronic heat, not load: the cooling path (fan,
+                dust, thermal paste, airflow) is degraded. A Proxmox host in this
+                state has powered off without a log at 85-88C, below every trip
+                point, so act on this before the critical tier. See runbook.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # Only the NVMe Composite reading counts: the drive's hotter Sensor 2, the
+  # CPU and a NIC are all on node_hwmon_temp_celsius too, and none of them is
+  # what the drive's limits are written against.
+  - interval: 1m
+    name: an NVMe Composite averaging 75C or more fires and nothing else does
+    input_series:
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="nvme_nvme0",sensor="temp1"}'
+        values: '82 70 82 70 82 70 82 70 82 70 82 70 82 70 82 70'
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="nvme_nvme0",sensor="temp3"}'
+        values: '85+0x15'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="nvme_nvme0",chip_name="nvme"}'
+        values: '1+0x15'
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.201:9100",host="pve2",chip="nvme_nvme0",sensor="temp1"}'
+        values: '70+0x15'
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.201:9100",host="pve2",chip="nvme_nvme0",sensor="temp3"}'
+        values: '80+0x15'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.201:9100",host="pve2",chip="nvme_nvme0",chip_name="nvme"}'
+        values: '1+0x15'
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.201:9100",host="pve2",chip="pci0000:00_0000:00:18_3",sensor="temp1"}'
+        values: '88+0x15'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.201:9100",host="pve2",chip="pci0000:00_0000:00:18_3",chip_name="k10temp"}'
+        values: '1+0x15'
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.201:9100",host="pve2",chip="r8169_0_100_r8169_0_100:00",sensor="temp1"}'
+        values: '90+0x15'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.201:9100",host="pve2",chip="r8169_0_100_r8169_0_100:00",chip_name="r8169_0_100:00"}'
+        values: '1+0x15'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: HardwareHostNvmeTemperatureHigh
+        exp_alerts:
+          - exp_labels:
+              job: pve-node
+              instance: "192.168.1.200:9100"
+              host: pve1
+              chip: nvme_nvme0
+              sensor: temp1
+              severity: warning
+            exp_annotations:
+              summary: "Host pve1 NVMe nvme_nvme0 averaging 76C over 10m"
+              description: >-
+                The NVMe drive nvme_nvme0 on pve1 has
+                averaged 75C or more (Composite) for 10 minutes, 9-15 degrees
+                under the drive's own warning limit, where it starts to
+                throttle; its critical limit shuts it down. Check airflow over the drive and
+                the host's CPU temperature — the drives heat with the chassis.
+                See runbook.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # Same exporter-restart guard as the CPU tiers.
+  - interval: 1m
+    name: one hot NVMe sample with no history behind it stays silent
+    input_series:
+      - series: 'node_hwmon_temp_celsius{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="nvme_nvme0",sensor="temp1"}'
+        values: '_x10 95 60'
+      - series: 'node_hwmon_chip_names{job="pve-node",instance="192.168.1.200:9100",host="pve1",chip="nvme_nvme0",chip_name="nvme"}'
+        values: '1+0x11'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HardwareHostNvmeTemperatureHigh
+        exp_alerts: []
+
+  # TrueNAS's branch has its own filter and guard: only the package sensor is
+  # the CPU temperature, and a feed back from an outage needs the same 300
+  # samples as a hypervisor before its average means anything.
+  - interval: 1m
+    name: TrueNAS fires on the package sensor only and only with enough history
+    input_series:
+      - series: 'truenas_cpu_temperature_celsius{job="truenas-graphite-exporter",host="truenas",sensor="package"}'
+        values: '_x100 84+0x320'
+      - series: 'truenas_cpu_temperature_celsius{job="truenas-graphite-exporter",host="truenas",sensor="core0"}'
+        values: '90+0x420'
+    alert_rule_test:
+      - eval_time: 370m
+        alertname: HardwareHostTemperatureElevated
+        exp_alerts: []
+      - eval_time: 400m
+        alertname: HardwareHostTemperatureElevated
+        exp_alerts:
+          - exp_labels:
+              host: truenas
+              severity: warning
+            exp_annotations:
+              summary: "Host truenas CPU averaged 84C over 6h"
+              description: >-
+                  The CPU on truenas has averaged 80C or more for 6
+                  hours. That is chronic heat, not load: the cooling path (fan,
+                  dust, thermal paste, airflow) is degraded. A Proxmox host in this
+                  state has powered off without a log at 85-88C, below every trip
+                  point, so act on this before the critical tier. See runbook.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
