@@ -38,14 +38,14 @@ defaultSettings:
   # The CSI components all ran BestEffort — this Longhorn setting (a JSON
   # string) is the only knob the chart exposes for them. Requests are ~1.5-2x
   # observed per pod (attacher ~26Mi, provisioner ~32Mi, resizer ~27Mi,
-  # snapshotter ~34Mi, csi-plugin pod ~52Mi across its three containers);
+  # snapshotter ~34Mi, csi-plugin container p95 23Mi / max 27Mi);
   # limits leave >=2x headroom so volume churn doesn't OOM the CSI path.
   systemManagedCSIComponentsResourceLimits: >-
     {"csi-attacher":{"requests":{"memory":"48Mi"},"limits":{"memory":"128Mi"}},
     "csi-provisioner":{"requests":{"memory":"64Mi"},"limits":{"memory":"128Mi"}},
     "csi-resizer":{"requests":{"memory":"48Mi"},"limits":{"memory":"128Mi"}},
     "csi-snapshotter":{"requests":{"memory":"64Mi"},"limits":{"memory":"128Mi"}},
-    "longhorn-csi-plugin":{"requests":{"memory":"64Mi"},"limits":{"memory":"256Mi"}},
+    "longhorn-csi-plugin":{"requests":{"memory":"40Mi"},"limits":{"memory":"256Mi"}},
     "node-driver-registrar":{"requests":{"memory":"16Mi"},"limits":{"memory":"64Mi"}},
     "longhorn-liveness-probe":{"requests":{"memory":"16Mi"},"limits":{"memory":"64Mi"}}}
 
