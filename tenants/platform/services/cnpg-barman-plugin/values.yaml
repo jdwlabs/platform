@@ -1,0 +1,18 @@
+# Both images pinned to their index digest. The sidecar image is not run by
+# this Deployment: the plugin injects it into every CNPG instance pod that
+# enables the plugin, so a moved tag there would roll the database pods.
+image:
+  tag: v0.16.0@sha256:6404a416718bd7aad943c67a25a7bb20d0558b43edfeab0bf167f013ca435882
+
+sidecarImage:
+  tag: v0.16.0@sha256:c669259e20ed1e11fad821f735c396c19d929985aa05b9544b13ecc8b5a386d0
+
+# The chart sets no resources, which leaves the pod BestEffort and first to be
+# evicted under node memory pressure. It is a small Go controller like the
+# CNPG operator next to it (~54Mi steady state), so it gets the same sizing.
+# The per-instance sidecar is sized separately, in each cluster's ObjectStore.
+resources:
+  requests:
+    memory: 96Mi
+  limits:
+    memory: 256Mi
