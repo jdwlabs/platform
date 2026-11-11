@@ -13,11 +13,16 @@ cluster:
       # 5 minutes even when idle (~200MB/h observed), so 4GB holds about 20h
       # of an absent replica: pg_wal tops out near 4GB + max_wal_size, well
       # inside 16Gi. Past the cap PostgreSQL invalidates the slot instead of
-      # filling the disk, and that replica has to be recloned: no backup
-      # target is configured, so CNPG's archive_command succeeds without
-      # archiving anything (ContinuousArchiving=True notwithstanding) and
-      # there is no archive to catch up from. Reloadable (sighup).
+      # filling the disk; the replica then catches up from the WAL archive
+      # (backups below) instead of being recloned. The cap does not bound WAL
+      # that is waiting to be archived: if MinIO is unreachable, pg_wal grows
+      # by about 4.7GB a day until CNPGWALArchivingStalled is acted on.
+      # Reloadable (sighup).
       max_slot_wal_keep_size: 4GB
+      # The recovery point: the longest a quiet database goes before its
+      # current segment is closed and archived. CNPG's default too; pinned
+      # here because the archive alert's 15-minute threshold assumes it.
+      archive_timeout: 5min
 
   monitoring:
     enabled: true
@@ -94,6 +99,67 @@ cluster:
       - ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON SEQUENCES TO app;
       - ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO app;
       - ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO app;
+
+# Continuous WAL archiving and weekly base backups through the Barman Cloud
+# plugin, to bucket cnpg-prd on the TrueNAS MinIO: point-in-time restore
+# anywhere in the last 30 days, about 5 minutes' recovery point. The 6-hourly
+# pg_dump to Drive (postgres-backup) stays as the copy that survives losing
+# the NAS. Enabling or changing the plugin rolls the cluster (the sidecar is
+# injected into each pod: replicas first, then a switchover), so merge it when
+# nobody is on the Minecraft servers. Restore runbook: docs/OPERATIONS.md §3.3.
+backups:
+  enabled: true
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  # Base backups read from a standby so the primary's IO is left alone.
+  target: prefer-standby
+  objectStore:
+    # The chart's default renders the ObjectStore as a Helm hook, which ArgoCD
+    # treats as ephemeral; a plain resource one wave ahead of the Cluster.
+    helmHook: false
+    annotations:
+      argocd.argoproj.io/sync-wave: "-1"
+  endpointURL: https://192.168.1.205:9000
+  # MinIO's certificate is issued by the internal CA; the Secret holding it is
+  # in this service's postInstall.
+  endpointCA:
+    create: false
+    name: postgresql-cluster-prd-minio-ca
+    key: ca.crt
+  # prd's own bucket and key; the non-prd cluster has neither. Barman adds the
+  # cluster name as a prefix inside it.
+  destinationPath: s3://cnpg-prd/
+  provider: s3
+  secret:
+    create: false
+    name: postgresql-cluster-prd-barman-s3
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        memory: 64Mi
+      limits:
+        memory: 512Mi
+  # encryption is empty on purpose: the chart defaults to SSE-S3 (AES256), and
+  # MinIO rejects that header because it has no KMS configured.
+  wal:
+    compression: gzip
+    encryption: ""
+    maxParallel: 1
+  data:
+    compression: gzip
+    encryption: ""
+    jobs: 2
+  scheduledBackups:
+    # Six-field cron (seconds first): Sundays 03:00 UTC. The chart also takes
+    # one immediately when the ScheduledBackup is first created.
+    - name: weekly
+      schedule: "0 0 3 * * 0"
+      backupOwnerReference: self
+      method: plugin
+      pluginConfiguration:
+        name: barman-cloud.cloudnative-pg.io
+  retentionPolicy: "30d"
 
 # Tenant isolation is enforced at the database boundary, not at the role level. The `app`
 # role owns ever tenant database and is used by Atlas migrations and application pods alike.
