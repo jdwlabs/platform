@@ -150,7 +150,7 @@ Kubernetes cluster ready
                                 +-- cert-manager ClusterIssuers + TLS certs
                                 +-- Longhorn ingress auth
                                 +-- ARC runners register with GitHub
-            +-- Wave 3:  CNPG operator, ARC controller (dormant)
+            +-- Wave 3:  CNPG operator, Barman Cloud plugin, ARC controller (dormant)
             +-- Wave 4:  PostgreSQL clusters, db-ui, litellm-db, litellm-redis
             +-- Wave 5:  postgres-backup, litellm, holmes,
                           Tenant ARC runner sets (dormant), Atlas schema migrations

@@ -403,6 +403,19 @@ services:
     postInstall: true
     syncWave: 3
 
+  # CNPG-I plugin that archives WAL and takes base backups to object storage.
+  # It replaces the in-tree barmanObjectStore, which CNPG removes in 1.32. It
+  # must share the operator's namespace: the operator discovers plugins by
+  # their Service there. Wave 3 so its ObjectStore CRD exists before the
+  # wave-4 clusters reference it.
+  - name: cnpg-barman-plugin
+    chart: plugin-barman-cloud
+    repo: https://cloudnative-pg.github.io/charts
+    revision: 0.9.0
+    namespace: cnpg-system
+    postInstall: false
+    syncWave: 3
+
   # ARC is dormant: CI runs exclusively on GitHub-hosted runners. The controller
   # is kept here (commented, with its values/postInstall intact) so self-hosted
   # runners can be re-enabled by uncommenting — see OPERATIONS.md "Self-hosted
