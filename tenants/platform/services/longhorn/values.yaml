@@ -54,10 +54,11 @@ longhornManager:
   resources:
     requests:
       cpu: "100m"
-      # ~165Mi steady-state per manager; 512Mi leaves churn headroom without
-      # reserving 1Gi/node the scheduler can never hand out. OOM protection
-      # comes from the limit below, not the request.
-      memory: "512Mi"
+      # 160-196Mi measured per manager (2026-11-11). The 4Gi workers have
+      # only ~2.3Gi allocatable, and at 512Mi they ran out of requests, which
+      # left the log-shipping DaemonSet Pending there. OOM protection comes
+      # from the limit below, not the request.
+      memory: "256Mi"
     limits:
       cpu: "1000m"
       # Raised from 1Gi to stop OOM-kills under volume churn. Do not lower.
