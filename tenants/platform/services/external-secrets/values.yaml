@@ -23,11 +23,11 @@ certController:
     limits:
       memory: 128Mi
 
-# Webhook observed ~82Mi.
+# Webhook seven-day p95 37Mi (max 38Mi).
 webhook:
   revisionHistoryLimit: 0
   resources:
     requests:
-      memory: 128Mi
+      memory: 64Mi
     limits:
       memory: 256Mi

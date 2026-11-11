@@ -6,11 +6,11 @@ clusterRoleBinding:
   create: false
 
 # Ran BestEffort (first evicted under node memory pressure, invisible to the
-# scheduler). Observed ~48Mi; request ~2x that, limit leaves headroom for
-# UI/API bursts.
+# scheduler). Seven-day p95 16Mi (max 21Mi); the request is ~2.5x that and the
+# limit leaves headroom for UI/API bursts.
 resources:
   requests:
-    memory: 96Mi
+    memory: 48Mi
   limits:
     memory: 192Mi
 
