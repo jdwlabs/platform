@@ -7,6 +7,13 @@ image:
 sidecarImage:
   tag: v0.16.0@sha256:c669259e20ed1e11fad821f735c396c19d929985aa05b9544b13ecc8b5a386d0
 
+# The controller reads the sidecar image from a ConfigMap at start-up only, and
+# the chart puts no checksum on the pod. Without this a bump to the sidecar
+# digest alone would leave the running controller injecting the old one.
+# Keep it equal to the sidecar digest above.
+podAnnotations:
+  sidecar-image-digest: sha256:c669259e20ed1e11fad821f735c396c19d929985aa05b9544b13ecc8b5a386d0
+
 # The chart sets no resources, which leaves the pod BestEffort and first to be
 # evicted under node memory pressure. It is a small Go controller like the
 # CNPG operator next to it (~54Mi steady state), so it gets the same sizing.
