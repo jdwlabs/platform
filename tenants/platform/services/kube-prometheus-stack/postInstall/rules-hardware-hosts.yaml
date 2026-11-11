@@ -45,9 +45,12 @@ spec:
         # would never fire. An average over the window fires on exactly that
         # shape.
         #
-        # 90C: pve1 reads 70-80C under its ordinary load and its first trip
-        # point is 105C, so ten minutes averaging 90C is a cooling problem with
-        # margin still left to act on it, not a boost excursion.
+        # 90C: pve1's first trip point is 105C, so ten minutes averaging 90C
+        # is a cooling problem with margin still left to act on it, not a
+        # boost excursion. It is not an early warning: with its cooling
+        # degraded pve1 sat at a firmware ceiling of 90-91C all day, so its
+        # 10m average topped out just under this line and the alert barely
+        # fired — chronic heat is HardwareHostTemperatureElevated's job.
         # keep_firing_for stops the alert resolving and re-firing each time
         # the average grazes the line.
         #
@@ -108,7 +111,94 @@ spec:
               this host if it keeps climbing. See runbook.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
-        # The two alerts above compare an existing series, so a host that
+        # Chronic heat, the signal the two tiers above miss. pve1 hard
+        # powered off at 85-88C, far under both thresholds and its trip
+        # points, after weeks with its 6h average at 84C while every sibling
+        # sat at 50-74C. A cooler degrading (dust, fan, paste) shows as a
+        # high average long before any single reading looks alarming.
+        #
+        # 80C sits 6C above the hottest healthy 6h average in the retained
+        # history (pve5, 74C) and under pve1's 84C. pve5 is not excluded as
+        # in the critical tier: its 95C regulation point is reached only
+        # under sustained all-core load, which a 6h average does not reach on
+        # that host's workload.
+        #
+        # TrueNAS has no node-exporter; its CPU package temperature arrives
+        # through the Graphite pipeline under the same `host` label, so it is
+        # its own branch here rather than part of the recording rule — adding
+        # it there would duplicate TrueNASCPUPackageHot/Critical through the
+        # two tiers above. max by (host) keeps a graphite-exporter pod restart,
+        # which briefly leaves two series, to one alert.
+        #
+        # 300 of the 360 samples a 6h window holds at the 1m scrape and the
+        # global 1m rule evaluation the recording rule inherits: an average
+        # over a host's first minutes back after a power-off says nothing
+        # about its cooling. A longer evaluation interval would leave the
+        # window short of 300 and silence this alert.
+        #
+        # keep_firing_for 1h on top of a 6h window means the alert can stay up
+        # for hours after a cooling fix. That is intended: the fix is proven
+        # by the 6h average falling, not by the first cool reading.
+        - alert: HardwareHostTemperatureElevated
+          expr: |
+            (
+              avg_over_time(host:hardware_cpu_temperature_celsius:max[6h]) >= 80
+              and
+              count_over_time(host:hardware_cpu_temperature_celsius:max[6h]) >= 300
+            )
+            or
+            (
+              max by (host) (avg_over_time(truenas_cpu_temperature_celsius{sensor="package"}[6h])) >= 80
+              and
+              max by (host) (count_over_time(truenas_cpu_temperature_celsius{sensor="package"}[6h])) >= 300
+            )
+          keep_firing_for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Host {{ $labels.host }} CPU averaged {{ $value | printf \"%.0f\" }}C over 6h"
+            description: >-
+              The CPU on {{ $labels.host }} has averaged 80C or more for 6
+              hours. That is chronic heat, not load: the cooling path (fan,
+              dust, thermal paste, airflow) is degraded. A Proxmox host in this
+              state has powered off without a log at 85-88C, below every trip
+              point, so act on this before the critical tier. See runbook.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # The drives share the CPU's chassis and none of the CPU rules see
+        # them; pve1's NVMe has logged 103 lifetime minutes over its own
+        # warning threshold with no alert. Composite (temp1) is the reading the
+        # drive's limits apply to: warning, where it starts throttling, at
+        # 83.85-89.85C and critical, where it shuts down, at 87.85-94.85C
+        # across these hosts (node_hwmon_temp_max/crit_celsius), so 75C leaves
+        # 9-15 degrees to act in. Selected through
+        # node_hwmon_chip_names like the CPU rule, because `chip` is a device
+        # path. TrueNAS's NVMe is left out: TrueNASDiskTemperatureHigh
+        # already covers it at 50C.
+        - alert: HardwareHostNvmeTemperatureHigh
+          expr: |
+            (
+              avg_over_time(node_hwmon_temp_celsius{job="pve-node", sensor="temp1"}[10m])
+              * on (instance, chip) group_left ()
+              node_hwmon_chip_names{job="pve-node", chip_name="nvme"}
+            ) >= 75
+            and
+            count_over_time(node_hwmon_temp_celsius{job="pve-node", sensor="temp1"}[10m]) >= 5
+          keep_firing_for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Host {{ $labels.host }} NVMe {{ $labels.chip }} averaging {{ $value | printf \"%.0f\" }}C over 10m"
+            description: >-
+              The NVMe drive {{ $labels.chip }} on {{ $labels.host }} has
+              averaged 75C or more (Composite) for 10 minutes, 9-15 degrees
+              under the drive's own warning limit, where it starts to
+              throttle; its critical limit shuts it down. Check airflow over the drive and
+              the host's CPU temperature — the drives heat with the chassis.
+              See runbook.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # The thermal alerts above compare an existing series, so a host that
         # exports no CPU temperature at all — hwmon collector disabled, a
         # kernel that stops loading k10temp, a sensor naming this rule's
         # selectors do not match — would be silently uncovered while its

@@ -151,6 +151,32 @@ cases:
       host: pve1
     receivers: ['ai-sre']
 
+  # Chronic heat is days of notice, not minutes: it goes to the agent to
+  # investigate, and must not land on the human channel next to the critical
+  # tier. TrueNAS's copy carries no tenant label either and takes the same
+  # route.
+  - name: hypervisor chronically hot reaches the agent only
+    labels:
+      alertname: HardwareHostTemperatureElevated
+      severity: warning
+      host: pve1
+    receivers: ['ai-sre']
+
+  - name: TrueNAS chronically hot reaches the agent only
+    labels:
+      alertname: HardwareHostTemperatureElevated
+      severity: warning
+      host: truenas
+    receivers: ['ai-sre']
+
+  - name: hypervisor NVMe running hot reaches the agent only
+    labels:
+      alertname: HardwareHostNvmeTemperatureHigh
+      severity: warning
+      host: pve1
+      chip: nvme_nvme0
+    receivers: ['ai-sre']
+
   # This one fires on every host if the scrape config goes live before the
   # exporters are installed. Its staying off the human channel is the whole
   # reason that ordering mistake is survivable, so it is pinned.
