@@ -116,7 +116,9 @@ node:
   driverRegistrar:
     resources:
       requests:
-        memory: 32Mi
+        # Seven-day max 13Mi on the 2.3Gi workers but 31Mi on the large worker,
+        # and a DaemonSet has one value, so this follows the larger p95 (22Mi).
+        memory: 24Mi
       limits:
         memory: 64Mi
   # Busybox cleanup container; negligible footprint but bounded so the pod has
@@ -124,7 +126,8 @@ node:
   cleanup:
     resources:
       requests:
-        memory: 16Mi
+        # Seven-day max 5Mi on every node.
+        memory: 8Mi
       limits:
         memory: 32Mi
   # The node DaemonSet has no business running on control-plane nodes.
