@@ -1,0 +1,71 @@
+# Unit tests for CNPGBaseBackupStale. Its windows are days long, so these run
+# at an hourly evaluation interval in a file of their own; at the minute
+# interval rules-cnpg_test.yaml uses, nine simulated days cost minutes of CI.
+rule_files:
+  - rules/cnpg-rules.yaml
+evaluation_interval: 1h
+tests:
+  # promtool's clock starts at the epoch, so a backup "at 0" is one taken at
+  # the start of the test. Weekly backups keep the newest under 8 days old.
+  - interval: 1h
+    name: weekly base backups on schedule are not stale
+    input_series:
+      - series: 'barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+0x167 604800+0x100'
+    alert_rule_test:
+      - eval_time: 9d
+        alertname: CNPGBaseBackupStale
+        exp_alerts: []
+
+  # The schedule stopped: the only backup is the one from the start.
+  - interval: 1h
+    name: no base backup for over eight days warns
+    input_series:
+      - series: 'barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+0x240'
+    alert_rule_test:
+      - eval_time: 7d
+        alertname: CNPGBaseBackupStale
+        exp_alerts: []
+      - eval_time: 9d
+        alertname: CNPGBaseBackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: database
+              cnpg_cluster: platform-postgresql-cluster-prd
+            exp_annotations:
+              summary: "No recent base backup of platform-postgresql-cluster-prd"
+              description: >-
+                The newest base backup in MinIO is more than 8 days old, or the plugin is not reporting
+                backups at all. Point-in-time restore needs a base backup inside the 30-day window. Check the
+                ScheduledBackup and recent Backups (kubectl -n database get scheduledbackups,backups) and the
+                plugin-barman-cloud sidecar log.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#33-wal-archive-and-point-in-time-restore"
+
+  # The plugin stops exporting its metrics, e.g. it cannot read the
+  # ObjectStore any more: warn after an hour.
+  - interval: 1h
+    name: plugin backup metrics missing for an hour warns
+    input_series:
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+0x3'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CNPGBaseBackupStale
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: CNPGBaseBackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: database
+              cnpg_cluster: platform-postgresql-cluster-prd
+            exp_annotations:
+              summary: "No recent base backup of platform-postgresql-cluster-prd"
+              description: >-
+                The newest base backup in MinIO is more than 8 days old, or the plugin is not reporting
+                backups at all. Point-in-time restore needs a base backup inside the 30-day window. Check the
+                ScheduledBackup and recent Backups (kubectl -n database get scheduledbackups,backups) and the
+                plugin-barman-cloud sidecar log.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#33-wal-archive-and-point-in-time-restore"

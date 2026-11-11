@@ -1,4 +1,4 @@
-# Unit tests for CNPGReplicationSlotInactive.
+# Unit tests for CNPGReplicationSlotInactive and the prd WAL archive alerts.
 #
 # The series shapes are the live ones: CNPG mirrors each HA slot onto every
 # standby, and those copies report active=0 for as long as they exist. The
@@ -85,8 +85,9 @@ tests:
                 consumer for 30 minutes and is retaining WAL. A `_cnpg_` slot names the replica that stopped
                 streaming: check that instance's pod and its CNPGInstanceMetricsAbsent / CNPGClusterHA* alerts.
                 Retained WAL is capped by max_slot_wal_keep_size (4GB, about 20h of idle WAL); past it the slot
-                is invalidated and the replica must be recloned, as there is no WAL archive to catch up from. A
-                slot that is not CNPG's own is a client that went away: drop it if nothing will reconnect.
+                is invalidated and the replica has to catch up from the WAL archive, so check that
+                CNPGWALArchivingStalled is not firing too. A slot that is not CNPG's own is a client that went
+                away: drop it if nothing will reconnect.
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#3-postgresql-operations"
 
   # After a failover the old primary rejoins as a standby. Its slots become
@@ -115,4 +116,258 @@ tests:
     alert_rule_test:
       - eval_time: 2h
         alertname: CNPGReplicationSlotInactive
+        exp_alerts: []
+
+  # archive_timeout closes a segment at least every 5 minutes, so on a
+  # healthy primary the age of the last archive is a sawtooth that never
+  # passes 300s.
+  - interval: 1m
+    name: primary archiving on schedule is silent
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+60x4 0+60x4 0+60x4 0+60x4 0+60x4 0+60x4 0+60x4 0+60x4 0+60x4 0+60x4 0+60x4 0+60x4'
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+0x60'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+0x60'
+    alert_rule_test:
+      - eval_time: 55m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts: []
+
+  # MinIO unreachable: the last success ages a minute per minute and every
+  # attempt fails. The page goes out at 15 minutes.
+  - interval: 1m
+    name: archive stalled for fifteen minutes pages
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+60x30'
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+1x30'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+0x30'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: database
+              cnpg_cluster: platform-postgresql-cluster-prd
+              pod: platform-postgresql-cluster-prd-10
+              reason: archive-age
+            exp_annotations:
+              summary: "No WAL archived from platform-postgresql-cluster-prd-10 for 15 minutes or more"
+              description: >-
+                Primary platform-postgresql-cluster-prd-10 has not archived a WAL segment to MinIO (bucket cnpg-prd) for at
+                least 15 minutes (seconds since the last success, -1 if none: 900). The recovery
+                point is growing and unarchived WAL is filling pg_wal (about 4.7GB a day, no cap); prd stops
+                taking writes when the volume fills. Check the plugin-barman-cloud sidecar log in that pod,
+                MinIO at 192.168.1.205:9000, and the postgresql-cluster-prd-barman-s3 secret.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#33-wal-archive-and-point-in-time-restore"
+
+  # A switchover onto an instance that was primary days ago: its archiver
+  # statistics come back from disk and read 86400s+ until the first archive
+  # on the new timeline, a minute or so later. That must not page.
+  - interval: 1m
+    name: switchover onto a former primary with old statistics is silent
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-prd-1"}'
+        values: '_x9 86400 86460 5 65 125 185 245 0+60x4 0+60x4 0+60x4'
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="database",pod="platform-postgresql-cluster-prd-1"}'
+        values: '_x9 0+0x22'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-1"}'
+        values: '1+0x9 0+0x22'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts: []
+
+  # The same switchover where the new primary then cannot archive at all
+  # does page, five minutes after the stale age is first seen.
+  - interval: 1m
+    name: switchover onto a primary that cannot archive pages
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-prd-1"}'
+        values: '_x9 86400+60x22'
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="database",pod="platform-postgresql-cluster-prd-1"}'
+        values: '_x9 0+1x22'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-1"}'
+        values: '1+0x9 0+0x22'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: database
+              cnpg_cluster: platform-postgresql-cluster-prd
+              pod: platform-postgresql-cluster-prd-1
+              reason: archive-age
+            exp_annotations:
+              summary: "No WAL archived from platform-postgresql-cluster-prd-1 for 15 minutes or more"
+              description: >-
+                Primary platform-postgresql-cluster-prd-1 has not archived a WAL segment to MinIO (bucket cnpg-prd) for at
+                least 15 minutes (seconds since the last success, -1 if none: 86820). The recovery
+                point is growing and unarchived WAL is filling pg_wal (about 4.7GB a day, no cap); prd stops
+                taking writes when the volume fills. Check the plugin-barman-cloud sidecar log in that pod,
+                MinIO at 192.168.1.205:9000, and the postgresql-cluster-prd-barman-s3 secret.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#33-wal-archive-and-point-in-time-restore"
+
+  # -1 means this instance has never archived. A primary that has been
+  # failing since it started pages after 15 minutes of it.
+  - interval: 1m
+    name: never-archived primary that keeps failing pages after fifteen minutes
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-prd-11"}'
+        values: '-1+0x30'
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="database",pod="platform-postgresql-cluster-prd-11"}'
+        values: '0+1x30'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-11"}'
+        values: '0+0x30'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: database
+              cnpg_cluster: platform-postgresql-cluster-prd
+              pod: platform-postgresql-cluster-prd-11
+              reason: never-archived
+            exp_annotations:
+              summary: "No WAL archived from platform-postgresql-cluster-prd-11 for 15 minutes or more"
+              description: >-
+                Primary platform-postgresql-cluster-prd-11 has not archived a WAL segment to MinIO (bucket cnpg-prd) for at
+                least 15 minutes (seconds since the last success, -1 if none: -1). The recovery
+                point is growing and unarchived WAL is filling pg_wal (about 4.7GB a day, no cap); prd stops
+                taking writes when the volume fills. Check the plugin-barman-cloud sidecar log in that pod,
+                MinIO at 192.168.1.205:9000, and the postgresql-cluster-prd-barman-s3 secret.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#33-wal-archive-and-point-in-time-restore"
+
+  # One failed first attempt on a new primary, then success: no page.
+  - interval: 1m
+    name: new primary with one failed first attempt is silent
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-prd-11"}'
+        values: '-1 -1 -1 0 60 120 180 240 0+60x4 0+60x4 0+60x4 0+60x4'
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="database",pod="platform-postgresql-cluster-prd-11"}'
+        values: '0 1 1+0x26'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-11"}'
+        values: '0+0x28'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts: []
+
+  - interval: 1m
+    name: never-archived primary with no failures is silent
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-prd-11"}'
+        values: '-1+0x30'
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="database",pod="platform-postgresql-cluster-prd-11"}'
+        values: '0+0x30'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-11"}'
+        values: '0+0x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts: []
+
+  # A standby's archiver statistics stop where they were when it was last
+  # primary, so they age without meaning anything.
+  - interval: 1m
+    name: stale archiver statistics on a standby are silent
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-prd-6"}'
+        values: '86400+60x30'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-6"}'
+        values: '1+0x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts: []
+
+  - interval: 1m
+    name: stalled archive on the non-prd cluster does not page
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-non-3"}'
+        values: '0+60x30'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-non-3"}'
+        values: '0+0x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CNPGWALArchivingStalled
+        exp_alerts: []
+
+  # The plugin's backup timestamps come from the ObjectStore, so every
+  # instance reports the same pair. Weekly base backup on 2026-11-15 03:00
+  # succeeded; the next one fails.
+  - interval: 1m
+    name: failed base backup after a good one warns once per cluster
+    input_series:
+      - series: 'barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '1763175600+0x20'
+      - series: 'barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database",pod="platform-postgresql-cluster-prd-6"}'
+        values: '1763175600+0x20'
+      - series: 'barman_cloud_cloudnative_pg_io_last_failed_backup_timestamp{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+0x9 1763780400+0x10'
+      - series: 'barman_cloud_cloudnative_pg_io_last_failed_backup_timestamp{namespace="database",pod="platform-postgresql-cluster-prd-6"}'
+        values: '0+0x9 1763780400+0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: CNPGBaseBackupFailed
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: CNPGBaseBackupFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: database
+              cnpg_cluster: platform-postgresql-cluster-prd
+            exp_annotations:
+              summary: "The last base backup of platform-postgresql-cluster-prd failed"
+              description: >-
+                The most recent base backup to MinIO failed and none has succeeded since. WAL archiving is
+                separate and may still be working, but point-in-time restore depends on a base backup inside
+                the 30-day window. Read the failed Backup object (kubectl -n database get backups) and the
+                plugin-barman-cloud sidecar log on the instance that took it.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#33-wal-archive-and-point-in-time-restore"
+
+  # A failure followed by a successful retry clears it; a plugin that has no
+  # backup yet reports 0 for both and stays quiet.
+  - interval: 1m
+    name: base backup retried successfully is silent
+    input_series:
+      - series: 'barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+0x9 1763784000+0x10'
+      - series: 'barman_cloud_cloudnative_pg_io_last_failed_backup_timestamp{namespace="database",pod="platform-postgresql-cluster-prd-10"}'
+        values: '0+0x4 1763780400+0x15'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: CNPGBaseBackupFailed
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: CNPGBaseBackupFailed
         exp_alerts: []
