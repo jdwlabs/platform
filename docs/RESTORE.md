@@ -11,8 +11,10 @@ Use this guide when you have a `pg_dumpall`-format `.sql.gz` file (e.g. from the
 `postgres-backup` CronJob) and need to restore one or more databases to the live
 CNPG cluster.
 
-> **Not a CNPG snapshot restore.** CNPG's native WAL-based recovery requires
-> editing the `Cluster` CR. This guide covers plain SQL dump restores only.
+> **Not a point-in-time restore.** Restoring from the WAL archive into a new
+> cluster (any moment back to the oldest base backup kept, up to 30 days) is in
+> [OPERATIONS.md §3.3](OPERATIONS.md#33-wal-archive-and-point-in-time-restore).
+> This guide covers plain SQL dump restores only.
 
 ---
 
