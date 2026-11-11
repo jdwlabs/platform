@@ -370,7 +370,7 @@
       },
       "targets": [
         {
-          "expr": "max(minecraft_status_healthy{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"})",
+          "expr": "max(kube_pod_container_status_ready{namespace=\"jdwillmsen-prd\", container=\"jdwillmsen-minecraft-fwb-prd-minecraft-bedrock\"}) or vector(0)",
           "refId": "A"
         }
       ]
@@ -379,7 +379,7 @@
       "id": 20,
       "type": "stat",
       "title": "Uptime (24h)",
-      "description": "Fraction of the last 24h the mc-monitor probe saw the server healthy. This is probe-observed availability (60s scrape), so a sub-minute blip can hide; planned hourly version-check restarts show up here as the small dips they are.",
+      "description": "Fraction of the last 24h the server container was Ready, per the kubelet readiness probe (mc-monitor status-bedrock, NetherNet with a RakNet fallback). Sampled at the 60s scrape, so a sub-minute blip can hide, and minutes with no pod count as down; the nightly restart and version-check restarts show up here as the small dips they are.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -418,7 +418,7 @@
       },
       "targets": [
         {
-          "expr": "avg_over_time(max(minecraft_status_healthy{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"})[24h:1m])",
+          "expr": "avg_over_time((max(kube_pod_container_status_ready{namespace=\"jdwillmsen-prd\", container=\"jdwillmsen-minecraft-fwb-prd-minecraft-bedrock\"}) or vector(0))[24h:1m])",
           "refId": "A"
         }
       ]
@@ -496,7 +496,7 @@
       "id": 21,
       "type": "stat",
       "title": "Server version",
-      "description": "Bedrock version as reported by the server itself (mc-monitor's server_version label). The version-check CronJob restarts the server when upstream moves ahead of this, so a stale value here plus a fresh check (panel to the right) means the restart path is broken, not the check.",
+      "description": "Bedrock version as reported by the server itself over NetherNet (the join probe's version label). The version-check CronJob restarts the server when upstream moves ahead of this, so a stale value here plus a fresh check (panel to the right) means the restart path is broken, not the check.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -520,8 +520,8 @@
       },
       "targets": [
         {
-          "expr": "max by (server_version) (minecraft_status_healthy{job=\"jdwillmsen-minecraft-fwb-prd-mc-monitor\"})",
-          "legendFormat": "{{server_version}}",
+          "expr": "max by (version) (mc_joinprobe_server_info{namespace=\"jdwillmsen-prd\", job=\"jdwillmsen-minecraft-fwb-prd-join-probe\"})",
+          "legendFormat": "{{version}}",
           "refId": "A"
         }
       ]
