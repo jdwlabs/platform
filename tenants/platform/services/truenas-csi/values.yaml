@@ -1,5 +1,18 @@
 # The chart under helm-charts/truenas-csi is dedicated to this cluster, so its
 # own values.yaml carries the full configuration (NAS address, image pins,
-# Talos accommodations) and this overlay stays empty. Overrides land here only
-# when a value must differ from the chart default without a chart change.
-{}
+# Talos accommodations). Overrides land here only when a value must differ from
+# the chart default without a chart change.
+
+# The chart requests 128Mi for the driver container on every worker, which on
+# the 2.3Gi workers is room a displaced Vault replica needs. Seven-day working
+# set: node driver up to 28Mi on the large worker and 17Mi on the small ones,
+# controller driver 9Mi. The 256Mi limits stay: they, not the request, guard
+# against OOM.
+controller:
+  resources:
+    requests:
+      memory: 32Mi
+node:
+  resources:
+    requests:
+      memory: 40Mi
