@@ -368,50 +368,64 @@ spec:
         #
         # See jdwillmsen/jdw-deployments docs/incidents/ for both write-ups.
 
-        # mc-monitor already pings the server and publishes this; nothing
-        # consumed it until now.
+        # Reads the server container's kubelet readiness, not the mc-monitor
+        # exporter's minecraft_status_healthy. The exporter pings over RakNet
+        # only, and the server now listens on NetherNet, so that gauge reads 0
+        # permanently whatever the server is doing. The readiness probe is
+        # `mc-monitor status-bedrock`, whose default `-protocol auto` tries
+        # NetherNet and falls back to RakNet, so it tells the truth under either
+        # transport. If an image bump ever changes that default this rule
+        # inherits the exporter's blindness.
         #
-        # 2m because the crash this server actually suffers recovers on its
-        # own in about thirty seconds, so a shorter window would page for
-        # something already fixed by the time anyone looked. Anything still
-        # unreachable after two minutes is not self-healing. Crashes are
-        # caught by the restart rule below instead, which is the signal that
-        # survives the recovery.
+        # FWB only, by exact container name. The crew lab, proving-grounds and
+        # fwb-seed servers share this namespace but are test and side worlds that
+        # are restarted and crashed on purpose; paging critically for them is
+        # noise. A regex over all four would also blind the absent() rule below,
+        # which stays satisfied while any one of the four series exists.
+        #
+        # 10m because a fresh pod can fail once and restart before settling: the
+        # longest NotReady stretch in the week before this was written was seven
+        # minutes, so 10m clears a rollout and the nightly restart while a server
+        # that is still not Ready after ten minutes is not recovering by itself.
+        # Crashes are caught by the restart rule below instead, which is the
+        # signal that survives the recovery.
         - alert: JdwillmsenMinecraftServerUnreachable
-          expr: minecraft_status_healthy{namespace="jdwillmsen-prd"} == 0
-          for: 2m
+          expr: min by (namespace, pod, container) (kube_pod_container_status_ready{namespace="jdwillmsen-prd", container="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}) == 0
+          for: 10m
           labels:
             severity: critical
             tenant: jdwillmsen
             namespace: jdwillmsen-prd
           annotations:
-            summary: "Minecraft server is not answering pings"
+            summary: "Minecraft server is not Ready"
             description: >-
-              The mc-monitor sidecar has been unable to reach the Bedrock server on 127.0.0.1:31132 for two minutes,
-              so players cannot join either. The container restarts itself on a crash, so a fault lasting this long
-              is one that did not recover: check the pod's status and its previous container's logs for a crash
-              dump, and the world volume for an ext4 read-only latch.
+              The Bedrock server container has failed its kubelet readiness probe (mc-monitor status-bedrock against
+              127.0.0.1:31132) for ten minutes, so players cannot join either. The container restarts itself on a
+              crash, so a fault lasting this long is one that did not recover: check the pod's status and its previous
+              container's logs for a crash dump, and the world volume for an ext4 read-only latch.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
-        # The rule above can only fire while something is publishing the
+        # The rule above can only fire while kube-state-metrics publishes the
         # series it reads. Same reasoning as the backup producer's absent()
         # rule: an expectation this repository holds cannot be forgotten by
-        # Prometheus, so it survives a deleted sidecar, a ServiceMonitor that
-        # stopped matching, and a cluster rebuilt from scratch.
+        # Prometheus, so it survives a deleted StatefulSet, a pod that never got
+        # scheduled (no container status exists for it), and a cluster rebuilt
+        # from scratch.
         - alert: JdwillmsenMinecraftServerHealthSignalAbsent
-          expr: absent(minecraft_status_healthy{namespace="jdwillmsen-prd"})
+          expr: absent(kube_pod_container_status_ready{namespace="jdwillmsen-prd", container="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"})
           for: 15m
           labels:
             severity: critical
             tenant: jdwillmsen
             namespace: jdwillmsen-prd
           annotations:
-            summary: "No health signal exists for the Minecraft server"
+            summary: "No readiness signal exists for the Minecraft server"
             description: >-
-              minecraft_status_healthy has not been scraped from jdwillmsen-prd for fifteen minutes. The server may be
-              fine, but nothing can now tell you if it is not -- JdwillmsenMinecraftServerUnreachable reads this
-              series and is silent while it is missing. Check the mc-monitor sidecar, its Service and ServiceMonitor.
-              If the sidecar is being retired deliberately, delete these rules in the same change.
+              kube_pod_container_status_ready has had no series for the Bedrock server container in jdwillmsen-prd for
+              fifteen minutes. The server may be fine, but nothing can now tell you if it is not --
+              JdwillmsenMinecraftServerUnreachable reads this series and is silent while it is missing. Check that the
+              StatefulSet and its pod exist and are scheduled, and that kube-state-metrics is up. If the server is
+              being retired deliberately, delete these rules in the same change.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
 
         # The server has crashed four times between 2026-08-25 and 09-01, each

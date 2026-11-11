@@ -1,0 +1,185 @@
+# Unit tests for JdwillmsenMinecraftServerUnreachable and its absent() twin.
+#
+# Both read the FWB server container's kubelet readiness. The assertions that
+# matter are the three ways the previous version of this rule was wrong or
+# would have been: it paged on a gauge (minecraft_status_healthy) that reads 0
+# forever once the server speaks NetherNet, it would have paged on a restart,
+# and a selector widened over the other servers in the namespace would have let
+# those servers satisfy the absent() rule while FWB itself was gone.
+rule_files:
+  - rules/jdwillmsen-tenant-alerts.yaml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    name: ready server is silent
+    input_series:
+      - series: 'kube_pod_container_status_ready{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock-0",container="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}'
+        values: '1+0x120'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftServerUnreachable
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: JdwillmsenMinecraftServerHealthSignalAbsent
+        exp_alerts: []
+
+  # The regression that motivated the retarget: the RakNet-only exporter's
+  # gauge sits at 0 for the life of the pod while the server is Ready and
+  # serving NetherNet. Nothing may page on it.
+  - interval: 1m
+    name: a permanently zero exporter gauge on a ready server is silent
+    input_series:
+      - series: 'kube_pod_container_status_ready{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock-0",container="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}'
+        values: '1+0x600'
+      - series: 'minecraft_status_healthy{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock-0",container="mc-monitor",server_port="31132"}'
+        values: '0+0x600'
+    alert_rule_test:
+      - eval_time: 10h
+        alertname: JdwillmsenMinecraftServerUnreachable
+        exp_alerts: []
+      - eval_time: 10h
+        alertname: JdwillmsenMinecraftServerHealthSignalAbsent
+        exp_alerts: []
+
+  # The two longest NotReady stretches seen in the week before this rule was
+  # retargeted: a fresh pod that failed once and restarted, seven minutes in
+  # all. The nightly restart is one or two minutes. Neither may page.
+  - interval: 1m
+    name: a seven minute restart is silent
+    input_series:
+      - series: 'kube_pod_container_status_ready{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock-0",container="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}'
+        values: '1+0x30 0+0x6 1+0x60 0+0x1 1+0x60'
+    alert_rule_test:
+      - eval_time: 37m
+        alertname: JdwillmsenMinecraftServerUnreachable
+        exp_alerts: []
+      - eval_time: 100m
+        alertname: JdwillmsenMinecraftServerUnreachable
+        exp_alerts: []
+      - eval_time: 2h30m
+        alertname: JdwillmsenMinecraftServerUnreachable
+        exp_alerts: []
+
+  # Not Ready from minute 31. The rule is still holding at minute 40 and fires
+  # once the full ten minutes have elapsed, at minute 41; it resolves when the
+  # pod is Ready again.
+  - interval: 1m
+    name: sustained not ready fires after ten minutes and resolves
+    input_series:
+      - series: 'kube_pod_container_status_ready{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock-0",container="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock",uid="a",instance="ksm-1"}'
+        values: '1+0x30 0+0x40 1+0x20'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: JdwillmsenMinecraftServerUnreachable
+        exp_alerts: []
+      - eval_time: 41m
+        alertname: JdwillmsenMinecraftServerUnreachable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              pod: jdwillmsen-minecraft-fwb-prd-minecraft-bedrock-0
+              container: jdwillmsen-minecraft-fwb-prd-minecraft-bedrock
+            exp_annotations:
+              summary: "Minecraft server is not Ready"
+              description: >-
+                The Bedrock server container has failed its kubelet readiness probe (mc-monitor status-bedrock against
+                127.0.0.1:31132) for ten minutes, so players cannot join either. The container restarts itself on a
+                crash, so a fault lasting this long is one that did not recover: check the pod's status and its previous
+                container's logs for a crash dump, and the world volume for an ext4 read-only latch.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+      - eval_time: 80m
+        alertname: JdwillmsenMinecraftServerUnreachable
+        exp_alerts: []
+
+  # The instance label changes while the pod stays NotReady, and the two
+  # kube-state-metrics series overlap for two minutes. They must read as one
+  # alert whose hold started at the first NotReady sample (minute 11), not
+  # two. A handover with a gap between the series does restart the hold; that
+  # costs at most ten minutes of delay and is accepted.
+  - interval: 1m
+    name: a kube-state-metrics handover does not reset the hold
+    input_series:
+      - series: 'kube_pod_container_status_ready{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock-0",container="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock",instance="ksm-1"}'
+        values: '1+0x10 0+0x8 _x40'
+      - series: 'kube_pod_container_status_ready{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock-0",container="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock",instance="ksm-2"}'
+        values: '_x18 0+0x40'
+    alert_rule_test:
+      - eval_time: 22m
+        alertname: JdwillmsenMinecraftServerUnreachable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              pod: jdwillmsen-minecraft-fwb-prd-minecraft-bedrock-0
+              container: jdwillmsen-minecraft-fwb-prd-minecraft-bedrock
+            exp_annotations:
+              summary: "Minecraft server is not Ready"
+              description: >-
+                The Bedrock server container has failed its kubelet readiness probe (mc-monitor status-bedrock against
+                127.0.0.1:31132) for ten minutes, so players cannot join either. The container restarts itself on a
+                crash, so a fault lasting this long is one that did not recover: check the pod's status and its previous
+                container's logs for a crash dump, and the world volume for an ext4 read-only latch.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # The crew lab, proving-grounds and fwb-seed servers are test and side worlds.
+  # Their containers being down for hours is not a critical page.
+  - interval: 1m
+    name: other servers in the namespace never page
+    input_series:
+      - series: 'kube_pod_container_status_ready{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock-0",container="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}'
+        values: '1+0x300'
+      - series: 'kube_pod_container_status_ready{namespace="jdwillmsen-prd",pod="jdwillmsen-crew-lab-prd-minecraft-bedrock-0",container="jdwillmsen-crew-lab-prd-minecraft-bedrock"}'
+        values: '0+0x300'
+      - series: 'kube_pod_container_status_ready{namespace="jdwillmsen-prd",pod="jdwillmsen-proving-grounds-prd-minecraft-bedrock-0",container="jdwillmsen-proving-grounds-prd-minecraft-bedrock"}'
+        values: '0+0x300'
+      - series: 'kube_pod_container_status_ready{namespace="jdwillmsen-prd",pod="jdwillmsen-fwb-seed-prd-minecraft-bedrock-0",container="jdwillmsen-fwb-seed-prd-minecraft-bedrock"}'
+        values: '0+0x300'
+    alert_rule_test:
+      - eval_time: 4h
+        alertname: JdwillmsenMinecraftServerUnreachable
+        exp_alerts: []
+
+  # The expectation survives the series vanishing. The lab's series are present
+  # throughout and must not satisfy it: that is why the selector is the exact
+  # FWB container name and not a pattern over every Bedrock container.
+  - interval: 1m
+    name: absent fires when the FWB series is gone even if other servers report
+    input_series:
+      - series: 'kube_pod_container_status_ready{namespace="jdwillmsen-prd",pod="jdwillmsen-crew-lab-prd-minecraft-bedrock-0",container="jdwillmsen-crew-lab-prd-minecraft-bedrock"}'
+        values: '1+0x120'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: JdwillmsenMinecraftServerHealthSignalAbsent
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: JdwillmsenMinecraftServerHealthSignalAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tenant: jdwillmsen
+              namespace: jdwillmsen-prd
+              container: jdwillmsen-minecraft-fwb-prd-minecraft-bedrock
+            exp_annotations:
+              summary: "No readiness signal exists for the Minecraft server"
+              description: >-
+                kube_pod_container_status_ready has had no series for the Bedrock server container in jdwillmsen-prd for
+                fifteen minutes. The server may be fine, but nothing can now tell you if it is not --
+                JdwillmsenMinecraftServerUnreachable reads this series and is silent while it is missing. Check that the
+                StatefulSet and its pod exist and are scheduled, and that kube-state-metrics is up. If the server is
+                being retired deliberately, delete these rules in the same change.
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # Pod replacement during a rollout leaves a gap with no series; the absent()
+  # rule must sit through a gap shorter than its hold.
+  - interval: 1m
+    name: a short gap between pods does not fire absent
+    input_series:
+      - series: 'kube_pod_container_status_ready{namespace="jdwillmsen-prd",pod="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock-0",container="jdwillmsen-minecraft-fwb-prd-minecraft-bedrock"}'
+        values: '1+0x30 stale _x7 1+0x60'
+    alert_rule_test:
+      - eval_time: 38m
+        alertname: JdwillmsenMinecraftServerHealthSignalAbsent
+        exp_alerts: []
