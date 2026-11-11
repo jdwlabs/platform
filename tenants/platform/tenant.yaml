@@ -404,7 +404,7 @@ services:
     syncWave: 3
 
   # CNPG-I plugin that archives WAL and takes base backups to object storage.
-  # It replaces the in-tree barmanObjectStore, which CNPG removes in 1.32. It
+  # It replaces the in-tree barmanObjectStore, deprecated since CNPG 1.26. It
   # must share the operator's namespace: the operator discovers plugins by
   # their Service there. Wave 3 so its ObjectStore CRD exists before the
   # wave-4 clusters reference it.
