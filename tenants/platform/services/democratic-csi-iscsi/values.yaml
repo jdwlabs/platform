@@ -105,13 +105,16 @@ node:
   driverRegistrar:
     resources:
       requests:
-        memory: 32Mi
+        # Seven-day max 13Mi on the 2.3Gi workers but 31Mi on the large worker,
+        # and a DaemonSet has one value, so this follows the larger p95 (22Mi).
+        memory: 24Mi
       limits:
         memory: 64Mi
   cleanup:
     resources:
       requests:
-        memory: 16Mi
+        # Seven-day max 5Mi on every node.
+        memory: 8Mi
       limits:
         memory: 32Mi
   # Same reasoning as the NFS release: the node DaemonSet has no business on
