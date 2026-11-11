@@ -110,7 +110,7 @@ databases:
     owner: app
 
 # Continuous WAL archiving and weekly base backups through the Barman Cloud
-# plugin, to the TrueNAS MinIO. This cluster runs it first so that the
+# plugin, to bucket cnpg-non on the TrueNAS MinIO. This cluster runs it first so that the
 # sidecar's memory, the archive itself and a point-in-time restore are proven
 # here before prd, and so that later plugin upgrades reach a cluster that can
 # take the hit before prd does. Enabling or changing the plugin restarts the
@@ -135,8 +135,9 @@ backups:
     create: false
     name: postgresql-cluster-non-minio-ca
     key: ca.crt
-  # Barman appends the cluster name, so each cluster gets its own prefix.
-  destinationPath: s3://cnpg-prd/
+  # Its own bucket and key, separate from prd's; Barman adds the cluster name
+  # as a prefix inside it.
+  destinationPath: s3://cnpg-non/
   provider: s3
   secret:
     create: false

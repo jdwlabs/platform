@@ -7,6 +7,8 @@ kind: Secret
 metadata:
   name: postgresql-cluster-non-minio-ca
   namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
 type: Opaque
 stringData:
   ca.crt: |
