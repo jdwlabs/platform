@@ -160,9 +160,10 @@ JSON
   [ "$want" = "$got" ] || die "[$e] Vault value does not match the MinIO secret"
   echo "    Vault $VAULT_MOUNT/$path written (sha256 compared, not printed)"
 
-  attached=$("$MC" admin policy entities admin --user "$user" 2>/dev/null || true)
-  if [[ $attached != *"$policy"* ]]; then
-    "$MC" admin policy attach admin "$policy" --user "$user" >/dev/null
+  # Attach unconditionally: the entities listing names the user too, and the
+  # user and policy share a name, so searching it for the policy proves nothing.
+  if ! out=$("$MC" admin policy attach admin "$policy" --user "$user" 2>&1); then
+    [[ ${out,,} == *"already"* ]] || die "[$e] could not attach policy $policy to $user"
   fi
 
   es=postgresql-cluster-$e-barman-s3
