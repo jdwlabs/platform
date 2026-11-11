@@ -292,10 +292,13 @@ collectors:
     # Runs on every node beside the alloy container and shipped with a request but
     # no limit, so ~44Mi/node was unbounded across the whole DaemonSet — the
     # largest uncapped footprint left after the primary-container sweep.
+    # Seven-day working set swings between 7Mi and 49Mi per node, so the request
+    # covers the busiest node; the 128Mi limit still guards against a runaway
+    # reload.
     configReloader:
       resources:
         requests:
-          memory: 64Mi
+          memory: 48Mi
         limits:
           memory: 128Mi
 
