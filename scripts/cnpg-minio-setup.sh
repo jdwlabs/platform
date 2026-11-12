@@ -7,6 +7,10 @@
 #   bash scripts/cnpg-minio-setup.sh prd        # one of: prd non
 #   ROTATE=1 bash scripts/cnpg-minio-setup.sh prd
 #
+# The MinIO admin login is read from the TrueNAS app config over SSH
+# (truenas_admin, middleware API), so nothing has to be typed. Set
+# MINIO_ADMIN_PROMPT=1 to type it at mc's prompt instead.
+#
 # Per cluster (prd, non):
 #   bucket cnpg-<env>, policy cnpg-<env> reaching only that bucket, user
 #   cnpg-<env> with a freshly generated secret, Vault kv/cnpg-<env>-s3
@@ -25,6 +29,8 @@ set -euo pipefail
 umask 077
 
 MINIO_URL=https://192.168.1.205:9000
+TRUENAS_SSH=${TRUENAS_SSH:-truenas_admin@192.168.1.205}
+MINIO_APP=${MINIO_APP:-minio}
 VAULT_MOUNT=kv
 CA_FILE=${CA_FILE:-$HOME/projects/jdwlabs/infrastructure/terraform/minio-ca.crt}
 MC_MODULE=github.com/minio/mc@v0.0.0-20251106162529-77f82e18b540
@@ -43,7 +49,7 @@ else
   done
 fi
 
-for bin in kubectl vault openssl sha256sum go curl python3 base64; do
+for bin in kubectl vault openssl sha256sum go curl python3 base64 ssh shred; do
   command -v "$bin" >/dev/null || die "$bin not found on PATH"
 done
 [ -r "$CA_FILE" ] || die "MinIO CA not readable at $CA_FILE (set CA_FILE=...)"
@@ -97,9 +103,24 @@ mc_config() {
 }
 
 mc_config mc-admin
-step "MinIO admin login (mc prompts; the secret input is hidden)"
-# No stdout redirect: mc writes its prompts there.
-"$MC" alias set admin "$MINIO_URL" || die "admin login failed"
+if [ "${MINIO_ADMIN_PROMPT:-}" = 1 ]; then
+  step "MinIO admin login (mc prompts; the secret input is hidden)"
+  # No stdout redirect: mc writes its prompts there.
+  "$MC" alias set admin "$MINIO_URL" || die "admin login failed"
+else
+  # The root login lives only in the TrueNAS app's compose environment, and
+  # truenas_admin can read it through the middleware API. It goes from there to
+  # a tmpfs file to mc's stdin, so it never reaches a terminal or argv.
+  step "reading the MinIO admin login from TrueNAS ($TRUENAS_SSH, app '$MINIO_APP')"
+  ssh -o BatchMode=yes -o ConnectTimeout=10 "$TRUENAS_SSH" "midclt call app.config $MINIO_APP" \
+    | python3 -c 'import json,sys
+e = json.load(sys.stdin)["services"]["minio"]["environment"]
+sys.stdout.write(e["MINIO_ROOT_USER"] + "\n" + e["MINIO_ROOT_PASSWORD"] + "\n")' \
+    > "$work/admin" || die "could not read the MinIO admin login from TrueNAS (MINIO_ADMIN_PROMPT=1 to type it instead)"
+  [ "$(wc -l < "$work/admin")" -eq 2 ] || die "TrueNAS returned no MinIO admin login"
+  "$MC" alias set admin "$MINIO_URL" < "$work/admin" >/dev/null || die "admin login failed"
+  shred -u "$work/admin"
+fi
 "$MC" admin info admin >/dev/null || die "those credentials do not have admin rights"
 
 # Every bucket exists before any user is tested, so each deny check below has
