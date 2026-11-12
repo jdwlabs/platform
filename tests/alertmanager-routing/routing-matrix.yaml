@@ -178,6 +178,27 @@ cases:
       cnpg_cluster: platform-postgresql-cluster-prd
     receivers: ['ai-sre']
 
+  # A stalled WAL archive fills prd's volume in about three days and is the
+  # point-in-time restore going stale, so it has to reach a human.
+  - name: stalled prd WAL archive pages humans as well as the agent
+    labels:
+      alertname: CNPGWALArchivingStalled
+      severity: critical
+      namespace: database
+      cnpg_cluster: platform-postgresql-cluster-prd
+      pod: platform-postgresql-cluster-prd-10
+    receivers: ['ai-sre', 'discord']
+
+  # A failed weekly base backup leaves a week to retry before the window
+  # thins out; agent-only like the other warnings.
+  - name: failed prd base backup reaches the agent only
+    labels:
+      alertname: CNPGBaseBackupFailed
+      severity: warning
+      namespace: database
+      cnpg_cluster: platform-postgresql-cluster-prd
+    receivers: ['ai-sre']
+
   # Tenant routes own their tenant's alerts at every severity, which is what
   # keeps them free to point at a per-tenant channel later.
   - name: jdwlabs warning reaches the agent and the tenant route

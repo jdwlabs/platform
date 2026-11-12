@@ -1,0 +1,25 @@
+# The CA that issued the TrueNAS MinIO certificate, copied from
+# jdwlabs/infrastructure terraform/minio-ca.crt. A public certificate, not a
+# credential; it is a Secret only because the ObjectStore's endpointCA must
+# reference one. It expires in 2036.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgresql-cluster-prd-minio-ca
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIBqzCCAVCgAwIBAgIUT0+mMv1nLJ4iotAz5LOz45kQuIkwCgYIKoZIzj0EAwIw
+    ITEfMB0GA1UEAwwWamR3bGFicyBtaW5pby1zdGF0ZSBDQTAeFw0yNjA3MjQwNDEx
+    MzBaFw0zNjA3MjEwNDExMzBaMCExHzAdBgNVBAMMFmpkd2xhYnMgbWluaW8tc3Rh
+    dGUgQ0EwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAR04UpOzsKhUA0CsBSilAtu
+    wJ7dVasIcmcEnThHvyW2UcRxntDGdAtCCdHJ3s74Hf2IDWJayAmHmys1+AvLvXtB
+    o2YwZDAdBgNVHQ4EFgQUfYej3B+AJ+KIUd3Rd0eu6Jk+BAIwHwYDVR0jBBgwFoAU
+    fYej3B+AJ+KIUd3Rd0eu6Jk+BAIwEgYDVR0TAQH/BAgwBgEB/wIBADAOBgNVHQ8B
+    Af8EBAMCAQYwCgYIKoZIzj0EAwIDSQAwRgIhALI/fndx0E1kGpOjfOnJgNjbeHNE
+    927ggCPcewQowHP9AiEA9iCRX6Ug0APXrVcUiKf8xAmrccYPqYyhCXSV8GMYghw=
+    -----END CERTIFICATE-----

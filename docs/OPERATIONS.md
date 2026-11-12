@@ -243,8 +243,9 @@ serves reads.
 Two CronJobs dump to the same Drive remote, each covering a different cluster —
 `postgres-backup` dumps the prd cluster to `gdrive:postgres-backups`, and
 `litellm-db-backup` dumps the LiteLLM gateway cluster to
-`gdrive:postgres-backups/litellm`. The non-prd cluster is deliberately not
-backed up; it holds nothing that cannot be recreated.
+`gdrive:postgres-backups/litellm`. The non-prd cluster is not dumped; it
+holds nothing that cannot be recreated. Both `database` clusters also archive
+WAL to MinIO (§3.3).
 
 ```bash
 kubectl -n database create job --from=cronjob/postgres-backup postgres-backup-manual-$(date +%s)
@@ -257,10 +258,7 @@ See **[RESTORE.md](RESTORE.md)** for the full step-by-step guide, including
 Windows-specific `kubectl cp` quirks, ownership fixes, and the mandatory
 `app` role password reset after every restore.
 
-**Restore from CNPG snapshot (WAL/declarative):**
-
-Edit the `Cluster` CR's `spec.bootstrap.recovery.backup.name` to the target
-snapshot and re-sync the Application. The Atlas migration job will replay on top.
+**Point-in-time restore from the WAL archive:** see §3.3.
 
 **Failover:** CNPG promotes a healthy replica automatically when the
 primary fails. Force a manual switchover with:
@@ -421,6 +419,122 @@ without complaint.
 
 After the host returns, `kubectl uncordon <node>`, then confirm each cluster
 reports `1/1 Running` again and that `platform-vault-*` still has quorum.
+
+### 3.3 WAL archive and point-in-time restore
+
+Both clusters in `database` archive WAL through the Barman Cloud plugin
+(`cnpg-barman-plugin`, namespace `cnpg-system`) to the TrueNAS MinIO
+(`https://192.168.1.205:9000`): prd to bucket `cnpg-prd`, non to `cnpg-non`.
+prd keeps 30 days and takes a base backup on Sundays at 03:00 UTC; non keeps
+7 days. `archive_timeout` is 5 minutes, which is the recovery point.
+
+`scripts/cnpg-minio-setup.sh` created both buckets and one MinIO user per
+cluster (`cnpg-prd`, `cnpg-non`), each reaching only its own bucket, so the
+non-prd cluster can never delete prd's archive. The keys are in Vault at
+`kv/cnpg-prd-s3` and `kv/cnpg-non-s3` and reach the clusters through
+ExternalSecrets. Those paths are not part of `platformctl bootstrap seed`:
+after a Vault rebuild, re-run the script with `ROTATE=1`.
+
+**Health:**
+
+```bash
+kubectl -n database get objectstores,scheduledbackups,backups
+PRIMARY=$(kubectl -n database get cluster platform-postgresql-cluster-prd -o jsonpath='{.status.currentPrimary}')
+# age of the last archive: under ~300s when healthy; failed_count should not climb
+kubectl -n database exec "$PRIMARY" -c postgres -- psql -tAc \
+  "select now() - last_archived_time, failed_count, last_failed_wal from pg_stat_archiver"
+kubectl -n database logs "$PRIMARY" -c plugin-barman-cloud --tail=50
+```
+
+`CNPGWALArchivingStalled` (critical) fires after 15 minutes without a
+successful archive from the prd primary: `reason=archive-age` when the last
+success is too old, `reason=never-archived` when a primary has failed every
+attempt since it started. Unarchived WAL is **not** capped by
+`max_slot_wal_keep_size`: it accumulates in `pg_wal` at about 4.7GB a day and
+prd stops taking writes when the 16Gi volume fills, roughly three days into a
+MinIO outage. Fix the cause (MinIO down, expired or rotated key, CA change);
+the archiver retries by itself and drains the backlog. `CNPGBaseBackupFailed`
+(warning) means the last weekly base backup failed; `CNPGBaseBackupStale`
+(warning) means the newest one is over 8 days old or the plugin has stopped
+reporting backups. Take one by hand once the cause is fixed:
+
+```bash
+kubectl -n database apply -f - <<'EOF'
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata:
+  name: prd-manual-<yyyymmdd>
+  namespace: database
+spec:
+  cluster:
+    name: platform-postgresql-cluster-prd
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+EOF
+```
+
+**Rotating a MinIO key:** from a terminal outside any agent session, run
+`ROTATE=1 bash scripts/cnpg-minio-setup.sh prd` (or `non`). It checks Vault
+first, issues the new secret, writes it to Vault at once without printing it,
+and force-syncs the cluster's ExternalSecret. Archiving fails for the seconds
+between MinIO accepting the new secret and the Secret refreshing; the
+archiver retries, so this stays well inside the 15-minute alert. If the script
+stops between those two steps it says so: re-run it.
+
+**Point-in-time restore into a new cluster.** Restore into a separate cluster
+in `database` first, whatever the goal: it proves the archive and leaves prd
+alone. Leave `plugins:` out of the restore cluster so it archives nothing.
+The rule that protects prd: never configure any other cluster to archive to
+prd's ObjectStore under `serverName: platform-postgresql-cluster-prd`; it
+would write a second history into prd's archive. Size `storage` from what prd
+uses (`df -h /var/lib/postgresql/data` in the primary): 8Gi covers today's
+~1.5GB database plus the WAL replayed on top of the base backup.
+
+```bash
+IMAGE=$(kubectl -n database get cluster platform-postgresql-cluster-prd -o jsonpath='{.status.image}')
+kubectl -n database apply -f - <<EOF
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-restoretest
+  namespace: database
+spec:
+  instances: 1
+  imageName: $IMAGE
+  storage:
+    size: 8Gi
+    storageClass: longhorn
+  resources:
+    requests:
+      memory: 192Mi
+    limits:
+      memory: 768Mi
+  bootstrap:
+    recovery:
+      source: origin
+      # Omit recoveryTarget to replay to the end of the archive.
+      recoveryTarget:
+        targetTime: "2026-11-12 04:00:00+00"
+  externalClusters:
+    - name: origin
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: platform-postgresql-cluster-prd-backups
+          serverName: platform-postgresql-cluster-prd
+EOF
+kubectl -n database get cluster pg-restoretest -w
+kubectl -n database exec pg-restoretest-1 -c postgres -- psql -d jdwillmsen_prd \
+  -c "select count(*) from minecraft.players"
+```
+
+Compare row counts with prd, then `kubectl -n database delete cluster
+pg-restoretest` (its PVC goes with it). To replace prd itself, the same
+`bootstrap.recovery` block goes into the cluster's values with a new cluster
+name, because CNPG only bootstraps a cluster once; that is a planned R3 change,
+not an incident shortcut. Restore the `app` password and restart the apps as in
+[RESTORE.md](RESTORE.md) steps 8–9.
 
 ## 4. TLS certs
 
