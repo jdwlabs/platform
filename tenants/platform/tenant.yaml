@@ -175,7 +175,7 @@ services:
   - name: nginx-gateway-fabric
     chart: nginx-gateway-fabric
     repo: ghcr.io/nginx/charts
-    revision: 2.8.0
+    revision: 2.8.1
     namespace: nginx-gateway
     postInstall: true
     syncWave: 1
@@ -237,7 +237,7 @@ services:
   - name: external-secrets
     chart: external-secrets
     repo: https://charts.external-secrets.io
-    revision: 2.14.0
+    revision: 2.15.0
     namespace: external-secrets
     postInstall: true
     syncWave: 2
@@ -253,7 +253,7 @@ services:
   - name: vault-config-operator
     chart: vault-config-operator
     repo: https://redhat-cop.github.io/vault-config-operator
-    revision: v1.0.5
+    revision: v1.0.6
     namespace: vault-config-operator
     postInstall: false
     syncWave: 2
@@ -269,7 +269,7 @@ services:
   - name: monitoring
     chart: k8s-monitoring
     repo: https://grafana.github.io/helm-charts
-    revision: 4.5.5
+    revision: 4.6.1
     namespace: monitoring
     postInstall: false
     syncWave: 2
@@ -277,7 +277,7 @@ services:
   - name: grafana
     chart: grafana
     repo: https://grafana-community.github.io/helm-charts
-    revision: 14.0.1
+    revision: 14.4.1
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -285,7 +285,7 @@ services:
   - name: loki
     chart: loki
     repo: https://grafana.github.io/helm-charts
-    revision: 7.5.0
+    revision: 7.6.0
     namespace: monitoring
     # The directory exists again, now holding the ruler's rule ConfigMaps. It
     # cannot live with the other alert rules under kube-prometheus-stack: those
@@ -298,7 +298,7 @@ services:
   - name: kube-prometheus-stack
     chart: kube-prometheus-stack
     repo: https://prometheus-community.github.io/helm-charts
-    revision: "92.13.1"
+    revision: "92.22.0"
     namespace: monitoring
     postInstall: true
     syncWave: 2
@@ -306,7 +306,7 @@ services:
   - name: blackbox-exporter
     chart: prometheus-blackbox-exporter
     repo: https://prometheus-community.github.io/helm-charts
-    revision: "11.20.2"
+    revision: "11.21.3"
     namespace: monitoring
     postInstall: false
     syncWave: 2
@@ -389,7 +389,7 @@ services:
   - name: reloader
     chart: reloader
     repo: https://stakater.github.io/stakater-charts
-    revision: 2.2.18
+    revision: 2.2.20
     namespace: reloader
     postInstall: false
     syncWave: 2
@@ -507,7 +507,7 @@ services:
   - name: holmes
     chart: holmes
     repo: https://robusta-charts.storage.googleapis.com
-    revision: 0.45.0
+    revision: 0.46.0
     namespace: ai-sre
     postInstall: true
     syncWave: 5
