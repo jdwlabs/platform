@@ -23,9 +23,12 @@ spec:
       # the count over the limit, so one old failed Job would otherwise linger
       # forever and keep kube_job_failed pinned at 1.
       ttlSecondsAfterFinished: 86400
+      # Never rather than OnFailure, so a failed run keeps its pod and logs
+      # until the TTL above; see postgres-backup for the incident behind it.
+      backoffLimit: 2
       template:
         spec:
-          restartPolicy: OnFailure
+          restartPolicy: Never
           # 999 is the postgres account baked into the postgres image. fsGroup
           # is what makes the shared backup volume writable by the dump
           # container and readable by the upload container after it.
@@ -99,7 +102,9 @@ spec:
               # Its own subdirectory, so this delete cannot reach the prd dumps
               # in the parent. The sibling job's delete is recursive and does
               # reach in here, but applies the identical 7d rule, so either job
-              # expiring these files produces the same result.
+              # expiring these files produces the same result. Both delete
+              # outright rather than to Drive trash, which would keep counting
+              # against the quota for another 30 days.
               command:
                 - /bin/sh
                 - -c
@@ -107,7 +112,7 @@ spec:
                   set -euo pipefail
                   cp /rclone-config/rclone.conf "$RCLONE_CONFIG"
                   rclone copy /backup gdrive:postgres-backups/litellm
-                  rclone delete gdrive:postgres-backups/litellm --min-age 7d || true
+                  rclone delete gdrive:postgres-backups/litellm --min-age 7d --drive-use-trash=false || true
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
