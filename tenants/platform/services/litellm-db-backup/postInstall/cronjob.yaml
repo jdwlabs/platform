@@ -99,12 +99,11 @@ spec:
                 # under a home directory this uid does not have.
                 - name: RCLONE_CONFIG
                   value: /tmp/rclone.conf
-              # Its own subdirectory, so this delete cannot reach the prd dumps
-              # in the parent. The sibling job's delete is recursive and does
-              # reach in here, but applies the identical 7d rule, so either job
-              # expiring these files produces the same result. Both delete
-              # outright rather than to Drive trash, which would keep counting
-              # against the quota for another 30 days.
+              # Its own subdirectory, and the postgres-backup delete is limited
+              # to prd-*.sql.gz at depth 1, so neither job can expire the
+              # other's dumps. Deletes skip Drive trash, which would keep
+              # counting against the quota for another 30 days. Expiry failure
+              # is only warned about: the upload above has already succeeded.
               command:
                 - /bin/sh
                 - -c
@@ -112,7 +111,9 @@ spec:
                   set -euo pipefail
                   cp /rclone-config/rclone.conf "$RCLONE_CONFIG"
                   rclone copy /backup gdrive:postgres-backups/litellm
-                  rclone delete gdrive:postgres-backups/litellm --min-age 7d --drive-use-trash=false || true
+                  rclone delete gdrive:postgres-backups/litellm --min-age 7d --drive-use-trash=false \
+                    --include 'litellm-*.sql.gz' --max-depth 1 \
+                    || echo "WARN: backup expiry failed" >&2
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

@@ -105,7 +105,10 @@ spec:
               # Expired dumps are deleted outright, not trashed: Drive trash
               # counts against the storage quota for 30 days, so trashing a
               # week of dumps kept roughly half the quota pinned and the
-              # uploads eventually failed with storageQuotaExceeded.
+              # uploads eventually failed with storageQuotaExceeded. The filter
+              # and depth limit keep this from reaching the litellm dumps in the
+              # subdirectory, which have their own job. Expiry failure is only
+              # warned about: the upload above has already succeeded.
               command:
                 - /bin/sh
                 - -c
@@ -113,7 +116,9 @@ spec:
                   set -euo pipefail
                   cp /rclone-config/rclone.conf "$RCLONE_CONFIG"
                   rclone copy /backup gdrive:postgres-backups
-                  rclone delete gdrive:postgres-backups --min-age 7d --drive-use-trash=false || true
+                  rclone delete gdrive:postgres-backups --min-age 7d --drive-use-trash=false \
+                    --include 'prd-*.sql.gz' --max-depth 1 \
+                    || echo "WARN: backup expiry failed" >&2
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
