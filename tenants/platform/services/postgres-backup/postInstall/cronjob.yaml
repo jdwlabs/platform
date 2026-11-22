@@ -19,9 +19,14 @@ spec:
       # 1. TTL-clean any finished Job after a day regardless of subsequent
       # successes.
       ttlSecondsAfterFinished: 86400
+      # Never + a small backoffLimit instead of OnFailure: with OnFailure the
+      # Job controller deletes the crash-looping pod once the limit is hit, so
+      # a failed run kept its Job object but lost every log line explaining
+      # why. Never leaves each failed pod in place until the TTL above.
+      backoffLimit: 2
       template:
         spec:
-          restartPolicy: OnFailure
+          restartPolicy: Never
           # 999 is the postgres account baked into the postgres image; a uid
           # above 10000 would not own the paths that image expects to own.
           # Both images declare no user, so the uid has to be numeric for
@@ -97,6 +102,10 @@ spec:
                 # the home directory, which no longer exists for this uid.
                 - name: RCLONE_CONFIG
                   value: /tmp/rclone.conf
+              # Expired dumps are deleted outright, not trashed: Drive trash
+              # counts against the storage quota for 30 days, so trashing a
+              # week of dumps kept roughly half the quota pinned and the
+              # uploads eventually failed with storageQuotaExceeded.
               command:
                 - /bin/sh
                 - -c
@@ -104,7 +113,7 @@ spec:
                   set -euo pipefail
                   cp /rclone-config/rclone.conf "$RCLONE_CONFIG"
                   rclone copy /backup gdrive:postgres-backups
-                  rclone delete gdrive:postgres-backups --min-age 7d || true
+                  rclone delete gdrive:postgres-backups --min-age 7d --drive-use-trash=false || true
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
