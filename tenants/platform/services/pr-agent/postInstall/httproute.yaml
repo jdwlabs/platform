@@ -10,7 +10,9 @@ metadata:
   namespace: pr-review
 spec:
   parentRefs:
-    - name: platform-gateway
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: platform-gateway
       namespace: nginx-gateway
       sectionName: https
   hostnames:
@@ -20,5 +22,8 @@ spec:
         - path: {type: Exact, value: /api/v1/github_webhooks}
           method: POST
       backendRefs:
-        - name: pr-agent
+        - group: ""
+          kind: Service
+          name: pr-agent
           port: 3000
+          weight: 1

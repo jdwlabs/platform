@@ -44,15 +44,21 @@ spec:
           kind: Gateway
           jqPathExpressions:
             - .spec.listeners[]?.tls.certificateRefs[]?.group
-        - group: gateway.networking.k8s.io
-          kind: HTTPRoute
-          jqPathExpressions:
-            - .spec.parentRefs[]?.group
-            - .spec.parentRefs[]?.kind
-            - .spec.rules[]?.backendRefs[]?.group
-            - .spec.rules[]?.backendRefs[]?.kind
-            - .spec.rules[]?.backendRefs[]?.weight
-            - .spec.rules[]?.matches
+        {{- /*
+        No HTTPRoute entry, on purpose. Ignoring the Gateway API defaulted
+        paths hid more than drift: under RespectIgnoreDifferences the ignored
+        path is replaced with the live value before the apply, so a changed
+        rule match or backend weight diffed clean, synced green and never
+        reached the route. Service routes write those defaults out instead,
+        enforced by tools/check-service-httproute-defaults.py.
+
+        Unlike the deployments appset, this one stays on client-side diff:
+        ServerSideDiff would change how every resource in every services app
+        is compared, and the ignores below exist to stop SSA field-manager
+        fights whose behaviour under a dry-run apply only a full before/after
+        measurement can show. Explicit route defaults fix the HTTPRoute trap
+        without taking that on.
+        */}}
         # Only scalar paths here. Ignoring fields *inside* .spec.data[] items
         # breaks under RespectIgnoreDifferences=true + ServerSideApply: ArgoCD
         # strips the ignored subfields from each atomic-list item before the

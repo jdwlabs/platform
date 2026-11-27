@@ -361,6 +361,27 @@ jobs:
       - name: Reject duplicate ADR numeric prefixes
         run: python3 tools/check-adr-numbering.py
 
+  # The services appset diffs client-side and no longer ignores HTTPRoute
+  # defaults, so a sparse service route would sit OutOfSync forever; catch
+  # it before merge instead.
+  service-httproute-defaults:
+    # See remote-chart-image-pin-check's needs comment above — same reason.
+    needs: image-pin-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: tools/requirements.txt
+      - name: Install dependencies
+        run: pip install -r tools/requirements.txt
+      - name: Test the checker against its known false negatives
+        run: python3 -m unittest discover -s tools/tests -t tools/tests
+      - name: Reject service HTTPRoutes that leave Gateway API defaults implicit
+        run: python3 tools/check-service-httproute-defaults.py
+
   go-build-test:
     runs-on: ubuntu-latest
     defaults:

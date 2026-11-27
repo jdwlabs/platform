@@ -7,12 +7,21 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   parentRefs:
-    - name: platform-gateway
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: platform-gateway
       namespace: nginx-gateway
       sectionName: https
   hostnames:
     - grafana.jdwlabs.com
   rules:
-    - backendRefs:
-        - name: platform-grafana
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: platform-grafana
           port: 80
+          weight: 1

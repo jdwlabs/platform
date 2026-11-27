@@ -7,18 +7,27 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   parentRefs:
-    - name: platform-gateway
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: platform-gateway
       namespace: nginx-gateway
       sectionName: https
   hostnames:
     - alertmanager.jdwlabs.com
   rules:
-    - filters:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
         - type: ExtensionRef
           extensionRef:
             group: gateway.nginx.org
             kind: AuthenticationFilter
             name: alertmanager-auth
       backendRefs:
-        - name: platform-kube-prometheus-s-alertmanager
+        - group: ""
+          kind: Service
+          name: platform-kube-prometheus-s-alertmanager
           port: 9093
+          weight: 1

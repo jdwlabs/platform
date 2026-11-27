@@ -7,18 +7,27 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   parentRefs:
-    - name: platform-gateway
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: platform-gateway
       namespace: nginx-gateway
       sectionName: https
   hostnames:
     - longhorn.jdwlabs.com
   rules:
-    - filters:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
         - type: ExtensionRef
           extensionRef:
             group: gateway.nginx.org
             kind: AuthenticationFilter
             name: longhorn-auth
       backendRefs:
-        - name: longhorn-frontend
+        - group: ""
+          kind: Service
+          name: longhorn-frontend
           port: 80
+          weight: 1
