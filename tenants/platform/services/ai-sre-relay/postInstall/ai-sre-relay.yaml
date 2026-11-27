@@ -42,6 +42,25 @@ spec:
             # latency is high-variance: 433-600s+ observed on the big model;
             # 900 gives the fallback chain room to run inside one alert.
             - {name: INVESTIGATION_TIMEOUT_SECONDS, value: "900"}
+            # The queue only buffers between HTTP accept and the worker pool;
+            # it cannot buy freshness. Four workers draining a 900s
+            # investigation take minutes per alert, so depth decides how long
+            # an alert waits before anyone looks at it. The 2*workers default
+            # held 8, which refused a storm's sends outright and left the
+            # sender to redeliver alerts that then aged out uninvestigated.
+            # 256 covers a storm after collapseFiring has already reduced it to
+            # one investigation per (alertname, namespace, severity) group.
+            # Memory is not the limit here: a queued alert measured ~1.5KiB of
+            # live heap, so a full queue is ~350KiB typical, a few MiB when
+            # every entry carries its group's siblings, against the 32Mi
+            # container limit and 28MiB GOMEMLIMIT below.
+            - {name: QUEUE_SIZE, value: "256"}
+            # Reviewed, not raised: this is concurrent LLM investigations, and
+            # the sre-investigator pools are free-tier endpoints behind a
+            # fallback chain, so extra workers buy upstream contention and
+            # per-investigation memory rather than throughput. Depth, not
+            # concurrency, is what a storm needs.
+            - {name: MAX_CONCURRENT, value: "4"}
             # Alert tickets are operational events, not planned work, so they
             # get a project of their own rather than landing on any stream's
             # board. The relay scopes its fingerprint dedupe search to this
