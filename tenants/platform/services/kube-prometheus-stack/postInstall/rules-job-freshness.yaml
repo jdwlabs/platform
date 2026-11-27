@@ -347,3 +347,27 @@ spec:
             summary: "Backup {{ $labels.backup_job }} fell back to an unquiesced copy"
             description: "The newest artifact for {{ $labels.backup_job }} was taken without its source at rest — the source was meant to be running and the job could not reach it. The archive is usable; why the source was unreachable is what needs looking at."
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+        # A dump that is a fraction of its usual size is missing data — a
+        # dropped database, the wrong cluster dumped — and every other signal
+        # here passes it: the job exits 0, the artifact is fresh and non-empty.
+        # The floor is the producer's own backup_min_artifact_bytes, like the
+        # age budget, so no producer's size is hard-coded here and one that
+        # publishes no floor is simply not covered.
+        #
+        # `> 0` leaves the zero-byte case to BackupArtifactEmpty alone, so one
+        # empty artifact pages once rather than twice. That also excludes an
+        # exporter's placeholder zeros, which is why this needs no
+        # backup_state_reported clause of its own.
+        - alert: BackupArtifactBelowFloor
+          expr: |
+            (max by (backup_job, artifact) (backup_last_artifact_bytes) > 0)
+            < on (backup_job, artifact)
+            max by (backup_job, artifact) (backup_min_artifact_bytes)
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Backup {{ $labels.backup_job }} produced a suspiciously small artifact"
+            description: "The newest artifact for {{ $labels.backup_job }} is {{ $value | humanize1024 }}B, below the floor the job publishes for itself. The run reported success; the artifact is probably missing data. Check the job's logs and the size of earlier artifacts."
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"

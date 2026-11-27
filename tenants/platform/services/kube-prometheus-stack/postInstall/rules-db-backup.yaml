@@ -1,0 +1,80 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: db-backup-rules
+  namespace: monitoring
+spec:
+  groups:
+    # Static expectations for the two logical database dumps. Staleness, empty
+    # and undersized artifacts are the generic rules in rules-job-freshness.yaml,
+    # fed by the gauges each job publishes; those all go quiet together the
+    # moment a producer stops publishing, so each producer also needs rules
+    # that name it and cannot expire. They live here rather than beside the
+    # CronJobs because a rule shipped by the thing it watches is deleted with
+    # it. Shape and reasoning: docs/observability/JOB-OUTPUT-FRESHNESS.md,
+    # "Every producer needs a static expectation".
+    - name: db-backup-expectations
+      rules:
+        # Over kube-state-metrics, not the job's own gauges: the exporter goes
+        # on serving its last payload after the CronJob is gone, so only a
+        # series the CronJob itself owns can say it is missing. `== 0` makes a
+        # suspended CronJob count as missing too, and since a comparison inside
+        # absent() strips every label, the labels are stated on the rule.
+        - alert: PostgresBackupCronJobAbsent
+          expr: absent(kube_cronjob_spec_suspend{namespace="database", cronjob="postgres-backup"} == 0)
+          for: 1h
+          labels:
+            severity: critical
+            namespace: database
+            cronjob: postgres-backup
+          annotations:
+            summary: "No scheduled backup exists for the prd PostgreSQL cluster"
+            description: >-
+              The CronJob database/postgres-backup is suspended, deleted, or was never created. It is the only backup
+              of platform-postgresql-cluster-prd. If it is being retired on purpose, delete this rule in the same change.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+
+        # Is anything reporting on the backup? Presence here only means the
+        # exporter is up and scraped, never that a backup ran.
+        - alert: PostgresBackupProducerAbsent
+          expr: absent(backup_last_success_timestamp_seconds{backup_job="postgres-backup"})
+          for: 1h
+          labels:
+            severity: critical
+            namespace: database
+          annotations:
+            summary: "No backup freshness signal exists for the prd PostgreSQL cluster"
+            description: >-
+              Nothing is publishing backup_last_success_timestamp_seconds for postgres-backup, so the stale, empty and
+              size-floor alerts cannot fire for it. Check the postgres-backup-exporter Deployment and ServiceMonitor in
+              the database namespace.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+
+        - alert: LitellmDbBackupCronJobAbsent
+          expr: absent(kube_cronjob_spec_suspend{namespace="ai-sre", cronjob="litellm-db-backup"} == 0)
+          for: 1h
+          labels:
+            severity: critical
+            namespace: ai-sre
+            cronjob: litellm-db-backup
+          annotations:
+            summary: "No scheduled backup exists for the LiteLLM database"
+            description: >-
+              The CronJob ai-sre/litellm-db-backup is suspended, deleted, or was never created. It is the only backup
+              of platform-litellm-db-cluster. If it is being retired on purpose, delete this rule in the same change.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+
+        - alert: LitellmDbBackupProducerAbsent
+          expr: absent(backup_last_success_timestamp_seconds{backup_job="litellm-db-backup"})
+          for: 1h
+          labels:
+            severity: critical
+            namespace: ai-sre
+          annotations:
+            summary: "No backup freshness signal exists for the LiteLLM database"
+            description: >-
+              Nothing is publishing backup_last_success_timestamp_seconds for litellm-db-backup, so the stale, empty and
+              size-floor alerts cannot fire for it. Check the litellm-db-backup-exporter Deployment and ServiceMonitor in
+              the ai-sre namespace.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+
