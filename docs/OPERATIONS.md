@@ -293,11 +293,12 @@ next to the existing `token` breaks the remote at its first token refresh. The
 client, the secret and a freshly authorized token are written together or not
 at all — `platformctl` rejects a block carrying only half a credential.
 
-Steps 1-6 need a browser and the Google account that owns the shared drive; the
-rest is CLI.
+Steps 1-6 need a browser and the Google account whose My Drive holds the
+backups; the rest is CLI.
 
-1. **Google Cloud Console**, signed in as the Google account with at least
-   *Content manager* on the shared drive holding `postgres-backups`. Create a
+1. **Google Cloud Console**, signed in as the Google account that owns
+   `postgres-backups`. The remote targets that account's My Drive, not a
+   shared drive, so no sharing role is involved. Create a
    project dedicated to this remote (e.g. `jdwlabs-backups`) — nothing else on
    the platform uses Google Cloud, and a project of its own keeps the consent
    screen scoped to this one job.
@@ -323,8 +324,9 @@ rest is CLI.
    rclone authorize "drive" "<client-id>" "<client-secret>"
    ```
 
-7. Assemble the replacement block. Read the current one for the `team_drive`
-   id — it identifies the shared drive and must be carried over verbatim:
+7. Assemble the replacement block. Read the current one and carry its
+   non-credential lines over verbatim — `team_drive` is empty here, because the
+   remote targets the account's My Drive rather than a shared drive:
 
    ```bash
    kubectl -n database get secret rclone-gdrive \
@@ -335,7 +337,7 @@ rest is CLI.
    [gdrive]
    type = drive
    scope = drive
-   team_drive = <existing id>
+   team_drive =
    client_id = <new client id>
    client_secret = <new client secret>
    token = <JSON printed by rclone authorize>
