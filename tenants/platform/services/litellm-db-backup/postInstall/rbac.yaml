@@ -1,0 +1,37 @@
+# The backup's publish step writes its freshness numbers into a ConfigMap,
+# which is how they reach the exporter without a shared volume. `create`
+# cannot be limited by name, so it is granted alone; everything that touches
+# an existing object is scoped to the one ConfigMap this job owns.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: litellm-db-backup
+  namespace: ai-sre
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: litellm-db-backup
+  namespace: ai-sre
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["litellm-db-backup-metrics"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: litellm-db-backup
+  namespace: ai-sre
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: litellm-db-backup
+subjects:
+  - kind: ServiceAccount
+    name: litellm-db-backup
+    namespace: ai-sre
