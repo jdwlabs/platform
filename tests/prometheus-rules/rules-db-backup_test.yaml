@@ -1,10 +1,16 @@
 # Unit tests for the database dump's freshness coverage: the generic size
-# floor and the two producers' static expectations.
+# floor, the two producers' static expectations, and the staged WAL-archiving
+# rules.
 #
 # The static-expectation fixtures model the exporter publishing, because that
 # is the state production is always in — a switch proven only against a silent
 # producer is proven against a world that does not exist (see
 # docs/observability/JOB-OUTPUT-FRESHNESS.md).
+#
+# The WAL fixtures are asserted in both directions on purpose. Their whole
+# design is a guard that keeps them silent until the barman-cloud plugin is
+# attached, and a guard that never lets anything through is indistinguishable
+# from a rule that passes.
 rule_files:
   - rules/job-freshness-rules.yaml
   - rules/db-backup-rules.yaml
@@ -211,4 +217,113 @@ tests:
               runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
       - eval_time: 90m
         alertname: PostgresBackupProducerAbsent
+        exp_alerts: []
+
+  # Today's cluster: no plugin attached, CNPG's no-op archive_command. Every
+  # WAL condition is true here and nothing may fire.
+  - interval: 1m
+    name: WAL rules are inert without the barman-cloud plugin
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '3600+60x60'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '0+0x60'
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '0+1x60'
+      - series: 'cnpg_collector_pg_wal{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor",value="size"}'
+        values: '14000000000+0x60'
+      - series: 'kubelet_volume_stats_capacity_bytes{namespace="database",persistentvolumeclaim="platform-postgresql-cluster-prd-1"}'
+        values: '16797093888+0x60'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: CNPGWALArchiveStale
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: CNPGWALArchiveFailing
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: CNPGWALVolumeUsageHigh
+        exp_alerts: []
+
+  # The same conditions once the plugin is attached to prd. The plugin series
+  # sits on a different pod than the primary on purpose: the guard joins on
+  # the cluster's PodMonitor job, not the pod. The standby's own stale
+  # archiver reading must not fire — standbys archive nothing.
+  - interval: 1m
+    name: WAL rules fire once the plugin is attached
+    input_series:
+      - series: 'barman_cloud_cloudnative_pg_io_first_recoverability_point{namespace="database",pod="platform-postgresql-cluster-prd-6",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '1000000000+0x60'
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '3600+60x60'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '0+0x60'
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-prd-6",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '3600+60x60'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-6",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '1+0x60'
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '0+1x60'
+      - series: 'cnpg_collector_pg_wal{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor",value="size"}'
+        values: '14000000000+0x60'
+      - series: 'kubelet_volume_stats_capacity_bytes{namespace="database",persistentvolumeclaim="platform-postgresql-cluster-prd-1"}'
+        values: '16797093888+0x60'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: CNPGWALArchiveStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: database
+              pod: platform-postgresql-cluster-prd-1
+              job: database/platform-postgresql-cluster-prd-cluster-podmonitor
+            exp_annotations:
+              summary: "WAL archiving on platform-postgresql-cluster-prd-1 is 1h 45m 0s behind"
+              description: "No WAL segment has been archived from primary platform-postgresql-cluster-prd-1 in over 15 minutes. Point-in-time recovery cannot reach past the last archived segment, and unarchived WAL accumulates in pg_wal."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+      - eval_time: 45m
+        alertname: CNPGWALArchiveFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: database
+              pod: platform-postgresql-cluster-prd-1
+              job: database/platform-postgresql-cluster-prd-cluster-podmonitor
+            exp_annotations:
+              summary: "WAL archive attempts are failing on platform-postgresql-cluster-prd-1"
+              description: "platform-postgresql-cluster-prd-1 has recorded failed WAL archive attempts continuously for 15 minutes. Check the plugin-barman sidecar's logs and the ObjectStore's credentials and free space."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+      - eval_time: 45m
+        alertname: CNPGWALVolumeUsageHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: database
+              pod: platform-postgresql-cluster-prd-1
+              persistentvolumeclaim: platform-postgresql-cluster-prd-1
+              job: database/platform-postgresql-cluster-prd-cluster-podmonitor
+            exp_annotations:
+              summary: "pg_wal on platform-postgresql-cluster-prd-1 uses 83.35% of its volume"
+              description: "WAL on platform-postgresql-cluster-prd-1 has used over 70% of the volume for 15 minutes. A stalled archive or an inactive replication slot is the usual cause; once the volume fills the instance stops accepting writes."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+
+  # A single failed push that the next retry clears is noise.
+  - interval: 1m
+    name: one transient archive failure is silent
+    input_series:
+      - series: 'barman_cloud_cloudnative_pg_io_first_recoverability_point{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '1000000000+0x60'
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '0x10 1+0x50'
+    alert_rule_test:
+      # Inside the 15m window the increase is visible but has not held for
+      # the `for:`; at 45m the window has cleared.
+      - eval_time: 20m
+        alertname: CNPGWALArchiveFailing
+        exp_alerts: []
+      - eval_time: 26m
+        alertname: CNPGWALArchiveFailing
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: CNPGWALArchiveFailing
         exp_alerts: []

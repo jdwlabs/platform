@@ -78,3 +78,88 @@ spec:
               the ai-sre namespace.
             runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
 
+    # Staged for continuous WAL archiving through the barman-cloud plugin,
+    # which is installed but not attached to any cluster yet.
+    #
+    # Every rule is guarded by `and on (namespace, job)` over the plugin's own
+    # metrics, and that guard is what keeps them inert today. Without an
+    # ObjectStore, CNPG's archive_command reports success without archiving
+    # anything, so the archiver metrics below already exist and read healthy.
+    # Unguarded, these rules would pass on archives nobody is making — a
+    # second false green beside ContinuousArchiving=True. The plugin exports
+    # barman_cloud_cloudnative_pg_io_* only for a cluster that has it attached
+    # (none exist with it installed and unused), so the guard switches each
+    # rule on per cluster when its archive becomes real, with no edit here. `job` is the
+    # cluster's PodMonitor, the one label both metric families share whichever
+    # instance happens to serve the plugin's series.
+    #
+    # Until a cluster is attached these rules match nothing, which looks the
+    # same as passing. That is acceptable only because nothing archives yet;
+    # docs/OPERATIONS.md says so rather than implying coverage.
+    - name: cnpg-wal-archiving
+      rules:
+        # archive_timeout forces a segment every 5 minutes even when idle, so
+        # 15 minutes without one is three missed segments, not a quiet
+        # database. Primary only: a standby archives nothing.
+        - alert: CNPGWALArchiveStale
+          expr: |
+            (
+              cnpg_pg_stat_archiver_seconds_since_last_archival > 900
+              and on (namespace, pod) (cnpg_pg_replication_in_recovery == 0)
+            )
+            and on (namespace, job)
+            count by (namespace, job) ({__name__=~"barman_cloud_cloudnative_pg_io_.+"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "WAL archiving on {{ $labels.pod }} is {{ $value | humanizeDuration }} behind"
+            description: >-
+              No WAL segment has been archived from primary {{ $labels.pod }} in over 15 minutes. Point-in-time
+              recovery cannot reach past the last archived segment, and unarchived WAL accumulates in pg_wal.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+
+        # Rising for a sustained window rather than any increase: one failed
+        # push that the next retry succeeds is noise, a run of them is an
+        # object store that is refusing writes.
+        - alert: CNPGWALArchiveFailing
+          expr: |
+            increase(cnpg_pg_stat_archiver_failed_count[15m]) > 0
+            and on (namespace, job)
+            count by (namespace, job) ({__name__=~"barman_cloud_cloudnative_pg_io_.+"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "WAL archive attempts are failing on {{ $labels.pod }}"
+            description: >-
+              {{ $labels.pod }} has recorded failed WAL archive attempts continuously for 15 minutes. Check the
+              plugin-barman sidecar's logs and the ObjectStore's credentials and free space.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+
+        # WAL that cannot be archived is kept, so a stuck archive ends in a
+        # full volume and a primary that stops taking writes — the 2026-11-06
+        # outage, reached through a different door. pg_wal shares the data
+        # volume (no walStorage), whose PVC CNPG names after the pod; a
+        # separate WAL volume would need the claim name changed here.
+        - alert: CNPGWALVolumeUsageHigh
+          expr: |
+            (
+              label_replace(
+                max by (namespace, pod, job) (cnpg_collector_pg_wal{value="size"}),
+                "persistentvolumeclaim", "$1", "pod", "(.+)"
+              )
+              / on (namespace, persistentvolumeclaim) group_left()
+              max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes)
+            ) > 0.7
+            and on (namespace, job)
+            count by (namespace, job) ({__name__=~"barman_cloud_cloudnative_pg_io_.+"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "pg_wal on {{ $labels.pod }} uses {{ $value | humanizePercentage }} of its volume"
+            description: >-
+              WAL on {{ $labels.pod }} has used over 70% of the volume for 15 minutes. A stalled archive or an inactive
+              replication slot is the usual cause; once the volume fills the instance stops accepting writes.
+            runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
