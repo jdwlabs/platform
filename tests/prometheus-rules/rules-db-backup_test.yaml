@@ -1,0 +1,329 @@
+# Unit tests for the database dump's freshness coverage: the generic size
+# floor, the two producers' static expectations, and the staged WAL-archiving
+# rules.
+#
+# The static-expectation fixtures model the exporter publishing, because that
+# is the state production is always in — a switch proven only against a silent
+# producer is proven against a world that does not exist (see
+# docs/observability/JOB-OUTPUT-FRESHNESS.md).
+#
+# The WAL fixtures are asserted in both directions on purpose. Their whole
+# design is a guard that keeps them silent until the barman-cloud plugin is
+# attached, and a guard that never lets anything through is indistinguishable
+# from a rule that passes.
+rule_files:
+  - rules/job-freshness-rules.yaml
+  - rules/db-backup-rules.yaml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    name: dump above its floor is silent
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="postgres-backup",artifact="dump"}'
+        values: '1000000000+0x60'
+      - series: 'backup_last_artifact_bytes{backup_job="postgres-backup",artifact="dump"}'
+        values: '366040174+0x60'
+      - series: 'backup_max_age_seconds{backup_job="postgres-backup",artifact="dump"}'
+        values: '28800+0x60'
+      - series: 'backup_min_artifact_bytes{backup_job="postgres-backup",artifact="dump"}'
+        values: '52428800+0x60'
+      - series: 'backup_state_reported{backup_job="postgres-backup",artifact="dump"}'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: BackupArtifactBelowFloor
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: BackupArtifactEmpty
+        exp_alerts: []
+
+  - interval: 1m
+    name: dump below its floor fires
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="postgres-backup",artifact="dump"}'
+        values: '1000000000+0x60'
+      - series: 'backup_last_artifact_bytes{backup_job="postgres-backup",artifact="dump"}'
+        values: '1048576+0x60'
+      - series: 'backup_max_age_seconds{backup_job="postgres-backup",artifact="dump"}'
+        values: '28800+0x60'
+      - series: 'backup_min_artifact_bytes{backup_job="postgres-backup",artifact="dump"}'
+        values: '52428800+0x60'
+      - series: 'backup_state_reported{backup_job="postgres-backup",artifact="dump"}'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: BackupArtifactBelowFloor
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: BackupArtifactBelowFloor
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              backup_job: postgres-backup
+              artifact: dump
+            exp_annotations:
+              summary: "Backup postgres-backup produced a suspiciously small artifact"
+              description: "The newest artifact for postgres-backup is 1MiB, below the floor the job publishes for itself. The run reported success; the artifact is probably missing data. Check the job's logs and the size of earlier artifacts."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # Zero bytes is BackupArtifactEmpty's alone, so it pages once, not twice.
+  - interval: 1m
+    name: empty dump is not also below floor
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="postgres-backup",artifact="dump"}'
+        values: '1000000000+0x60'
+      - series: 'backup_last_artifact_bytes{backup_job="postgres-backup",artifact="dump"}'
+        values: '0+0x60'
+      - series: 'backup_max_age_seconds{backup_job="postgres-backup",artifact="dump"}'
+        values: '28800+0x60'
+      - series: 'backup_min_artifact_bytes{backup_job="postgres-backup",artifact="dump"}'
+        values: '52428800+0x60'
+      - series: 'backup_state_reported{backup_job="postgres-backup",artifact="dump"}'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: BackupArtifactBelowFloor
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: BackupArtifactEmpty
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              backup_job: postgres-backup
+              artifact: dump
+            exp_annotations:
+              summary: "Backup postgres-backup produced an empty artifact"
+              description: "The most recent artifact for postgres-backup is zero bytes. The job completed successfully and wrote nothing."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#5-troubleshooting-symptom--fix"
+
+  # The exporter's placeholder payload before a first run: zeros, floor
+  # published, state 0. Nothing about the floor should fire on it.
+  - interval: 1m
+    name: placeholder payload does not trip the floor
+    input_series:
+      - series: 'backup_last_success_timestamp_seconds{backup_job="litellm-db-backup",artifact="dump"}'
+        values: '0+0x60'
+      - series: 'backup_last_artifact_bytes{backup_job="litellm-db-backup",artifact="dump"}'
+        values: '0+0x60'
+      - series: 'backup_max_age_seconds{backup_job="litellm-db-backup",artifact="dump"}'
+        values: '28800+0x60'
+      - series: 'backup_min_artifact_bytes{backup_job="litellm-db-backup",artifact="dump"}'
+        values: '5242880+0x60'
+      - series: 'backup_state_reported{backup_job="litellm-db-backup",artifact="dump"}'
+        values: '0+0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: BackupArtifactBelowFloor
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: BackupArtifactEmpty
+        exp_alerts: []
+
+  # A producer that publishes no floor is not covered, rather than paging.
+  - interval: 1m
+    name: producer without a floor is silent
+    input_series:
+      - series: 'backup_last_artifact_bytes{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"}'
+        values: '1024+0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: BackupArtifactBelowFloor
+        exp_alerts: []
+
+  - interval: 1m
+    name: scheduled and reporting backups are silent
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{namespace="database",cronjob="postgres-backup"}'
+        values: '0+0x120'
+      - series: 'kube_cronjob_spec_suspend{namespace="ai-sre",cronjob="litellm-db-backup"}'
+        values: '0+0x120'
+      - series: 'backup_last_success_timestamp_seconds{backup_job="postgres-backup",artifact="dump",namespace="database"}'
+        values: '1000000000+0x120'
+      - series: 'backup_last_success_timestamp_seconds{backup_job="litellm-db-backup",artifact="dump",namespace="ai-sre"}'
+        values: '1000000000+0x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: PostgresBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: PostgresBackupProducerAbsent
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: LitellmDbBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: LitellmDbBackupProducerAbsent
+        exp_alerts: []
+
+  # The exporter goes on publishing after the CronJob is suspended or gone,
+  # which is exactly why the switch reads kube-state-metrics instead.
+  - interval: 1m
+    name: suspended CronJob fires while its exporter keeps publishing
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{namespace="database",cronjob="postgres-backup"}'
+        values: '1+0x120'
+      - series: 'backup_last_success_timestamp_seconds{backup_job="postgres-backup",artifact="dump",namespace="database"}'
+        values: '1000000000+0x120'
+      - series: 'backup_last_success_timestamp_seconds{backup_job="litellm-db-backup",artifact="dump",namespace="ai-sre"}'
+        values: '1000000000+0x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: PostgresBackupCronJobAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: database
+              cronjob: postgres-backup
+            exp_annotations:
+              summary: "No scheduled backup exists for the prd PostgreSQL cluster"
+              description: "The CronJob database/postgres-backup is suspended, deleted, or was never created. It is the only backup of platform-postgresql-cluster-prd. If it is being retired on purpose, delete this rule in the same change."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+      # Deleted outright: no series at all.
+      - eval_time: 90m
+        alertname: LitellmDbBackupCronJobAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: ai-sre
+              cronjob: litellm-db-backup
+            exp_annotations:
+              summary: "No scheduled backup exists for the LiteLLM database"
+              description: "The CronJob ai-sre/litellm-db-backup is suspended, deleted, or was never created. It is the only backup of platform-litellm-db-cluster. If it is being retired on purpose, delete this rule in the same change."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+      - eval_time: 90m
+        alertname: PostgresBackupProducerAbsent
+        exp_alerts: []
+
+  - interval: 1m
+    name: missing exporter fires the producer switch
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{namespace="database",cronjob="postgres-backup"}'
+        values: '0+0x120'
+      - series: 'kube_cronjob_spec_suspend{namespace="ai-sre",cronjob="litellm-db-backup"}'
+        values: '0+0x120'
+      - series: 'backup_last_success_timestamp_seconds{backup_job="postgres-backup",artifact="dump",namespace="database"}'
+        values: '1000000000+0x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: LitellmDbBackupProducerAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: ai-sre
+              backup_job: litellm-db-backup
+            exp_annotations:
+              summary: "No backup freshness signal exists for the LiteLLM database"
+              description: "Nothing is publishing backup_last_success_timestamp_seconds for litellm-db-backup, so the stale, empty and size-floor alerts cannot fire for it. Check the litellm-db-backup-exporter Deployment and ServiceMonitor in the ai-sre namespace."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+      - eval_time: 90m
+        alertname: PostgresBackupProducerAbsent
+        exp_alerts: []
+
+  # Today's cluster: no plugin attached, CNPG's no-op archive_command. Every
+  # WAL condition is true here and nothing may fire.
+  - interval: 1m
+    name: WAL rules are inert without the barman-cloud plugin
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '3600+60x60'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '0+0x60'
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '0+1x60'
+      - series: 'cnpg_collector_pg_wal{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor",value="size"}'
+        values: '14000000000+0x60'
+      - series: 'kubelet_volume_stats_capacity_bytes{namespace="database",persistentvolumeclaim="platform-postgresql-cluster-prd-1"}'
+        values: '16797093888+0x60'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: CNPGWALArchiveStale
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: CNPGWALArchiveFailing
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: CNPGWALVolumeUsageHigh
+        exp_alerts: []
+
+  # The same conditions once the plugin is attached to prd. The plugin series
+  # sits on a different pod than the primary on purpose: the guard joins on
+  # the cluster's PodMonitor job, not the pod. The standby's own stale
+  # archiver reading must not fire — standbys archive nothing.
+  - interval: 1m
+    name: WAL rules fire once the plugin is attached
+    input_series:
+      - series: 'barman_cloud_cloudnative_pg_io_first_recoverability_point{namespace="database",pod="platform-postgresql-cluster-prd-6",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '1000000000+0x60'
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '3600+60x60'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '0+0x60'
+      - series: 'cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="database",pod="platform-postgresql-cluster-prd-6",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '3600+60x60'
+      - series: 'cnpg_pg_replication_in_recovery{namespace="database",pod="platform-postgresql-cluster-prd-6",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '1+0x60'
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '0+1x60'
+      - series: 'cnpg_collector_pg_wal{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor",value="size"}'
+        values: '14000000000+0x60'
+      - series: 'kubelet_volume_stats_capacity_bytes{namespace="database",persistentvolumeclaim="platform-postgresql-cluster-prd-1"}'
+        values: '16797093888+0x60'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: CNPGWALArchiveStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: database
+              pod: platform-postgresql-cluster-prd-1
+              job: database/platform-postgresql-cluster-prd-cluster-podmonitor
+            exp_annotations:
+              summary: "WAL archiving on platform-postgresql-cluster-prd-1 is 1h 45m 0s behind"
+              description: "No WAL segment has been archived from primary platform-postgresql-cluster-prd-1 in over 15 minutes. Point-in-time recovery cannot reach past the last archived segment, and unarchived WAL accumulates in pg_wal."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+      - eval_time: 45m
+        alertname: CNPGWALArchiveFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: database
+              pod: platform-postgresql-cluster-prd-1
+              job: database/platform-postgresql-cluster-prd-cluster-podmonitor
+            exp_annotations:
+              summary: "WAL archive attempts are failing on platform-postgresql-cluster-prd-1"
+              description: "platform-postgresql-cluster-prd-1 has recorded failed WAL archive attempts continuously for 15 minutes. Check the plugin-barman sidecar's logs and the ObjectStore's credentials and free space."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+      - eval_time: 45m
+        alertname: CNPGWALVolumeUsageHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: database
+              pod: platform-postgresql-cluster-prd-1
+              persistentvolumeclaim: platform-postgresql-cluster-prd-1
+              job: database/platform-postgresql-cluster-prd-cluster-podmonitor
+            exp_annotations:
+              summary: "pg_wal on platform-postgresql-cluster-prd-1 uses 83.35% of its volume"
+              description: "WAL on platform-postgresql-cluster-prd-1 has used over 70% of the volume for 15 minutes. A stalled archive or an inactive replication slot is the usual cause; once the volume fills the instance stops accepting writes."
+              runbook_url: "https://github.com/jdwlabs/platform/blob/main/docs/OPERATIONS.md#backups"
+
+  # A single failed push that the next retry clears is noise.
+  - interval: 1m
+    name: one transient archive failure is silent
+    input_series:
+      - series: 'barman_cloud_cloudnative_pg_io_first_recoverability_point{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '1000000000+0x60'
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="database",pod="platform-postgresql-cluster-prd-1",job="database/platform-postgresql-cluster-prd-cluster-podmonitor"}'
+        values: '0x10 1+0x50'
+    alert_rule_test:
+      # Inside the 15m window the increase is visible but has not held for
+      # the `for:`; at 45m the window has cleared.
+      - eval_time: 20m
+        alertname: CNPGWALArchiveFailing
+        exp_alerts: []
+      - eval_time: 26m
+        alertname: CNPGWALArchiveFailing
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: CNPGWALArchiveFailing
+        exp_alerts: []

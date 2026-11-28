@@ -50,6 +50,7 @@ exists, an `artifact` label.
 | `backup_max_age_seconds` | gauge | The producer's own freshness SLO, published as a metric. |
 | `backup_state_reported` | gauge | Required of any producer whose metrics are served by a **long-lived exporter** rather than pushed by the run itself. `1` when the values beside it are state the producer wrote, `0` when they are placeholders the exporter is serving because nothing has written state yet. Publish it in **both** cases — a gauge that appears and disappears cannot be joined against, and its absence has to keep meaning "this producer never adopted it". |
 | `backup_exporter_start_time_seconds` | gauge | Required alongside `backup_state_reported`. Unix time the exporter process began serving. It is what bounds the suppression that `backup_state_reported 0` buys: `BackupStateNeverReported` compares it against this producer's own budget, so a placeholder state can never be both permanent and silent. |
+| `backup_min_artifact_bytes` | gauge | Optional. The size below which this producer's artifact is suspect, published as a metric like the age budget. Where an artifact's normal size is known — a database dump — a much smaller one means data is missing from it while every other gauge reads healthy. Omit it where size varies too much to set a floor; nothing then fires. |
 | `backup_last_artifact_quiesced` | gauge | Optional. `1` if the newest artifact was taken with its **source at rest**, `0` if taken while the source was running and could not be stilled. Omit it entirely where the distinction does not apply, or where it is not known — never guess a value, since the point of the gauge is to make a degraded run distinguishable from a clean one. |
 | `backup_last_artifact_source_replicas` | gauge | Optional, informational. The source workload's desired replica count at the time of the copy. No rule reads it; it is what lets a human tell a *held* source apart from a *stopped* one after the fact. Omit it when the count cannot be read. |
 
@@ -151,7 +152,7 @@ ServiceMonitor. Three details are worth copying:
 
 ### The rules these feed
 
-The four rules driven by these gauges are live in
+The rules driven by these gauges are live in
 `tenants/platform/services/kube-prometheus-stack/postInstall/rules-job-freshness.yaml`
 and are not restated here — one copy, so the two cannot drift:
 
@@ -164,6 +165,7 @@ and are not restated here — one copy, so the two cannot drift:
 | `BackupArtifactSizeMissing` | a producer publishes a timestamp but no `backup_last_artifact_bytes`, so `BackupArtifactEmpty` can never fire for it |
 | `BackupStateNeverReported` | a producer has served placeholder values for longer than its own `backup_max_age_seconds`, so the two criticals above are suppressed for it and nothing is watching its artifact |
 | `BackupArtifactNotQuiesced` | the newest artifact was taken while its source was running and could not be stilled |
+| `BackupArtifactBelowFloor` | the newest artifact is non-empty but smaller than the producer's own `backup_min_artifact_bytes` |
 
 The two `…Missing` rules exist because the three gauges are required together
 and adoption is easy to get half-right. Publishing a timestamp alone leaves the

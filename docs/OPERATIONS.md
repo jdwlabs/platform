@@ -238,29 +238,58 @@ serves reads.
 
 ## 3. PostgreSQL operations
 
-**Manual backup trigger:**
+### Backups
 
-Two CronJobs dump to the same Drive remote, each covering a different cluster —
-`postgres-backup` dumps the prd cluster to `gdrive:postgres-backups`, and
-`litellm-db-backup` dumps the LiteLLM gateway cluster to
-`gdrive:postgres-backups/litellm`. The non-prd cluster is deliberately not
-backed up; it holds nothing that cannot be recreated.
+**What exists today, and what does not.** The only database backup is a
+logical `pg_dumpall` every 6 hours, gzipped and copied to Google Drive, kept for
+7 days. There is no WAL archive, no base backup, and no point-in-time recovery:
+a restore brings a cluster back to the moment of the dump it is made from, so up
+to 6 hours of writes can be lost, more if the latest runs failed.
+
+| CronJob | Source cluster | Drive path | Schedule (UTC) |
+|---|---|---|---|
+| `database/postgres-backup` | `platform-postgresql-cluster-prd` | `gdrive:postgres-backups/prd-<stamp>.sql.gz` | `0 */6 * * *` |
+| `ai-sre/litellm-db-backup` | `platform-litellm-db-cluster` | `gdrive:postgres-backups/litellm/litellm-<stamp>.sql.gz` | `30 */6 * * *` |
+
+The non-prd cluster is deliberately not backed up; it holds nothing that cannot
+be recreated.
+
+Two things look like more coverage than there is:
+
+- **`ContinuousArchiving=True` on the CNPG clusters is a false green.** No
+  `ObjectStore` or `ScheduledBackup` exists, so CNPG's `archive_command`
+  succeeds without archiving anything. No `Backup` object exists to recover a
+  `Cluster` from.
+- **The barman-cloud plugin is installed but attached to no cluster.** The
+  WAL-archiving alerts (`CNPGWALArchiveStale`, `CNPGWALArchiveFailing`,
+  `CNPGWALVolumeUsageHigh`) are staged for it and stay inert until a cluster
+  exports the plugin's metrics. That they never fire today means nothing.
+
+**How a backup failure is noticed.** Each job counts a run as successful only
+once Drive reports the new object at the same size as the local dump; `rclone
+copy` exiting 0 is not enough. It then publishes the freshness gauges of
+[docs/observability/JOB-OUTPUT-FRESHNESS.md](observability/JOB-OUTPUT-FRESHNESS.md)
+through a `<job>-metrics` ConfigMap, served by a `<job>-exporter` Deployment in
+the same namespace. Budget 8h, so `BackupArtifactStale` pages about 8.5h after
+the last verified dump; `BackupArtifactBelowFloor` pages on a dump under 50 MiB
+(prd) or 5 MiB (LiteLLM), roughly a tenth of their size in 2026-11. Check the
+current state with:
+
+```bash
+kubectl -n database get configmap postgres-backup-metrics -o jsonpath='{.data.metrics\.txt}'
+kubectl -n ai-sre get configmap litellm-db-backup-metrics -o jsonpath='{.data.metrics\.txt}'
+```
+
+**Manual backup trigger:**
 
 ```bash
 kubectl -n database create job --from=cronjob/postgres-backup postgres-backup-manual-$(date +%s)
 kubectl -n ai-sre create job --from=cronjob/litellm-db-backup litellm-db-backup-manual-$(date +%s)
 ```
 
-**Restore from SQL dump (`.sql.gz`):**
-
-See **[RESTORE.md](RESTORE.md)** for the full step-by-step guide, including
-Windows-specific `kubectl cp` quirks, ownership fixes, and the mandatory
-`app` role password reset after every restore.
-
-**Restore from CNPG snapshot (WAL/declarative):**
-
-Edit the `Cluster` CR's `spec.bootstrap.recovery.backup.name` to the target
-snapshot and re-sync the Application. The Atlas migration job will replay on top.
+**Restore:** download the dump from Drive and replay it with `psql`.
+**[RESTORE.md](RESTORE.md)** is the step-by-step procedure, from fetching the
+file to resetting the `app` password afterwards.
 
 **Failover:** CNPG promotes a healthy replica automatically when the
 primary fails. Force a manual switchover with:
@@ -507,6 +536,10 @@ kubectl -n cert-manager logs deploy/porkbun-webhook
 | `JdwillmsenMinecraftActorParkedLong` (warning) | An actor has held a presence override with no `until` for over 24 hours, and nothing clears one of those on its own. If the override is still wanted, make it that actor's default in the minecraft-fwb chart's actor list so git says so, then run `tools/mc presence unpark <actor>` once that change has synced: changing the default does not clear the override, and the warning stays until it is cleared. Otherwise clear it with `tools/mc presence unpark <actor>`; the warning resolves within about three minutes, since the rule bridges a leader handover of that length. |
 | `JdwillmsenMinecraftPresenceStale` (warning) | The presence leader has not completed a tick that read both its overrides and the actor statuses for over five minutes, and has held that for five more. The leader agent's log says which read fails, and the two fail differently. `presence_tick_skipped` is a failed override read: parks, expiries and wakes are frozen, and desired state and override ages hold their last values. `presence_status_read_failed` is a failed status read: the loop still evaluates, expires and kicks, but reads every bot as out of the world, so `JdwillmsenMinecraftAfkBotsDegraded` may page for bots that are fine once the outage passes thirty minutes. Either way, check the Postgres cluster behind it. `store_open_failed` at startup is the likeliest production cause: Postgres was unreachable when the agent started, so it runs without a store for the life of the process, its stamp stays at the seed of 0, and the warning never clears on its own. Restart the agent pod once Postgres is back. `presence_store_unready` means its presence tables are not migrated. A new leader seeds its stamp at 0, so one that never reads the store warns too; one that reads it within the hold does not. With no stamp at all (presence switched off, no leader yet, or the agent gone) it is silent, and the agent connection rules cover the last. |
 | `BackupBudgetMissing` / `BackupArtifactSizeMissing` (warning) | A producer publishes a success timestamp but not `backup_max_age_seconds` / `backup_last_artifact_bytes`. The matching critical (`BackupArtifactStale` / `BackupArtifactEmpty`) has nothing to compare against and can never fire for that producer, so it is unmonitored while looking healthy. Fix the producer's gauge set rather than the rule; the contract's three gauges are all required. |
+| `BackupArtifactBelowFloor` (critical) | The newest artifact is non-empty but smaller than the floor its producer publishes as `backup_min_artifact_bytes`. For the database dumps that means data is missing from it: a database dropped, or the wrong cluster dumped. Compare with the earlier dumps (`rclone lsl` from the `dump-fetch` pod in [RESTORE.md](RESTORE.md) Step 0) and read the job's `dump` container log. Lower the floor only if the database genuinely shrank. |
+| `PostgresBackupCronJobAbsent` / `LitellmDbBackupCronJobAbsent` (critical) | The CronJob that is the only backup of that cluster is suspended, deleted or was never created. Read from kube-state-metrics, so the job's exporter cannot hide it. Check `kubectl get cronjob -n database postgres-backup` (or `-n ai-sre litellm-db-backup`) and the `platform-postgres-backup` / `platform-litellm-db-backup` Applications. If the backup is being retired on purpose, delete the rule in the same change. |
+| `PostgresBackupProducerAbsent` / `LitellmDbBackupProducerAbsent` (critical) | Nothing publishes that job's freshness gauges, so its stale, empty and size-floor alerts cannot fire. Check the `<job>-exporter` Deployment, Service and ServiceMonitor in the job's namespace. Not evidence that backups are running: the exporter publishes whether or not they are. |
+| `CNPGWALArchiveStale` / `CNPGWALArchiveFailing` / `CNPGWALVolumeUsageHigh` | Staged for WAL archiving with the barman-cloud plugin and inert until a cluster has it attached (§3, Backups). Stale: no segment archived from the primary for 15m, so point-in-time recovery stops at the last one. Failing: archive attempts have been failing for 15m; read the plugin sidecar's log and check the ObjectStore's credentials and space. Volume: pg_wal is over 70% of the data volume, usually a stuck archive or an inactive slot (`CNPGReplicationSlotInactive`). |
 | A pod reports `Read-only file system` while every layer above the kernel looks healthy | The filesystem is latched read-only without `/proc/mounts` ever changing: since Linux 6.12 ext4's error handler sets an internal emergency-RO bit instead of `SB_RDONLY`, so `node_filesystem_readonly` stays 0, the `VolumeAttachment` stays `true`, and the CSI node pod logs nothing. The evidence is in the node's kernel ring buffer only. Query it in Loki: `{job="integrations/talos/kernel", node="<node>"} |~ "(?i)ext4-fs error"`. `NodeKernelFilesystemFault` fires on this within a minute; if it did not, check the collector is receiving at all before trusting the absence. Recovery is a remount, which in practice means deleting the pod (and, if the journal aborted, detaching/reattaching the volume). |
 
 ## 6. Non-interactive / CI mode
@@ -653,8 +686,11 @@ gates green.
 1. Restore the Vault snapshot (if available) into a fresh cluster.
 2. `platformctl bootstrap --non-interactive` with the env vars supplied
    from the operator's offline backup.
-3. PostgreSQL clusters auto-restore from their CNPG backups (configured
-   to use the rclone-gdrive remote).
+3. PostgreSQL clusters come up **empty**: nothing restores them
+   automatically, because no CNPG backup exists to bootstrap from. Once
+   `rclone-gdrive` is seeded, restore each backed-up cluster from its newest
+   dump on Drive with [RESTORE.md](RESTORE.md) before letting applications
+   write to it. Expect to lose up to 6 hours of data (§3, Backups).
 
 ## 8. Observability quick-refs
 

@@ -1,28 +1,113 @@
 # Database Restore Guide
 
 Step-by-step guide for restoring a PostgreSQL cluster from a SQL dump (`.sql.gz`).
-For CNPG declarative recovery (WAL/snapshot restore), see [OPERATIONS.md §3](OPERATIONS.md#3-postgresql-operations).
+This is the only restore path that exists: there is no WAL archive and no CNPG
+`Backup` to recover from, so there is no point-in-time recovery — see
+[OPERATIONS.md §3, Backups](OPERATIONS.md#backups).
 
 ---
 
 ## When to use this guide
 
-Use this guide when you have a `pg_dumpall`-format `.sql.gz` file (e.g. from the
-`postgres-backup` CronJob) and need to restore one or more databases to the live
-CNPG cluster.
-
-> **Not a CNPG snapshot restore.** CNPG's native WAL-based recovery requires
-> editing the `Cluster` CR. This guide covers plain SQL dump restores only.
+Use this guide to restore one or more databases from a `pg_dumpall`-format
+`.sql.gz` made by the `postgres-backup` or `litellm-db-backup` CronJob. The
+data comes back as of the dump's timestamp; anything written after it is lost.
 
 ---
 
 ## Prerequisites
 
 - `kubectl` configured with cluster access
-- The `.sql.gz` dump file on your local machine
 - Identify the target cluster:
-  - **Production:** `platform-postgresql-cluster-prd` in namespace `database`
-  - **Non-prod:** `platform-postgresql-cluster-non` in namespace `database`
+  - **Production:** `platform-postgresql-cluster-prd` in namespace `database`,
+    dumps under `gdrive:postgres-backups/prd-*.sql.gz`
+  - **LiteLLM gateway:** `platform-litellm-db-cluster` in namespace `ai-sre`,
+    dumps under `gdrive:postgres-backups/litellm/litellm-*.sql.gz`
+  - **Non-prod:** `platform-postgresql-cluster-non` in namespace `database` (not
+    backed up; only useful with a dump you made yourself)
+
+The commands below use the prd cluster and pod names; substitute the namespace,
+cluster and pod for the LiteLLM cluster.
+
+---
+
+## Step 0 — Fetch the dump from Google Drive
+
+The Drive credentials live only in the `rclone-gdrive` Secret, so the dump is
+fetched by a short-lived pod that mounts it, and streamed straight into the
+primary's `/dev/shm` without touching your machine's disk. Nothing here prints
+the credential. Create the pod in the namespace of the cluster you are
+restoring (`database` or `ai-sre`; both carry the Secret):
+
+```bash
+NS=database
+kubectl -n "$NS" apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dump-fetch
+spec:
+  restartPolicy: Never
+  activeDeadlineSeconds: 3600
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: rclone
+      image: rclone/rclone:1.74.4@sha256:c61954aaa32328a5486715dd063a81c7879f5195ad3505cd362deddd509dc4a1
+      env:
+        # rclone rewrites its config when it refreshes the token; the Secret
+        # mount is read-only.
+        - name: RCLONE_CONFIG
+          value: /tmp/rclone.conf
+      command: ["/bin/sh", "-c", "cp /rclone-config/rclone.conf /tmp/rclone.conf && sleep 3600"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - { name: rclone-config, mountPath: /rclone-config, readOnly: true }
+        - { name: tmp, mountPath: /tmp }
+  volumes:
+    - name: rclone-config
+      secret:
+        secretName: rclone-gdrive
+    - name: tmp
+      emptyDir: {}
+EOF
+kubectl -n "$NS" wait --for=condition=Ready pod/dump-fetch --timeout=120s
+```
+
+List the dumps and pick one. Names are UTC start times; the newest is last:
+
+```bash
+kubectl -n "$NS" exec dump-fetch -- rclone lsl gdrive:postgres-backups \
+  --max-depth 1 --include 'prd-*.sql.gz' | sort -k2,3
+# LiteLLM: gdrive:postgres-backups/litellm --include 'litellm-*.sql.gz'
+```
+
+Stream it into the primary and check it arrived whole — the size must match
+the `lsl` listing and `gzip -t` must pass. The primary moves on failover, so
+read its name rather than assuming one:
+
+```bash
+DUMP=prd-20261127T040859Z.sql.gz
+PRIMARY=$(kubectl -n "$NS" get cluster platform-postgresql-cluster-prd -o jsonpath='{.status.currentPrimary}')
+kubectl -n "$NS" exec dump-fetch -- rclone cat "gdrive:postgres-backups/$DUMP" \
+  | kubectl -n "$NS" exec -i "$PRIMARY" -c postgres -- \
+      sh -c 'cat > /dev/shm/restore.sql.gz && stat -c %s /dev/shm/restore.sql.gz && gzip -t /dev/shm/restore.sql.gz && echo OK'
+kubectl -n "$NS" delete pod dump-fetch
+```
+
+Rclone prints a `NOTICE` about its shared client_id on every command; it goes
+to stderr and does not corrupt the stream (see OPERATIONS.md §3.1).
+
+To keep a local copy as well, write the stream to a file instead
+(`... rclone cat ... > "$DUMP"`) and copy it in with Step 2.
 
 ---
 
@@ -38,6 +123,8 @@ All restore commands run against the primary.
 ---
 
 ## Step 2 — Copy the dump into the pod
+
+Skip this if Step 0 streamed the dump into the pod already.
 
 CNPG pods have a **read-only root filesystem**. The only writable location available
 without mounting a volume is `/dev/shm` (an in-memory tmpfs, ~14 GB).
@@ -83,8 +170,10 @@ Expected output:
 \restrict <token>
 ```
 
-The `\restrict` / `\unrestrict` tokens are CNPG barman plugin markers. Standard
-`psql` does not know these commands and will warn about them but continue safely.
+The `\restrict` / `\unrestrict` lines are written by `pg_dump` itself (from
+PostgreSQL 17.6 / 16.10): they stop a tampered dump from running psql
+meta-commands. The cluster's `psql` understands them; an older `psql` would
+reject them as invalid commands and carry on.
 
 Find the `\connect` line numbers — you need these if a partial re-restore is required:
 
@@ -146,7 +235,7 @@ kubectl exec platform-postgresql-cluster-prd-1 -n database -c postgres -- \
 | `ERROR: current user cannot be dropped` | Cannot drop `postgres` while connected as it |
 | `ERROR: role "streaming_replica" cannot be dropped` | CNPG replication role in use |
 | `ERROR: role "app/postgres/streaming_replica" already exists` | Roles survive — `ALTER ROLE` that follows still applies |
-| `ERROR: unrecognized configuration parameter "transaction_timeout"` | Dump was made with PG17, cluster runs PG16 — harmless |
+| `ERROR: unrecognized configuration parameter "transaction_timeout"` | Dump was made with PG17, cluster runs PG16 — harmless (one per database) |
 
 ### Errors that need action
 
@@ -230,7 +319,8 @@ kubectl exec platform-postgresql-cluster-prd-1 -n database -c postgres -- \
   psql -U postgres -c "ALTER ROLE app WITH PASSWORD '$APP_PASS';"
 ```
 
-For the non-prod cluster, replace `prd` with `non` in the secret name.
+For the non-prod cluster, replace `prd` with `non` in the secret name. For the
+LiteLLM cluster the secret is `platform-litellm-db-cluster-app` in `ai-sre`.
 
 ---
 
@@ -264,8 +354,9 @@ kubectl exec platform-postgresql-cluster-prd-1 -n database -c postgres -- \
 ## Quick reference checklist
 
 ```
+[ ] 0. Fetch the dump from Drive into /dev/shm (dump-fetch pod), check size + gzip -t
 [ ] 1. Identify primary pod
-[ ] 2. Copy .sql.gz to /dev/shm in the primary pod
+[ ] 2. (Only for a local file) copy .sql.gz to /dev/shm in the primary pod
 [ ] 3. Inspect dump header + note \connect line numbers
 [ ] 4. Terminate connections (scale down apps if needed)
 [ ] 5. Run full restore with --set ON_ERROR_STOP=off
@@ -284,6 +375,6 @@ kubectl exec platform-postgresql-cluster-prd-1 -n database -c postgres -- \
 |---|---|
 | `kubectl cp` Windows path parsing | `C:/path` is read as `host:path`. Always `cd` to the folder and use `.\filename` |
 | CNPG read-only filesystem | Only `/dev/shm` and the data PVC (`/var/lib/postgresql/data`) are writable. Use `/dev/shm` for temp files |
-| `\restrict` / `\unrestrict` tokens | CNPG-specific psql extensions. Standard `psql` ignores them with a warning — safe to ignore |
+| `\restrict` / `\unrestrict` lines | Written by `pg_dump` 17.6+/16.10+ as a guard against tampered dumps. Understood by the cluster's `psql`; an older client reports them as invalid commands and continues |
 | PG17 dump → PG16 cluster | `transaction_timeout` parameter warnings are harmless |
 | `app` password always overwritten | The dump stores a hashed password at backup time. Step 8 is always required |

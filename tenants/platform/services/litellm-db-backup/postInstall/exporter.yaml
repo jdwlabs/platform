@@ -1,0 +1,192 @@
+# Serves the job-output freshness contract
+# (docs/observability/JOB-OUTPUT-FRESHNESS.md) for the litellm-db-backup CronJob.
+# A CronJob pod is gone before Prometheus can scrape it, so the job writes its
+# verified numbers into the litellm-db-backup-metrics ConfigMap and this pod only
+# serves them. Same shape as the Minecraft world backup's exporter, which is
+# the contract's reference producer.
+#
+# The ConfigMap is created by the job, deliberately not shipped here: ArgoCD
+# self-heals this app, and a committed ConfigMap would have its contents
+# reverted on every sync, sawtoothing the signal between real and stale.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm-db-backup-exporter
+  namespace: ai-sre
+  labels:
+    app: litellm-db-backup-exporter
+spec:
+  replicas: 1
+  revisionHistoryLimit: 0
+  selector:
+    matchLabels:
+      app: litellm-db-backup-exporter
+  template:
+    metadata:
+      labels:
+        app: litellm-db-backup-exporter
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: exporter
+          image: busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          ports:
+            - name: metrics
+              containerPort: 9101
+          env:
+            - name: BACKUP_JOB
+              value: litellm-db-backup
+            # Must match the CronJob's publish step: these are what the
+            # placeholder payload carries before the first run has reported.
+            - name: MAX_AGE_SECONDS
+              value: "28800"
+            - name: MIN_BYTES
+              value: "5242880"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              OUT=/run/metrics
+              SRC=/run/state/metrics.txt
+              L="backup_job=\"${BACKUP_JOB}\",artifact=\"dump\""
+              STARTED="$(date +%s)"
+
+              # A non-numeric value renders as a bare metric name, which makes
+              # Prometheus reject the whole scrape. Crashlooping says so far
+              # louder than a scrape that silently drops.
+              for v in "$MAX_AGE_SECONDS" "$MIN_BYTES" "$STARTED"; do
+                case "$v" in
+                  ''|*[!0-9]*) echo "FATAL: '$v' is not a number" >&2; exit 1 ;;
+                esac
+              done
+
+              # Zeros rather than silence before the first run, so a backup
+              # that has never produced anything says so instead of looking
+              # healthy; backup_state_reported 0 marks them as placeholders.
+              zeros() {
+                echo "# HELP backup_last_success_timestamp_seconds Unix time an artifact was last verified written and non-empty."
+                echo "# TYPE backup_last_success_timestamp_seconds gauge"
+                echo "backup_last_success_timestamp_seconds{${L}} 0"
+                echo "# HELP backup_last_artifact_bytes Size in bytes of that artifact."
+                echo "# TYPE backup_last_artifact_bytes gauge"
+                echo "backup_last_artifact_bytes{${L}} 0"
+                echo "# HELP backup_max_age_seconds Freshness budget this producer publishes for itself."
+                echo "# TYPE backup_max_age_seconds gauge"
+                echo "backup_max_age_seconds{${L}} ${MAX_AGE_SECONDS}"
+                echo "# HELP backup_min_artifact_bytes Size below which this producer's artifact is suspect."
+                echo "# TYPE backup_min_artifact_bytes gauge"
+                echo "backup_min_artifact_bytes{${L}} ${MIN_BYTES}"
+              }
+              state() {
+                echo "# HELP backup_state_reported 1 if the producer has written the state being served, 0 if these are placeholder values."
+                echo "# TYPE backup_state_reported gauge"
+                echo "backup_state_reported{${L}} $1"
+                echo "# HELP backup_exporter_start_time_seconds Unix time this exporter process began serving."
+                echo "# TYPE backup_exporter_start_time_seconds gauge"
+                echo "backup_exporter_start_time_seconds{${L}} ${STARTED}"
+              }
+
+              # httpd runs as a child, not as PID 1: the kernel drops signals
+              # that have no handler when they are sent to a namespace's init
+              # from inside it, so a PID 1 httpd cannot be stopped by the
+              # refresh loop and would keep serving a frozen payload from a
+              # Ready pod. With the shell as PID 1, either half dying ends the
+              # container. The .txt suffix is what makes httpd send text/plain.
+              httpd -f -p 9101 -h "$OUT" &
+              HTTPD=$!
+              trap 'kill "$HTTPD" 2>/dev/null; exit 0' TERM INT
+
+              # Copied out of the ConfigMap mount, whose symlinks kubelet swaps
+              # on update, rather than served from it. A failed read is
+              # tolerated; a failure to publish it exits under set -e.
+              while kill -0 "$HTTPD" 2>/dev/null; do
+                if [ -s "$SRC" ]; then
+                  { cat "$SRC" && state 1; } > "$OUT/.metrics.tmp" 2>/dev/null || :
+                else
+                  { zeros && state 0; } > "$OUT/.metrics.tmp" 2>/dev/null || :
+                fi
+                # The state gauge is written last, so its presence proves the
+                # payload was written in full; a half-written one would fail
+                # the whole scrape.
+                if grep -q '^backup_state_reported{' "$OUT/.metrics.tmp" 2>/dev/null; then
+                  mv "$OUT/.metrics.tmp" "$OUT/metrics.txt"
+                fi
+                # In the background so the TERM trap runs at once rather than
+                # after the sleep, which would outlast the grace period.
+                sleep 60 &
+                wait $!
+              done
+              echo "FATAL: httpd exited" >&2
+              exit 1
+          readinessProbe:
+            httpGet:
+              path: /metrics.txt
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: state
+              mountPath: /run/state
+              readOnly: true
+            - name: metrics
+              mountPath: /run/metrics
+      volumes:
+        # Optional so the exporter starts, and serves placeholders, before the
+        # job has ever created the ConfigMap.
+        - name: state
+          configMap:
+            name: litellm-db-backup-metrics
+            optional: true
+        - name: metrics
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm-db-backup-exporter
+  namespace: ai-sre
+  labels:
+    app: litellm-db-backup-exporter
+spec:
+  selector:
+    app: litellm-db-backup-exporter
+  ports:
+    - name: metrics
+      port: 9101
+      targetPort: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: litellm-db-backup-exporter
+  namespace: ai-sre
+spec:
+  selector:
+    matchLabels:
+      app: litellm-db-backup-exporter
+  namespaceSelector:
+    matchNames:
+      - ai-sre
+  endpoints:
+    - port: metrics
+      path: /metrics.txt
+      interval: 60s

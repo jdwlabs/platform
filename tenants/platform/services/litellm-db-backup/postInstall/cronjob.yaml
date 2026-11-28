@@ -29,6 +29,13 @@ spec:
       template:
         spec:
           restartPolicy: Never
+          # Only the publish step talks to the API server, to write its
+          # freshness numbers into a ConfigMap (rbac.yaml). The token is
+          # mounted into that container alone rather than automounted into
+          # all three, so the dump and upload steps -- the latter holding the
+          # Drive token -- carry no cluster credential.
+          serviceAccountName: litellm-db-backup
+          automountServiceAccountToken: false
           # 999 is the postgres account baked into the postgres image. fsGroup
           # is what makes the shared backup volume writable by the dump
           # container and readable by the upload container after it.
@@ -79,7 +86,8 @@ spec:
               volumeMounts:
                 - mountPath: /backup
                   name: backup
-          containers:
+            # An init container so the publish step cannot start until the
+            # upload has been verified; see postgres-backup.
             - name: upload
               image: rclone/rclone:1.74.4@sha256:c61954aaa32328a5486715dd063a81c7879f5195ad3505cd362deddd509dc4a1
               # rclone streams in fixed-size chunks, so unlike pg_dumpall its
@@ -99,6 +107,10 @@ spec:
                 # under a home directory this uid does not have.
                 - name: RCLONE_CONFIG
                   value: /tmp/rclone.conf
+              # The size Drive reports for the new object has to match the
+              # local file before the run counts as a success: `rclone copy`
+              # exits 0 having copied nothing. See postgres-backup.
+              #
               # Its own subdirectory, and the postgres-backup delete is limited
               # to prd-*.sql.gz at depth 1, so neither job can expire the
               # other's dumps. Deletes skip Drive trash, which would keep
@@ -110,7 +122,23 @@ spec:
                 - |
                   set -euo pipefail
                   cp /rclone-config/rclone.conf "$RCLONE_CONFIG"
+                  set -- /backup/litellm-*.sql.gz
+                  if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+                    echo "FATAL: expected exactly one dump in /backup, found: $*" >&2
+                    exit 1
+                  fi
+                  NAME="$(basename "$1")"
+                  LOCAL_BYTES="$(stat -c %s "$1")"
                   rclone copy /backup gdrive:postgres-backups/litellm
+                  REMOTE_BYTES="$(rclone lsf gdrive:postgres-backups/litellm --files-only --max-depth 1 \
+                    --format s --include "$NAME")"
+                  if [ "$REMOTE_BYTES" != "$LOCAL_BYTES" ]; then
+                    echo "FATAL: $NAME is $LOCAL_BYTES bytes locally but '$REMOTE_BYTES' on Drive" >&2
+                    exit 1
+                  fi
+                  echo "verified $NAME on Drive, $REMOTE_BYTES bytes"
+                  printf 'name=%s\nbytes=%s\nverified_at=%s\n' \
+                    "$NAME" "$REMOTE_BYTES" "$(date +%s)" > /result/verified
                   rclone delete gdrive:postgres-backups/litellm --min-age 7d --drive-use-trash=false \
                     --include 'litellm-*.sql.gz' --max-depth 1 \
                     || echo "WARN: backup expiry failed" >&2
@@ -127,11 +155,116 @@ spec:
                   readOnly: true
                 - mountPath: /tmp
                   name: tmp
+                - mountPath: /result
+                  name: result
+          containers:
+            # Publishes the job-output freshness contract
+            # (docs/observability/JOB-OUTPUT-FRESHNESS.md) for exporter.yaml
+            # to serve, from the upload step's check of the object on Drive.
+            - name: publish
+              image: alpine/k8s:1.36.5@sha256:094adf64cdc4827377cdbe7ea5747472ce115f9fbc64a4e35970ec66777f9a00
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi
+              env:
+                # kubectl keeps its discovery cache under $HOME, and the root
+                # filesystem is read-only.
+                - name: HOME
+                  value: /tmp
+                - name: BACKUP_JOB
+                  value: litellm-db-backup
+                - name: METRICS_CM
+                  value: litellm-db-backup-metrics
+                # Must match exporter.yaml, which serves the same two values
+                # as placeholders before the first run has reported. Same 8h
+                # as postgres-backup: same 6h schedule.
+                - name: MAX_AGE_SECONDS
+                  value: "28800"
+                # About a tenth of a dump on 2026-11-27 (~55MB); see
+                # postgres-backup for why a size floor at all.
+                - name: MIN_BYTES
+                  value: "5242880"
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -euo pipefail
+                  NAME="$(sed -n 's/^name=//p' /result/verified)"
+                  BYTES="$(sed -n 's/^bytes=//p' /result/verified)"
+                  TS="$(sed -n 's/^verified_at=//p' /result/verified)"
+                  # Prometheus rejects a whole scrape on one malformed line,
+                  # which would take every gauge here down at once -- better
+                  # to fail the run than publish something unparseable.
+                  for v in "$BYTES" "$TS" "$MAX_AGE_SECONDS" "$MIN_BYTES"; do
+                    if [[ ! "$v" =~ ^[0-9]+$ ]]; then
+                      echo "FATAL: '$v' is not a number; not publishing" >&2
+                      exit 1
+                    fi
+                  done
+                  L="backup_job=\"${BACKUP_JOB}\",artifact=\"dump\""
+                  {
+                    echo "# HELP backup_last_success_timestamp_seconds Unix time an artifact was last verified written and non-empty."
+                    echo "# TYPE backup_last_success_timestamp_seconds gauge"
+                    echo "backup_last_success_timestamp_seconds{${L}} ${TS}"
+                    echo "# HELP backup_last_artifact_bytes Size in bytes of that artifact."
+                    echo "# TYPE backup_last_artifact_bytes gauge"
+                    echo "backup_last_artifact_bytes{${L}} ${BYTES}"
+                    echo "# HELP backup_max_age_seconds Freshness budget this producer publishes for itself."
+                    echo "# TYPE backup_max_age_seconds gauge"
+                    echo "backup_max_age_seconds{${L}} ${MAX_AGE_SECONDS}"
+                    echo "# HELP backup_min_artifact_bytes Size below which this producer's artifact is suspect."
+                    echo "# TYPE backup_min_artifact_bytes gauge"
+                    echo "backup_min_artifact_bytes{${L}} ${MIN_BYTES}"
+                  } > /tmp/metrics.txt
+                  kubectl create configmap "$METRICS_CM" -n ai-sre \
+                    --from-file=metrics.txt=/tmp/metrics.txt \
+                    --dry-run=client -o yaml | kubectl apply -n ai-sre -f -
+                  echo "published freshness metrics for $NAME"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - mountPath: /result
+                  name: result
+                  readOnly: true
+                # Not the upload step's /tmp, which holds the Drive token.
+                - mountPath: /tmp
+                  name: publish-tmp
+                - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+                  name: api-token
+                  readOnly: true
           volumes:
             - name: backup
               emptyDir: {}
             - name: tmp
               emptyDir: {}
+            # Kept apart from /backup, which is copied to Drive wholesale.
+            - name: result
+              emptyDir: {}
+            - name: publish-tmp
+              emptyDir: {}
+            # What automounting would have provided, for publish only.
+            - name: api-token
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      path: token
+                      expirationSeconds: 3600
+                  - configMap:
+                      name: kube-root-ca.crt
+                      items:
+                        - key: ca.crt
+                          path: ca.crt
+                  - downwardAPI:
+                      items:
+                        - path: namespace
+                          fieldRef:
+                            fieldPath: metadata.namespace
             - name: rclone-config
               secret:
                 secretName: rclone-gdrive
