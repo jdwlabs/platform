@@ -108,3 +108,63 @@ databases:
   - name: dotablazetech_non
     ensure: present
     owner: app
+
+# Continuous WAL archiving and weekly base backups through the Barman Cloud
+# plugin, to bucket cnpg-non on the TrueNAS MinIO. This cluster runs it first so that the
+# sidecar's memory, the archive itself and a point-in-time restore are proven
+# here before prd, and so that later plugin upgrades reach a cluster that can
+# take the hit before prd does. Enabling or changing the plugin restarts the
+# instance: the sidecar is injected into the pod.
+backups:
+  enabled: true
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  # One instance, so there is no standby to back up from.
+  target: primary
+  objectStore:
+    # The chart's default renders the ObjectStore as a Helm hook, which ArgoCD
+    # treats as ephemeral; a plain resource one wave ahead of the Cluster.
+    helmHook: false
+    annotations:
+      argocd.argoproj.io/sync-wave: "-1"
+  endpointURL: https://192.168.1.205:9000
+  # MinIO's certificate is issued by the internal CA; the Secret holding it is
+  # in this service's postInstall.
+  endpointCA:
+    create: false
+    name: postgresql-cluster-non-minio-ca
+    key: ca.crt
+  # Its own bucket and key, separate from prd's; Barman adds the cluster name
+  # as a prefix inside it.
+  destinationPath: s3://cnpg-non/
+  provider: s3
+  secret:
+    create: false
+    name: postgresql-cluster-non-barman-s3
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        memory: 64Mi
+      limits:
+        memory: 512Mi
+  # encryption is empty on purpose: the chart defaults to SSE-S3 (AES256), and
+  # MinIO rejects that header because it has no KMS configured.
+  wal:
+    compression: gzip
+    encryption: ""
+    maxParallel: 1
+  data:
+    compression: gzip
+    encryption: ""
+    jobs: 2
+  scheduledBackups:
+    # Six-field cron (seconds first): Sundays 03:00 UTC.
+    - name: weekly
+      schedule: "0 0 3 * * 0"
+      backupOwnerReference: self
+      method: plugin
+      pluginConfiguration:
+        name: barman-cloud.cloudnative-pg.io
+  # Shorter than prd: this cluster holds no data worth restoring a month back.
+  retentionPolicy: "7d"
