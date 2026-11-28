@@ -7,12 +7,21 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   parentRefs:
-    - name: platform-gateway
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: platform-gateway
       namespace: nginx-gateway
       sectionName: https
   hostnames:
     - vault.jdwlabs.com
   rules:
-    - backendRefs:
-        - name: platform-vault-ui
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: platform-vault-ui
           port: 8200
+          weight: 1

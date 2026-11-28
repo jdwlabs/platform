@@ -9,12 +9,21 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   parentRefs:
-    - name: platform-gateway
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: platform-gateway
       namespace: nginx-gateway
       sectionName: https
   hostnames:
     - dbui.jdwlabs.com
   rules:
-    - backendRefs:
-        - name: db-ui
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: db-ui
           port: 80
+          weight: 1
