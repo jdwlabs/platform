@@ -90,9 +90,12 @@ _quotaTiers:
     # Raised from 24Gi: jdwillmsen-prd had 1.5Gi of limits free, and a third
     # Bedrock server (512Mi) would have left FWB's 05:40 census job (1Gi)
     # refused every day. 2Gi also covers the 2560Mi a Bedrock version-check
-    # candidate needs once the servers are unpinned. Only jdwillmsen-prd is
+    # candidate needs once the servers are unpinned. Raised again from 26Gi:
+    # the 26 crew pods (384Mi each) plus the servers left 864Mi free, under the
+    # 1152Mi the census pod needs, so the nightly job could not create a pod.
+    # 2Gi leaves room for about four more crew pods. Only jdwillmsen-prd is
     # on this tier.
-    limits.memory: 26Gi
+    limits.memory: 28Gi
     persistentvolumeclaims: "20"
     services.loadbalancers: "5"
   ci:
